@@ -113,6 +113,38 @@ function toUser(r: MeResponse): User {
 }
 
 export const authApi = {
+  async requestOtp(email: string): Promise<{ message: string; success: boolean }> {
+    return request<{ message: string; success: boolean }>('/auth/otp/request', {
+      method: 'POST',
+      body: { email },
+    });
+  },
+
+  async verifyOtp(email: string, code: string): Promise<{ tokens: AuthTokens; user: User }> {
+    const r = await request<LoginResponse>('/auth/otp/verify', {
+      method: 'POST',
+      body: { email, code },
+    });
+    const tokens = toTokens(r);
+    const me = await authApi.me(tokens.accessToken);
+    return { tokens, user: me };
+  },
+
+  async getOAuthUrl(provider: 'google' | 'apple'): Promise<string> {
+    const res = await request<{ provider: string; authorization_url: string }>(`/auth/oauth/${provider}/url`);
+    return res.authorization_url;
+  },
+
+  async signInWithOAuth(provider: 'google' | 'apple', idToken?: string, code?: string): Promise<{ tokens: AuthTokens; user: User }> {
+    const r = await request<LoginResponse>(`/auth/oauth/${provider}`, {
+      method: 'POST',
+      body: { provider, id_token: idToken, code },
+    });
+    const tokens = toTokens(r);
+    const me = await authApi.me(tokens.accessToken);
+    return { tokens, user: me };
+  },
+
   async login(req: LoginRequest): Promise<{ tokens: AuthTokens; user: User }> {
     const r = await request<LoginResponse>('/auth/login', {
       method: 'POST',

@@ -18,10 +18,31 @@ class LoginRequest(BaseModel):
         return self.username or self.email or ""
 
 
+class OtpRequest(BaseModel):
+    email: EmailStr = Field(..., description="User email for OTP delivery")
+
+
+class OtpVerifyRequest(BaseModel):
+    email: EmailStr = Field(..., description="User email")
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit OTP code")
+
+
+class OAuthLoginRequest(BaseModel):
+    provider: str = Field(..., description="Identity provider: 'google' or 'apple'")
+    id_token: Optional[str] = Field(default=None, description="OpenID Connect ID token from provider")
+    code: Optional[str] = Field(default=None, description="Authorization code from OAuth callback")
+    redirect_uri: Optional[str] = Field(default=None, description="Redirect URI used in OAuth exchange")
+
+
+class OAuthUrlResponse(BaseModel):
+    provider: str
+    authorization_url: str
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: Optional[str] = Field(default=None, min_length=6)
     first_name: Optional[str] = Field(default="", max_length=50)
     last_name: Optional[str] = Field(default="", max_length=50)
 

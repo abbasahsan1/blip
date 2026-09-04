@@ -112,6 +112,39 @@ const INITIAL_POSTS: Blipp[] = [
     tags: ['productivity', 'focus'],
     createdAt: new Date(Date.now() - 36 * 3600 * 1000).toISOString(),
   },
+  {
+    id: 'ad-1',
+    title: 'Supercharge Your Engineering Workflow with Linear',
+    author: 'Linear',
+    authorId: 'sponsor-linear',
+    duration: 60,
+    audio_url: 'https://example.com/audio/ads/linear-spot.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/ads/linear-low.mp3',
+      standard: 'https://example.com/audio/ads/linear-standard.mp3',
+      high: 'https://example.com/audio/ads/linear-high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/ads/linear-spot.mp3',
+    coverGradient: ['#5e6ad2', '#27282b'],
+    listenCount: 45000,
+    likeCount: 3120,
+    sourceName: 'Partner Spotlight',
+    sourceType: 'other',
+    // Server-hydrated sponsored ad slot (§6.4)
+    is_sponsored: true,
+    sponsor: {
+      name: 'Linear',
+      tagline: 'The purpose-built tool for modern product teams',
+      cta_text: 'Try Linear for Free',
+      cta_url: 'https://linear.app',
+      logo_url: 'https://linear.app/favicon.ico',
+    },
+    ad_metadata: {
+      campaign_id: 'cmp_linear_q3_audio',
+      impression_url: 'https://api.blipp.local/v1/telemetry/ad/impression?cmp=linear',
+    },
+    createdAt: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
+  },
 ];
 
 // ─── Store ────────────────────────────────────────────────────────────────────

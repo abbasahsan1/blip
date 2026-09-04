@@ -1,0 +1,71 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: blipp-ratelimit
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: blipp-ingress
+    app.kubernetes.io/part-of: blipp
+spec:
+  rateLimit:
+    average: 100
+    burst: 50
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: blipp-ingressroute
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: blipp-ingress
+    app.kubernetes.io/part-of: blipp
+spec:
+  entryPoints:
+    - web
+  routes:
+    # Keycloak Identity Provider & Admin UI
+    - match: PathPrefix(`/keycloak`)
+      kind: Rule
+      services:
+        - name: keycloak
+          port: 8080
+
+    # Versioned Authentication Microservice (/v1/auth)
+    - match: PathPrefix(`/v1/auth`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: auth-service
+          port: 8000
+
+    # FastAPI API Microservice (/api)
+    - match: PathPrefix(`/api`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: auth-service
+          port: 8000
+
+    # Swagger Documentation
+    - match: PathPrefix(`/docs`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8000
+
+    # Health Probe
+    - match: PathPrefix(`/health`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8000
+
+    # Frontend Expo Web Client
+    - match: PathPrefix(`/`)
+      kind: Rule
+      services:
+        - name: blipp-app
+          port: 80

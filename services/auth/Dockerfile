@@ -22,7 +22,9 @@ FROM gcr.io/distroless/python3-debian12
 
 WORKDIR /app
 
-ENV PATH="/opt/venv/bin:$PATH" \
+# Distroless has no shell to expand variables like $PATH at runtime.
+# Provide full explicit static PATH and wire PYTHONPATH directly into site-packages.
+ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
     PYTHONPATH="/app:/opt/venv/lib/python3.11/site-packages" \
     PYTHONUNBUFFERED=1
 

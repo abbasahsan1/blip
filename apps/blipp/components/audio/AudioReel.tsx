@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  AppState,
-  type AppStateStatus,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
 import { telemetryApi } from '@/lib/api';
+import { getDeviceSignal, subscribeDeviceSignal } from '@/lib/deviceSignal';
 import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
 
 function formatDuration(secs: number): string {
@@ -39,24 +39,14 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   // Stream source resolved from audio_variants.standard with fallback to canonical audio_url
   const audioSource = item?.audio_variants?.standard || item?.audio_url || item?.audioUrl || '';
 
-  // Device signal state tracked via AppState
-  const [deviceSignal, setDeviceSignal] = useState<DeviceSignal>(
-    AppState.currentState === 'active' ? 'screen_on' : 'app_backgrounded'
-  );
+  // Device signal state tracked via high-fidelity device signal engine (§5.8)
+  const [deviceSignal, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      let signal: DeviceSignal = 'screen_on';
-      if (nextAppState === 'background') {
-        signal = 'app_backgrounded';
-      } else if (nextAppState === 'inactive') {
-        signal = 'screen_off';
-      } else if (nextAppState === 'active') {
-        signal = 'screen_on';
-      }
-      setDeviceSignal(signal);
+    const unsubscribe = subscribeDeviceSignal((nextSignal) => {
+      setDeviceSignal(nextSignal);
     });
-    return () => subscription.remove();
+    return unsubscribe;
   }, []);
 
   // Animated waveform bars
@@ -115,13 +105,14 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
           return nextP;
         });
 
-        // Emit telemetry every 3 seconds of active playback
+        // Emit telemetry every 3 seconds of active playback with dynamic device signal
         if (secondsElapsed % 3 === 0) {
+          const activeSignal = getDeviceSignal(true);
           telemetryApi.recordPlayProgress({
             blipp_id: item.id,
             position_seconds: secondsElapsed,
             duration_seconds: item.duration,
-            device_signal: deviceSignal,
+            device_signal: activeSignal,
           });
         }
       }, 1000);
@@ -136,10 +127,9 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         Animated.timing(b, { toValue: 0.15, duration: 200, useNativeDriver: false }).start();
       });
     }
-  }, [isPlaying, bars, item?.duration, deviceSignal, item?.id]);
+  }, [isPlaying, bars, item?.duration, item?.id]);
 
   const [grad1 = PALETTE.accent, grad2 = '#8b5cf6'] = item?.coverGradient ?? [];
-
 
   return (
     <View style={[styles.root, { height }]}>
@@ -163,20 +153,35 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
 
       {/* Content */}
       <View style={styles.content}>
-        {/* Source chip */}
-        {item.sourceName && (
-          <View style={styles.sourceChip}>
-            <Text style={styles.sourceText} numberOfLines={1}>
-              {item.sourceName}
-            </Text>
-          </View>
-        )}
+        {/* Header row: Source chip & Sponsored indicator */}
+        <View style={styles.headerRow}>
+          {item.sourceName && (
+            <View style={styles.sourceChip}>
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {item.sourceName}
+              </Text>
+            </View>
+          )}
+
+          {item.is_sponsored && (
+            <View style={styles.sponsoredBadge}>
+              <Text style={styles.sponsoredBadgeText}>SPONSORED</Text>
+            </View>
+          )}
+        </View>
 
         {/* Title */}
         <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
 
-        {/* Author */}
-        <Text style={styles.author}>{item.author}</Text>
+        {/* Author / Sponsor */}
+        <View style={styles.authorRow}>
+          <Text style={styles.author}>{item.author}</Text>
+          {item.sponsor?.tagline && (
+            <Text style={styles.sponsorTagline} numberOfLines={1}>
+              · {item.sponsor.tagline}
+            </Text>
+          )}
+        </View>
 
         {/* Waveform */}
         <View style={styles.waveform}>
@@ -230,8 +235,20 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
           </Pressable>
         </View>
 
+        {/* Sponsored Call To Action Button */}
+        {item.is_sponsored && item.sponsor && (
+          <Pressable
+            style={styles.ctaButton}
+            onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
+            accessibilityRole="button"
+            accessibilityLabel={item.sponsor.cta_text || 'Learn more'}
+          >
+            <Text style={styles.ctaText}>{item.sponsor.cta_text || 'Learn More'} ↗</Text>
+          </Pressable>
+        )}
+
         {/* Tags */}
-        {item.tags && item.tags.length > 0 && (
+        {item.tags && item.tags.length > 0 && !item.is_sponsored && (
           <View style={styles.tags}>
             {item.tags.map((tag) => (
               <View key={tag} style={styles.tag}>
@@ -270,6 +287,11 @@ const styles = StyleSheet.create({
     paddingTop: 100,
     gap: 12,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   sourceChip: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -284,16 +306,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.8)',
   },
+  sponsoredBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  sponsoredBadgeText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
+    color: '#fbbf24',
+    letterSpacing: 0.5,
+  },
   title: {
     fontFamily: 'Inter_700Bold',
     fontSize: 24,
     color: '#fff',
     lineHeight: 32,
   },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   author: {
     fontFamily: 'Inter_500Medium',
     fontSize: 15,
     color: 'rgba(255,255,255,0.65)',
+  },
+  sponsorTagline: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.45)',
+    flex: 1,
   },
   // Waveform
   waveform: {
@@ -370,6 +417,20 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     fontSize: 12,
     color: 'rgba(255,255,255,0.6)',
+  },
+  ctaButton: {
+    backgroundColor: PALETTE.accent,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  ctaText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: '#fff',
   },
   // Tags
   tags: {

@@ -98,11 +98,11 @@ deploy:
 	@kubectl apply -f k8s/postgres/
 	@echo "🔑 Deploying Keycloak..."
 	@kubectl apply -f k8s/keycloak/
-	@echo "⚡ Deploying FastAPI Auth Service..."
-	@kubectl apply -f k8s/auth-service/
+	@echo "⚡ Deploying FastAPI Auth Service via Helm chart..."
+	@PATH="$$HOME/.local/bin:$$PATH" helm upgrade --install blipp-auth charts/auth-service -n $(NAMESPACE)
 	@echo "📱 Deploying Blipp Expo Frontend..."
 	@kubectl apply -f k8s/blipp-app/
-	@echo "🌐 Deploying Traefik Ingress..."
+	@echo "🌐 Deploying Traefik Ingress & IngressRoutes..."
 	@kubectl apply -f k8s/ingress/
 	@echo "✅ Manifests applied."
 

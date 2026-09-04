@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
@@ -97,44 +99,8 @@ async def app_exception_handler(request: Request, exc: AppException):
     )
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    req_id = get_request_id(request)
-    
-    # Handle dict details or string details
-    if isinstance(exc.detail, dict):
-        code = exc.detail.get("code", f"HTTP_{exc.status_code}")
-        message = exc.detail.get("message", str(exc.detail))
-    else:
-        status_to_code = {
-            400: "BAD_REQUEST",
-            401: CODE_UNAUTHORIZED,
-            403: CODE_FORBIDDEN,
-            404: CODE_NOT_FOUND,
-            409: "CONFLICT",
-            503: CODE_SERVICE_UNAVAILABLE,
-            500: CODE_INTERNAL_SERVER_ERROR,
-        }
-        code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
-        message = str(exc.detail) if exc.detail else "An error occurred"
-
-    headers = exc.headers or {}
-    headers["X-Request-ID"] = req_id
-    return JSONResponse(
-        status_code=exc.status_code,
-        headers=headers,
-        content={
-            "error": {
-                "code": code,
-                "message": message,
-                "request_id": req_id
-            }
-        }
-    )
-
-
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
     req_id = get_request_id(request)
     error_messages = []
     for err in exc.errors():
@@ -148,6 +114,66 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={
             "error": {
                 "code": CODE_VALIDATION_ERROR,
+                "message": message,
+                "request_id": req_id
+            }
+        }
+    )
+
+
+@app.exception_handler(ValidationError)
+async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+    req_id = get_request_id(request)
+    error_messages = []
+    for err in exc.errors():
+        loc = " -> ".join(str(item) for item in err.get("loc", []))
+        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
+    
+    message = "; ".join(error_messages) if error_messages else "Model validation failed"
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        headers={"X-Request-ID": req_id},
+        content={
+            "error": {
+                "code": CODE_VALIDATION_ERROR,
+                "message": message,
+                "request_id": req_id
+            }
+        }
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    req_id = get_request_id(request)
+    
+    if isinstance(exc.detail, dict):
+        code = exc.detail.get("code", f"HTTP_{exc.status_code}")
+        message = exc.detail.get("message", str(exc.detail))
+    else:
+        status_to_code = {
+            400: "BAD_REQUEST",
+            401: CODE_UNAUTHORIZED,
+            403: CODE_FORBIDDEN,
+            404: CODE_NOT_FOUND,
+            405: "METHOD_NOT_ALLOWED",
+            409: "CONFLICT",
+            422: CODE_VALIDATION_ERROR,
+            500: CODE_INTERNAL_SERVER_ERROR,
+            503: CODE_SERVICE_UNAVAILABLE,
+        }
+        code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
+        message = str(exc.detail) if exc.detail else "An error occurred"
+
+    headers = getattr(exc, "headers", None) or {}
+    headers["X-Request-ID"] = req_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=headers,
+        content={
+            "error": {
+                "code": code,
                 "message": message,
                 "request_id": req_id
             }

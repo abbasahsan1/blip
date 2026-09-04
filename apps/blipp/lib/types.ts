@@ -31,6 +31,20 @@ export interface AudioVariants {
   high: string;
 }
 
+export interface SponsorInfo {
+  name: string;
+  tagline?: string;
+  cta_text: string;
+  cta_url: string;
+  logo_url?: string;
+}
+
+export interface AdMetadata {
+  campaign_id: string;
+  impression_url?: string;
+  click_url?: string;
+}
+
 export interface Blipp {
   id: string;
   title: string;
@@ -49,6 +63,10 @@ export interface Blipp {
   // Source metadata
   sourceName?: string; // e.g. "The Tim Ferriss Show", "Lex Fridman Podcast"
   sourceType?: 'podcast' | 'interview' | 'documentary' | 'other';
+  // Server-hydrated sponsored ad slot (§6.4)
+  is_sponsored?: boolean;
+  sponsor?: SponsorInfo;
+  ad_metadata?: AdMetadata;
 }
 
 // Alias AudioPost to Blipp for seamless compatibility
