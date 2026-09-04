@@ -1,0 +1,168 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { ApiError, authApi } from '../api';
+import type { AuthFailure, SessionStatus, User } from '../types';
+
+// ─── Storage Keys ─────────────────────────────────────────────────────────────
+
+const KEY_ACCESS = 'blipp:access_token';
+const KEY_REFRESH = 'blipp:refresh_token';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+interface SessionStore {
+  status: SessionStatus;
+  user: User | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+
+  // UI feedback
+  isSubmitting: boolean;
+  error: AuthFailure | null;
+
+  // Actions
+  initialize: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (username: string, email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  clearError: () => void;
+  refreshSession: () => Promise<boolean>;
+}
+
+// ─── Store ────────────────────────────────────────────────────────────────────
+
+export const useSessionStore = create<SessionStore>((set, get) => ({
+  status: 'loading',
+  user: null,
+  accessToken: null,
+  refreshToken: null,
+  isSubmitting: false,
+  error: null,
+
+  async initialize() {
+    try {
+      const [access, refresh] = await AsyncStorage.multiGet([KEY_ACCESS, KEY_REFRESH]);
+      const accessToken = access[1];
+      const refreshToken = refresh[1];
+
+      if (!accessToken || !refreshToken) {
+        set({ status: 'unauthenticated' });
+        return;
+      }
+
+      // Validate stored token
+      try {
+        const user = await authApi.me(accessToken);
+        set({ status: 'authenticated', user, accessToken, refreshToken });
+      } catch (err) {
+        // Try refresh
+        if (refreshToken) {
+          const ok = await get().refreshSession();
+          if (!ok) {
+            await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+            set({ status: 'unauthenticated', accessToken: null, refreshToken: null });
+          }
+        } else {
+          set({ status: 'unauthenticated' });
+        }
+      }
+    } catch {
+      set({ status: 'unauthenticated' });
+    }
+  },
+
+  async signInWithEmail(email, password) {
+    set({ isSubmitting: true, error: null });
+    try {
+      const { tokens, user } = await authApi.login({ email, password });
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, tokens.accessToken],
+        [KEY_REFRESH, tokens.refreshToken],
+      ]);
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        isSubmitting: false,
+      });
+    } catch (err) {
+      const failure = toFailure(err);
+      set({ isSubmitting: false, error: failure });
+    }
+  },
+
+  async signUpWithEmail(username, email, password) {
+    set({ isSubmitting: true, error: null });
+    try {
+      const { tokens, user } = await authApi.register({ username, email, password });
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, tokens.accessToken],
+        [KEY_REFRESH, tokens.refreshToken],
+      ]);
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        isSubmitting: false,
+      });
+    } catch (err) {
+      set({ isSubmitting: false, error: toFailure(err) });
+    }
+  },
+
+  async signOut() {
+    const { accessToken } = get();
+    if (accessToken) {
+      await authApi.logout(accessToken);
+    }
+    await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+    set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null });
+  },
+
+  clearError() {
+    set({ error: null });
+  },
+
+  async refreshSession() {
+    const { refreshToken } = get();
+    if (!refreshToken) return false;
+    try {
+      const tokens = await authApi.refresh(refreshToken);
+      const user = await authApi.me(tokens.accessToken);
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, tokens.accessToken],
+        [KEY_REFRESH, tokens.refreshToken],
+      ]);
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+}));
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function toFailure(err: unknown): AuthFailure {
+  if (err instanceof ApiError) {
+    const msg = err.message.toLowerCase();
+    if (msg.includes('invalid credentials') || msg.includes('unauthorized') || err.status === 401) {
+      return { field: 'credentials', message: 'Incorrect email or password.' };
+    }
+    if (msg.includes('email') && msg.includes('already')) {
+      return { field: 'email', message: 'An account with this email already exists.' };
+    }
+    if (msg.includes('username') && msg.includes('already')) {
+      return { field: 'username', message: 'This username is taken.' };
+    }
+    return { field: 'general', message: err.message };
+  }
+  return { field: 'general', message: 'Something went wrong. Please try again.' };
+}

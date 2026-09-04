@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: idp
+    app.kubernetes.io/part-of: blipp
+data:
+  blipp-realm.json: |
+    {
+      "id": "blipp",
+      "realm": "blipp",
+      "displayName": "Blipp Platform",
+      "enabled": true,
+      "sslRequired": "none",
+      "registrationAllowed": true,
+      "registrationEmailAsUsername": false,
+      "rememberMe": true,
+      "verifyEmail": false,
+      "loginWithEmailAllowed": true,
+      "resetPasswordAllowed": true,
+      "roles": {
+        "realm": [
+          {
+            "name": "admin",
+            "description": "Administrator role"
+          },
+          {
+            "name": "user",
+            "description": "Standard user role"
+          }
+        ]
+      },
+      "groups": [],
+      "clients": [
+        {
+          "clientId": "blipp-app",
+          "name": "Blipp Application",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": false,
+          "protocol": "openid-connect",
+          "baseUrl": "http://100.122.207.32:8419",
+          "redirectUris": [
+            "http://100.122.207.32:8419/*",
+            "http://100.122.207.32:8419",
+            "http://localhost:8419/*",
+            "http://localhost:8419",
+            "*"
+          ],
+          "webOrigins": [
+            "*"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "http://100.122.207.32:8419/*##http://localhost:8419/*"
+          }
+        },
+        {
+          "clientId": "blipp-auth-service",
+          "name": "FastAPI Auth Service",
+          "enabled": true,
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "blipp-secret-client-token",
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": true,
+          "protocol": "openid-connect"
+        }
+      ],
+      "users": [
+        {
+          "username": "testuser",
+          "enabled": true,
+          "email": "testuser@blipp.local",
+          "emailVerified": true,
+          "firstName": "Test",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "TestPassword123!",
+              "temporary": false
+            }
+          ],
+          "realmRoles": [
+            "user"
+          ]
+        }
+      ]
+    }

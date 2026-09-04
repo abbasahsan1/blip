@@ -1,0 +1,277 @@
+# Blipp — Production Codebase Context
+
+> **AI Agents**: The active master memory file is [`memory.md`](file:///home/ali/blipp-dev/memory.md).
+> Last updated: 2026-09-05
+> Workspace: `/home/ali/blipp-dev`
+> Host IP: `100.122.207.32` | Host port: `8419`
+> Cluster: `k3d` cluster named `blipp-cluster`, namespace `blipp`
+
+---
+
+## 1. Product Description
+
+**Blipp** is an audio-only short-form content feed — TikTok/Reels-style but for audio clips sourced from podcasts, interviews, documentaries, and spoken content.
+
+**Core use case:** Background-screen consumption (driving, cycling, commuting) without the data cost of video.
+
+The original no-code prototype lives at: https://github.com/abbasahsan1/blipp (React Native + Expo Router + TypeScript, dark-only, audio-first).
+
+Production development started in this repo, building each feature properly one at a time.
+
+---
+
+## 2. Repository Layout
+
+```
+/home/ali/blipp-dev/
+├── apps/
+│   └── blipp/                    ← Expo React Native web frontend
+│       ├── src/
+│       │   ├── context/AuthContext.js  ← Session state (login, logout, refresh)
+│       │   ├── screens/
+│       │   │   ├── LoginScreen.js
+│       │   │   ├── SignupScreen.js
+│       │   │   └── DashboardScreen.js
+│       │   ├── services/api.js         ← HTTP client (uses window.location.origin)
+│       │   └── styles/theme.js         ← Design tokens (dark-only)
+│       ├── App.js                      ← Root navigation (login → signup → dashboard)
+│       ├── app.json                    ← Expo config (output: single, viewport: mobile)
+│       ├── nginx.conf                  ← Prod Nginx serving the SPA
+│       ├── Dockerfile                  ← 2-stage: node builder → nginx:1.27-alpine
+│       └── package.json
+├── services/
+│   └── auth/                     ← FastAPI authentication microservice
+│       ├── app/
+│       │   ├── main.py                 ← FastAPI app (docs: /api/docs)
+│       │   ├── core/
+│       │   │   ├── config.py           ← Pydantic settings
+│       │   │   └── security.py         ← JWT verification (RS256 + JWKS cache)
+│       │   ├── api/v1/
+│       │   │   ├── auth.py             ← /api/auth/* endpoints
+│       │   │   └── protected.py        ← /api/protected/* endpoints
+│       │   └── models/schemas.py
+│       ├── requirements.txt
+│       └── Dockerfile                  ← python:3.12-slim
+├── k8s/
+│   ├── namespace.yaml
+│   ├── keycloak/
+│   │   ├── deployment.yaml             ← Keycloak 26.1.3 (KC_HOSTNAME=/keycloak)
+│   │   ├── service.yaml
+│   │   └── realm-configmap.yaml        ← blipp realm pre-seeded
+│   ├── postgres/                       ← PostgreSQL 16 backing Keycloak
+│   ├── auth-service/                   ← Deployment + Service for FastAPI
+│   ├── blipp-app/                      ← Deployment + Service for Expo frontend
+│   └── ingress/
+│       └── ingress.yaml                ← Traefik routes (see below)
+├── Makefile                            ← make all / make destroy
+├── .env                                ← All secrets and config
+├── .env.example
+├── context.md                          ← THIS FILE — master context for agents
+├── DESIGN.md
+├── PRODUCT.md
+└── README.md
+```
+
+---
+
+## 3. Live Cluster State
+
+| Component | Image | Internal DNS |
+|---|---|---|
+| PostgreSQL 16 | postgres:16-alpine | postgres.blipp.svc.cluster.local:5432 |
+| Keycloak 26.1.3 | quay.io/keycloak/keycloak:26.1.3 | keycloak.blipp.svc.cluster.local:8080 |
+| FastAPI auth-service | blipp-auth-service:latest | auth-service.blipp.svc.cluster.local:8000 |
+| Expo blipp-app (Nginx) | blipp-app:latest | blipp-app.blipp.svc.cluster.local:80 |
+
+---
+
+## 4. Traefik Ingress Routes
+
+All traffic enters on host port `8419`.
+
+| Public Path | Internal Service | Notes |
+|---|---|---|
+| `/` | `blipp-app:80` | Expo SPA (SPA fallback via nginx try_files) |
+| `/keycloak` | `keycloak:8080` | Keycloak admin + OIDC |
+| `/api` | `auth-service:8000` | FastAPI auth microservice |
+| `/api/docs` | `auth-service:8000` | Swagger UI |
+| `/health` | `auth-service:8000` | Liveness probe |
+
+---
+
+## 5. Live Endpoints
+
+- Blipp Web App: http://100.122.207.32:8419/
+- Keycloak Admin Console: http://100.122.207.32:8419/keycloak
+- FastAPI Swagger UI: http://100.122.207.32:8419/api/docs
+- Keycloak OIDC Discovery: http://100.122.207.32:8419/keycloak/realms/blipp/.well-known/openid-configuration
+- Keycloak Token Endpoint: http://100.122.207.32:8419/keycloak/realms/blipp/protocol/openid-connect/token
+
+---
+
+## 6. FastAPI Auth Service API Contract
+
+Base path: `/api`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/login` | None | Email/password → access+refresh tokens |
+| POST | `/api/auth/register` | None | Creates user in Keycloak realm |
+| POST | `/api/auth/refresh` | None | Refresh token → new access token |
+| POST | `/api/auth/logout` | None | Revokes Keycloak session |
+| GET | `/api/auth/me` | Bearer | Returns user profile from JWT |
+| GET | `/api/protected/data` | Bearer | Sample protected resource |
+| GET | `/api/health` | None | Health + Keycloak connectivity probe |
+
+Token validation: RS256, JWKS from keycloak service internally, 10-min cache. Issuer must end with `/realms/blipp`.
+
+---
+
+## 7. Keycloak Configuration
+
+- Version: 26.1.3 Quarkus
+- KC_HTTP_RELATIVE_PATH=/keycloak
+- KC_HOSTNAME=http://100.122.207.32:8419/keycloak
+- KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true
+- KC_PROXY_HEADERS=xforwarded
+- Realm: `blipp` (pre-seeded via configmap)
+- Client: `blipp-app` (public, Direct Access Grants enabled)
+- Test user: `testuser` / `TestPassword123!`
+- Admin: `admin` / `admin_master_password`
+- Google OAuth: NOT YET CONFIGURED (pending credentials from user)
+
+---
+
+## 8. Frontend: Current vs Target
+
+### Current State (Phase 0 — Basic JS SPA)
+The current frontend is a basic Expo SPA (apps/blipp) with:
+- LoginScreen.js — email/password form → /api/auth/login
+- SignupScreen.js — registration form → /api/auth/register
+- DashboardScreen.js — placeholder user workspace
+- AuthContext.js — manages tokens in localStorage
+- api.js — REST calls using window.location.origin as base
+
+### Target State (from reference repo https://github.com/abbasahsan1/blipp)
+The production frontend is a full React Native / Expo Router TypeScript app with:
+- Screen architecture (Expo Router file-based routing):
+  - app/_layout.tsx — Root layout, font loading, session bootstrap
+  - app/auth/sign-in.tsx — Sign in (email + Google OAuth button)
+  - app/auth/sign-up.tsx — Sign up
+  - app/auth/verify.tsx — Email verification
+  - app/auth/profile-setup.tsx — Post-signup profile
+  - app/(tabs)/index.tsx — Main audio feed (FlatList, scroll-snap, auto-play)
+  - app/(tabs)/profile.tsx — User profile
+  - app/(tabs)/upload.tsx — Audio upload
+- Key components:
+  - components/audio/AudioReel — Per-item reel card with waveform, scrubber, controls
+  - components/audio/ReelSkeleton — Loading skeleton
+  - components/auth/GoogleSignInButton — Google OAuth button
+- State management: Zustand stores
+  - lib/store/sessionStore.ts — Auth session state
+  - lib/store/feedStore.ts — Audio posts, sorting, pagination
+  - lib/store/playerStore.ts — Active player position, speed, buffering
+- UI library: heroui-native + uniwind
+
+---
+
+## 9. Design System
+
+Color Palette (dark-only):
+- background: #09090b
+- surface: #121215
+- card: #18181b
+- border: #27272a
+- text: #fafafa
+- textSecondary: #a1a1aa
+- textMuted: #71717a
+- primary: #ffffff (buttons)
+- accent: #2563eb (blue highlights)
+- success: #10b981
+- error: #ef4444
+
+Rules:
+- No backend jargon on any user-facing screen
+- All touch targets ≥ 44px
+- Responsive layouts (useWindowDimensions)
+- Dark-only, Inter font family
+
+---
+
+## 10. Infrastructure
+
+Makefile targets: make all, make destroy, make build, make import, make deploy, make status, make logs.
+
+IMPORTANT: Use DOCKER_BUILDKIT=0 — the host Docker does not have buildx.
+
+Rebuild commands:
+```bash
+# Auth service
+docker build -t blipp-auth-service:latest services/auth
+k3d image import blipp-auth-service:latest -c blipp-cluster
+kubectl rollout restart deployment auth-service -n blipp
+
+# Frontend
+docker build -t blipp-app:latest apps/blipp
+k3d image import blipp-app:latest -c blipp-cluster
+kubectl rollout restart deployment blipp-app -n blipp
+```
+
+---
+
+## 11. Master Development Plan
+
+### Phase 1 — Auth Foundation (IN PROGRESS)
+- [x] Keycloak 26 OIDC running in k3d
+- [x] FastAPI auth service with RS256 JWT validation
+- [x] Migrate frontend to full TypeScript Expo Router app (AudioReels feed, tabs, auth)
+- [x] Wire Keycloak to frontend (sessionStore with JWT + refresh token handling via FastAPI)
+- [x] /api/docs accessible via Traefik
+- [x] /keycloak routes to Admin UI correctly
+- [ ] Add Google OAuth (configure Keycloak Identity Provider + frontend button — pending credentials)
+
+### Phase 2 — Core Feed
+- [ ] Audio post data model + PostgreSQL schema
+- [ ] Feed API endpoint (GET /api/feed)
+- [ ] AudioReel component (full-screen scroll-snap player)
+- [ ] Auto-play on scroll into view
+- [ ] Playback controls (play/pause, scrubber, speed 1x/1.5x/2x)
+- [ ] Background audio (works with screen off on mobile)
+
+### Phase 3 — Content
+- [ ] Audio upload endpoint (POST /api/posts)
+- [ ] Upload screen with audio picker + metadata form
+
+### Phase 4 — Social
+- [ ] Like/unlike, follow/following, user profiles
+
+### Phase 5 — Discovery
+- [ ] Search, category filtering, personalization
+
+---
+
+## 12. Open Items / Blockers
+
+1. Google OAuth Credentials needed from user:
+   - Google Cloud Console → APIs & Services → OAuth 2.0 Client ID (Web application type)
+   - Authorized redirect URI: http://100.122.207.32:8419/keycloak/realms/blipp/broker/google/endpoint
+   - Need: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+
+---
+
+## 13. How to Resume Work (New Chat)
+
+1. Read this context.md first
+2. Check live cluster: kubectl get pods -n blipp
+3. See Phase 1 checklist (section 11) to pick up next item
+4. Never hardcode localhost — always use 100.122.207.32
+5. No port forwarding — all traffic through Traefik on port 8419
+6. Run DOCKER_BUILDKIT=0 docker build (not docker buildx)
+
+Quick verification:
+```bash
+curl -s -I http://100.122.207.32:8419/
+curl -s -I http://100.122.207.32:8419/api/docs
+curl -s http://100.122.207.32:8419/api/health | jq .
+kubectl get pods -n blipp
+```
