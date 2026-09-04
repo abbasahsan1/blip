@@ -1,7 +1,7 @@
-import type { AuthTokens, User } from './types';
+import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
 
 // All API calls are relative — the SPA and API share the same origin
-// via Traefik routing: / → blipp-app, /api → auth-service
+// via Traefik routing: / → blipp-app, /api or /v1 → auth-service
 const BASE = '/api';
 
 // ─── Request Helper ───────────────────────────────────────────────────────────
@@ -32,11 +32,14 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
+    const errorEnvelope = (data as { error?: { message?: string; code?: string; request_id?: string } })?.error;
     const message =
+      errorEnvelope?.message ??
       (data as { detail?: string })?.detail ??
       (data as { message?: string })?.message ??
       `Request failed: ${response.status}`;
-    throw new ApiError(message, response.status, data);
+    
+    throw new ApiError(message, response.status, data, errorEnvelope?.code, errorEnvelope?.request_id);
   }
 
   return data as T;
@@ -49,6 +52,8 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly data: unknown = null,
+    public readonly code?: string,
+    public readonly requestId?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -58,7 +63,8 @@ export class ApiError extends Error {
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 
 interface LoginRequest {
-  email: string;
+  email?: string;
+  username?: string;
   password: string;
 }
 
@@ -76,9 +82,13 @@ interface LoginResponse {
 }
 
 interface MeResponse {
-  sub: string;
+  id?: string;
+  sub?: string;
   email: string;
-  preferred_username: string;
+  username?: string;
+  preferred_username?: string;
+  first_name?: string;
+  last_name?: string;
   name?: string;
   picture?: string;
 }
@@ -92,11 +102,12 @@ function toTokens(r: LoginResponse): AuthTokens {
 }
 
 function toUser(r: MeResponse): User {
+  const displayName = r.name || (r.first_name ? `${r.first_name} ${r.last_name || ''}`.trim() : undefined);
   return {
-    id: r.sub,
+    id: r.id || r.sub || '',
     email: r.email,
-    username: r.preferred_username,
-    displayName: r.name,
+    username: r.username || r.preferred_username || '',
+    displayName: displayName || r.username || r.preferred_username || '',
     avatarUrl: r.picture,
   };
 }
@@ -135,5 +146,24 @@ export const authApi = {
     await request('/auth/logout', { method: 'POST', token }).catch(() => {
       // Ignore logout errors — we'll clear local state regardless
     });
+  },
+};
+
+// ─── Telemetry API ────────────────────────────────────────────────────────────
+
+export const telemetryApi = {
+  /**
+   * Emits playback progress telemetry along with active device signal state
+   * (screen_on, app_backgrounded, screen_off, bluetooth_connected).
+   */
+  async recordPlayProgress(payload: PlaybackTelemetryPayload): Promise<void> {
+    try {
+      await request('/telemetry/playback', {
+        method: 'POST',
+        body: payload,
+      });
+    } catch {
+      // Non-blocking telemetry — fail silently to never disrupt audio consumption
+    }
   },
 };

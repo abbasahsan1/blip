@@ -1,10 +1,21 @@
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., description="Username or email", min_length=1)
+    username: Optional[str] = Field(default=None, description="Username")
+    email: Optional[str] = Field(default=None, description="Email")
     password: str = Field(..., description="User password", min_length=1)
+
+    @model_validator(mode="after")
+    def check_identifier(self):
+        if not self.username and not self.email:
+            raise ValueError("Either 'username' or 'email' must be provided")
+        return self
+
+    @property
+    def identifier(self) -> str:
+        return self.username or self.email or ""
 
 
 class RegisterRequest(BaseModel):

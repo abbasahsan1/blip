@@ -1,29 +1,38 @@
-# Stage 1: Runtime base
-FROM python:3.12-slim
+# ─── Stage 1: Build virtual environment ─────────────────────────────────────────
+FROM python:3.11-slim AS builder
 
-# Prevent Python from writing .pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/home/appuser/.local/bin:$PATH"
-
-# Create non-root user for security
-RUN groupadd -g 1000 appuser && \
-    useradd -u 1000 -g appuser -m -s /bin/bash appuser
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install dependencies in a separate layer for optimal caching
+RUN python -m venv /opt/venv
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
-COPY --chown=appuser:appuser app/ ./app/
+# In python:3.11-slim, /opt/venv/bin/python points to /usr/local/bin/python
+# In gcr.io/distroless/python3-debian12, the python3 binary is located at /usr/bin/python3
+# Re-point the symlink so /opt/venv/bin/python resolves correctly in distroless
+RUN ln -sf /usr/bin/python3 /opt/venv/bin/python && \
+    ln -sf /usr/bin/python3 /opt/venv/bin/python3
 
-# Switch to non-root user
-USER appuser
+# ─── Stage 2: Distroless Runtime ───────────────────────────────────────────────
+FROM gcr.io/distroless/python3-debian12
+
+WORKDIR /app
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH="/app:/opt/venv/lib/python3.11/site-packages" \
+    PYTHONUNBUFFERED=1
+
+# Copy installed virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code
+COPY app/ ./app/
 
 EXPOSE 8000
 
-# Run uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Non-shell exec form entrypoint using direct binary execution
+ENTRYPOINT ["/opt/venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

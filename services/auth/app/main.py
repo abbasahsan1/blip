@@ -1,10 +1,23 @@
 import logging
+import uuid
 import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
+from app.core.exceptions import (
+    AppException,
+    CODE_VALIDATION_ERROR,
+    CODE_INTERNAL_SERVER_ERROR,
+    CODE_UNAUTHORIZED,
+    CODE_FORBIDDEN,
+    CODE_NOT_FOUND,
+    CODE_SERVICE_UNAVAILABLE,
+)
 from app.api.v1.auth import router as auth_router
 from app.api.v1.protected import router as protected_router
 from app.models.schemas import HealthResponse
@@ -33,27 +46,149 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-@app.get("/docs", include_in_schema=False)
-async def docs_redirect():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/api/docs")
+
+# ─── Request ID Middleware ───────────────────────────────────────────────────
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+app.add_middleware(RequestIDMiddleware)
 
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Production ingress handles edge security
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API Routers under /api
+
+# ─── Standard Error Envelope Handlers ────────────────────────────────────────
+
+def get_request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException):
+    req_id = get_request_id(request)
+    headers = exc.headers or {}
+    headers["X-Request-ID"] = req_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=headers,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "request_id": req_id
+            }
+        }
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = get_request_id(request)
+    
+    # Handle dict details or string details
+    if isinstance(exc.detail, dict):
+        code = exc.detail.get("code", f"HTTP_{exc.status_code}")
+        message = exc.detail.get("message", str(exc.detail))
+    else:
+        status_to_code = {
+            400: "BAD_REQUEST",
+            401: CODE_UNAUTHORIZED,
+            403: CODE_FORBIDDEN,
+            404: CODE_NOT_FOUND,
+            409: "CONFLICT",
+            503: CODE_SERVICE_UNAVAILABLE,
+            500: CODE_INTERNAL_SERVER_ERROR,
+        }
+        code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
+        message = str(exc.detail) if exc.detail else "An error occurred"
+
+    headers = exc.headers or {}
+    headers["X-Request-ID"] = req_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        headers=headers,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "request_id": req_id
+            }
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    req_id = get_request_id(request)
+    error_messages = []
+    for err in exc.errors():
+        loc = " -> ".join(str(item) for item in err.get("loc", []))
+        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
+    
+    message = "; ".join(error_messages) if error_messages else "Request validation failed"
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        headers={"X-Request-ID": req_id},
+        content={
+            "error": {
+                "code": CODE_VALIDATION_ERROR,
+                "message": message,
+                "request_id": req_id
+            }
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    req_id = get_request_id(request)
+    logger.exception(f"Unhandled exception [request_id={req_id}]: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        headers={"X-Request-ID": req_id},
+        content={
+            "error": {
+                "code": CODE_INTERNAL_SERVER_ERROR,
+                "message": "An internal server error occurred",
+                "request_id": req_id
+            }
+        }
+    )
+
+
+# ─── Routes ──────────────────────────────────────────────────────────────────
+
+@app.get("/docs", include_in_schema=False)
+async def docs_redirect():
+    return RedirectResponse(url="/api/docs")
+
+
+# Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
 app.include_router(auth_router, prefix="/api")
 app.include_router(protected_router, prefix="/api")
+app.include_router(auth_router, prefix="/v1")
+app.include_router(protected_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
+@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """Liveness probe and readiness indicator."""
     keycloak_status = "unknown"

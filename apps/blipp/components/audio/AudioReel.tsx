@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  AppState,
+  type AppStateStatus,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
-import type { AudioPost } from '@/lib/types';
+import { telemetryApi } from '@/lib/api';
+import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
 
 function formatDuration(secs: number): string {
   const m = Math.floor(secs / 60);
@@ -21,15 +24,40 @@ function formatListens(n: number): string {
 }
 
 interface Props {
-  post: AudioPost;
+  post?: AudioPost;
+  item?: Blipp;
   isActive: boolean;
   height: number;
   onLike: () => void;
 }
 
-export function AudioReel({ post, isActive, height, onLike }: Props) {
+export function AudioReel({ post, item: propItem, isActive, height, onLike }: Props) {
+  const item = (post || propItem) as Blipp;
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  // Stream source resolved from audio_variants.standard with fallback to canonical audio_url
+  const audioSource = item?.audio_variants?.standard || item?.audio_url || item?.audioUrl || '';
+
+  // Device signal state tracked via AppState
+  const [deviceSignal, setDeviceSignal] = useState<DeviceSignal>(
+    AppState.currentState === 'active' ? 'screen_on' : 'app_backgrounded'
+  );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      let signal: DeviceSignal = 'screen_on';
+      if (nextAppState === 'background') {
+        signal = 'app_backgrounded';
+      } else if (nextAppState === 'inactive') {
+        signal = 'screen_off';
+      } else if (nextAppState === 'active') {
+        signal = 'screen_on';
+      }
+      setDeviceSignal(signal);
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Animated waveform bars
   const bars = useRef(Array.from({ length: 40 }, () => new Animated.Value(0.15))).current;
@@ -53,7 +81,7 @@ export function AudioReel({ post, isActive, height, onLike }: Props) {
   }, [isActive, glowAnim]);
 
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
         Animated.loop(
           Animated.sequence([
@@ -74,15 +102,28 @@ export function AudioReel({ post, isActive, height, onLike }: Props) {
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
 
-      // Fake progress animation (Phase 2 will use real audio position)
+      // Progress animation & telemetry emitter
+      let secondsElapsed = 0;
       const interval = setInterval(() => {
+        secondsElapsed += 1;
         setProgress((p) => {
           if (p >= 1) {
             setIsPlaying(false);
             return 0;
           }
-          return p + 1 / post.duration;
+          const nextP = p + 1 / (item.duration || 1);
+          return nextP;
         });
+
+        // Emit telemetry every 3 seconds of active playback
+        if (secondsElapsed % 3 === 0) {
+          telemetryApi.recordPlayProgress({
+            blipp_id: item.id,
+            position_seconds: secondsElapsed,
+            duration_seconds: item.duration,
+            device_signal: deviceSignal,
+          });
+        }
       }, 1000);
 
       return () => {
@@ -95,9 +136,10 @@ export function AudioReel({ post, isActive, height, onLike }: Props) {
         Animated.timing(b, { toValue: 0.15, duration: 200, useNativeDriver: false }).start();
       });
     }
-  }, [isPlaying, bars, post.duration]);
+  }, [isPlaying, bars, item?.duration, deviceSignal, item?.id]);
 
-  const [grad1 = PALETTE.accent, grad2 = '#8b5cf6'] = post.coverGradient ?? [];
+  const [grad1 = PALETTE.accent, grad2 = '#8b5cf6'] = item?.coverGradient ?? [];
+
 
   return (
     <View style={[styles.root, { height }]}>
@@ -122,19 +164,19 @@ export function AudioReel({ post, isActive, height, onLike }: Props) {
       {/* Content */}
       <View style={styles.content}>
         {/* Source chip */}
-        {post.sourceName && (
+        {item.sourceName && (
           <View style={styles.sourceChip}>
             <Text style={styles.sourceText} numberOfLines={1}>
-              {post.sourceName}
+              {item.sourceName}
             </Text>
           </View>
         )}
 
         {/* Title */}
-        <Text style={styles.title} numberOfLines={3}>{post.title}</Text>
+        <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
 
         {/* Author */}
-        <Text style={styles.author}>{post.author}</Text>
+        <Text style={styles.author}>{item.author}</Text>
 
         {/* Waveform */}
         <View style={styles.waveform}>
@@ -172,26 +214,26 @@ export function AudioReel({ post, isActive, height, onLike }: Props) {
           </Pressable>
 
           <View style={styles.meta}>
-            <Text style={styles.metaText}>{formatDuration(post.duration)}</Text>
+            <Text style={styles.metaText}>{formatDuration(item.duration)}</Text>
             <Text style={styles.metaDot}>·</Text>
-            <Text style={styles.metaText}>{formatListens(post.listenCount)} plays</Text>
+            <Text style={styles.metaText}>{formatListens(item.listenCount)} plays</Text>
           </View>
 
           <Pressable
             style={styles.likeBtn}
             onPress={onLike}
             accessibilityRole="button"
-            accessibilityLabel={post.isLiked ? 'Unlike' : 'Like'}
+            accessibilityLabel={item.isLiked ? 'Unlike' : 'Like'}
           >
-            <Text style={styles.likeIcon}>{post.isLiked ? '♥' : '♡'}</Text>
-            <Text style={styles.likeCount}>{formatListens(post.likeCount)}</Text>
+            <Text style={styles.likeIcon}>{item.isLiked ? '♥' : '♡'}</Text>
+            <Text style={styles.likeCount}>{formatListens(item.likeCount)}</Text>
           </Pressable>
         </View>
 
         {/* Tags */}
-        {post.tags && post.tags.length > 0 && (
+        {item.tags && item.tags.length > 0 && (
           <View style={styles.tags}>
-            {post.tags.map((tag) => (
+            {item.tags.map((tag) => (
               <View key={tag} style={styles.tag}>
                 <Text style={styles.tagText}>#{tag}</Text>
               </View>

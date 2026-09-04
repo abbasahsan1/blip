@@ -1,17 +1,25 @@
 import { create } from 'zustand';
-import type { AudioPost, FeedSort } from '../types';
+import type { Blipp, FeedSort } from '../types';
 
-// ─── Placeholder feed data ────────────────────────────────────────────────────
-// Phase 2 will replace this with real API calls to GET /api/feed
+// ─── Feed Posts ──────────────────────────────────────────────────────────────
+// Posts are consumed directly as returned by the server feed contract.
+// No client-side ad interleaving (e.g. index % 5 -> inject ad) is permitted;
+// any sponsored/ad units are served directly in the API feed stream.
 
-const MOCK_POSTS: AudioPost[] = [
+const INITIAL_POSTS: Blipp[] = [
   {
     id: '1',
     title: 'The Art of Deliberate Practice',
     author: 'Tim Ferriss',
     authorId: 'u1',
     duration: 318, // 5:18
-    audioUrl: '',
+    audio_url: 'https://example.com/audio/1/master.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/1/low.mp3',
+      standard: 'https://example.com/audio/1/standard.mp3',
+      high: 'https://example.com/audio/1/high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/1/master.mp3',
     coverGradient: ['#6366f1', '#8b5cf6'],
     listenCount: 12400,
     likeCount: 891,
@@ -26,7 +34,13 @@ const MOCK_POSTS: AudioPost[] = [
     author: 'Lex Fridman',
     authorId: 'u2',
     duration: 247,
-    audioUrl: '',
+    audio_url: 'https://example.com/audio/2/master.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/2/low.mp3',
+      standard: 'https://example.com/audio/2/standard.mp3',
+      high: 'https://example.com/audio/2/high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/2/master.mp3',
     coverGradient: ['#0f172a', '#1e3a5f'],
     listenCount: 8900,
     likeCount: 672,
@@ -41,7 +55,13 @@ const MOCK_POSTS: AudioPost[] = [
     author: 'Andrew Huberman',
     authorId: 'u3',
     duration: 192,
-    audioUrl: '',
+    audio_url: 'https://example.com/audio/3/master.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/3/low.mp3',
+      standard: 'https://example.com/audio/3/standard.mp3',
+      high: 'https://example.com/audio/3/high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/3/master.mp3',
     coverGradient: ['#064e3b', '#065f46'],
     listenCount: 21300,
     likeCount: 1840,
@@ -56,7 +76,13 @@ const MOCK_POSTS: AudioPost[] = [
     author: 'Naval Ravikant',
     authorId: 'u4',
     duration: 404,
-    audioUrl: '',
+    audio_url: 'https://example.com/audio/4/master.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/4/low.mp3',
+      standard: 'https://example.com/audio/4/standard.mp3',
+      high: 'https://example.com/audio/4/high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/4/master.mp3',
     coverGradient: ['#78350f', '#92400e'],
     listenCount: 54200,
     likeCount: 4210,
@@ -71,7 +97,13 @@ const MOCK_POSTS: AudioPost[] = [
     author: 'Cal Newport',
     authorId: 'u5',
     duration: 285,
-    audioUrl: '',
+    audio_url: 'https://example.com/audio/5/master.mp3',
+    audio_variants: {
+      low: 'https://example.com/audio/5/low.mp3',
+      standard: 'https://example.com/audio/5/standard.mp3',
+      high: 'https://example.com/audio/5/high.mp3',
+    },
+    audioUrl: 'https://example.com/audio/5/master.mp3',
     coverGradient: ['#1e1b4b', '#312e81'],
     listenCount: 9800,
     likeCount: 756,
@@ -85,7 +117,7 @@ const MOCK_POSTS: AudioPost[] = [
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 interface FeedStore {
-  posts: AudioPost[];
+  posts: Blipp[];
   sort: FeedSort;
   isLoading: boolean;
   isRefreshing: boolean;
@@ -114,9 +146,12 @@ export const useFeedStore = create<FeedStore>((set, get) => ({
     set({ isLoading: true, error: null });
 
     // Simulate network delay for realistic loading state
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 400));
 
-    const sorted = [...MOCK_POSTS].sort((a, b) => {
+    // Consumes items directly without client-side ad interleaving
+    const items = [...INITIAL_POSTS];
+
+    const sorted = items.sort((a, b) => {
       if (sort === 'newest') {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }

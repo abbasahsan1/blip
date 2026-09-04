@@ -1,9 +1,17 @@
 import logging
 from typing import List
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.config import settings
+from app.core.exceptions import (
+    AppException,
+    CODE_INVALID_CREDENTIALS,
+    CODE_SERVICE_UNAVAILABLE,
+    CODE_USER_ALREADY_EXISTS,
+    CODE_REGISTRATION_FAILED,
+    CODE_INVALID_TOKEN,
+)
 from app.core.security import get_current_user, get_admin_token, verify_token
 from app.models.schemas import (
     LoginRequest,
@@ -34,10 +42,11 @@ async def login(req: LoginRequest):
     token_path = f"realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token"
     token_urls = get_candidate_keycloak_urls(token_path)
     
+    login_id = req.identifier
     data = {
         "grant_type": "password",
         "client_id": settings.KEYCLOAK_CLIENT_ID,
-        "username": req.username,
+        "username": login_id,
         "password": req.password,
         "scope": "openid profile email",
     }
@@ -59,16 +68,18 @@ async def login(req: LoginRequest):
 
     if resp is None:
         logger.error(f"Failed to reach Keycloak token endpoint: {last_error}")
-        raise HTTPException(
+        raise AppException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication provider unreachable"
+            code=CODE_SERVICE_UNAVAILABLE,
+            message="Authentication provider unreachable"
         )
 
     if resp.status_code != 200:
-        logger.warning(f"Keycloak authentication failed for {req.username}: {resp.text}")
-        raise HTTPException(
+        logger.warning(f"Keycloak authentication failed for user identifier '{login_id}': {resp.text}")
+        raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            code=CODE_INVALID_CREDENTIALS,
+            message="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -79,7 +90,7 @@ async def login(req: LoginRequest):
     payload = await verify_token(access_token)
     user = UserResponse(
         id=payload.get("sub", ""),
-        username=payload.get("preferred_username", req.username),
+        username=payload.get("preferred_username", login_id),
         email=payload.get("email"),
         first_name=payload.get("given_name"),
         last_name=payload.get("family_name"),
@@ -135,23 +146,26 @@ async def register(req: RegisterRequest):
                 logger.debug(f"User registration candidate {url} failed: {e}")
 
     if resp is None:
-        raise HTTPException(
+        raise AppException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Keycloak user registration interface unreachable"
+            code=CODE_SERVICE_UNAVAILABLE,
+            message="Keycloak user registration interface unreachable"
         )
 
     if resp.status_code == 201:
         return MessageResponse(message="User registered successfully", success=True)
     elif resp.status_code == 409:
-        raise HTTPException(
+        raise AppException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email is already registered"
+            code=CODE_USER_ALREADY_EXISTS,
+            message="Username or email is already registered"
         )
     else:
         logger.error(f"Failed to create user in Keycloak: {resp.status_code} - {resp.text}")
-        raise HTTPException(
+        raise AppException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Registration failed: {resp.text}"
+            code=CODE_REGISTRATION_FAILED,
+            message=f"Registration failed: {resp.text}"
         )
 
 
@@ -181,9 +195,10 @@ async def refresh_token(req: RefreshRequest):
                 pass
 
     if resp is None or resp.status_code != 200:
-        raise HTTPException(
+        raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
+            code=CODE_INVALID_TOKEN,
+            message="Invalid or expired refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

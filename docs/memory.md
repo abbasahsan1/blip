@@ -109,6 +109,7 @@ All traffic enters on host port `8419`.
 |---|---|---|
 | `/` | `blipp-app:80` | Expo SPA (SPA fallback via nginx try_files) |
 | `/keycloak` | `keycloak:8080` | Keycloak admin + OIDC |
+| `/v1/auth` | `auth-service:8000` | Versioned FastAPI auth microservice |
 | `/api` | `auth-service:8000` | FastAPI auth microservice |
 | `/api/docs` | `auth-service:8000` | Swagger UI |
 | `/health` | `auth-service:8000` | Liveness probe |
@@ -122,22 +123,36 @@ All traffic enters on host port `8419`.
 - FastAPI Swagger UI: http://100.122.207.32:8419/api/docs
 - Keycloak OIDC Discovery: http://100.122.207.32:8419/keycloak/realms/blipp/.well-known/openid-configuration
 - Keycloak Token Endpoint: http://100.122.207.32:8419/keycloak/realms/blipp/protocol/openid-connect/token
+- Versioned Auth Route: http://100.122.207.32:8419/v1/auth/login
 
 ---
 
 ## 6. FastAPI Auth Service API Contract
 
-Base path: `/api`
+Base paths: `/v1/auth` and `/api/auth`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/auth/login` | None | Email/password → access+refresh tokens |
-| POST | `/api/auth/register` | None | Creates user in Keycloak realm |
-| POST | `/api/auth/refresh` | None | Refresh token → new access token |
-| POST | `/api/auth/logout` | None | Revokes Keycloak session |
-| GET | `/api/auth/me` | Bearer | Returns user profile from JWT |
+| POST | `/v1/auth/login` (or `/api/auth/login`) | None | Email/password → access+refresh tokens |
+| POST | `/v1/auth/register` (or `/api/auth/register`) | None | Creates user in Keycloak realm |
+| POST | `/v1/auth/refresh` (or `/api/auth/refresh`) | None | Refresh token → new access token |
+| POST | `/v1/auth/logout` (or `/api/auth/logout`) | None | Revokes Keycloak session |
+| GET | `/v1/auth/me` (or `/api/auth/me`) | Bearer | Returns user profile from JWT |
 | GET | `/api/protected/data` | Bearer | Sample protected resource |
-| GET | `/api/health` | None | Health + Keycloak connectivity probe |
+| GET | `/api/health` / `/health` | None | Health + Keycloak connectivity probe |
+
+### Error Envelope Contract (All 4xx/5xx Responses)
+```json
+{
+  "error": {
+    "code": "string",
+    "message": "string",
+    "request_id": "uuid"
+  }
+}
+```
+All HTTP responses include header: `X-Request-ID: <uuid>`.
+
 
 Token validation: RS256, JWKS from keycloak service internally, 10-min cache. Issuer must end with `/realms/blipp`.
 

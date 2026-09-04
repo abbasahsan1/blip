@@ -21,17 +21,25 @@ export interface AuthFailure {
   code?: string;
 }
 
-// ─── Feed ────────────────────────────────────────────────────────────────────
+// ─── Audio & Feed ─────────────────────────────────────────────────────────────
 
 export type FeedSort = 'most_listened' | 'newest';
 
-export interface AudioPost {
+export interface AudioVariants {
+  low: string;
+  standard: string;
+  high: string;
+}
+
+export interface Blipp {
   id: string;
   title: string;
   author: string;
   authorId: string;
   duration: number; // seconds
-  audioUrl: string;
+  audio_url: string; // canonical URL
+  audio_variants?: AudioVariants; // quality tier variants
+  audioUrl?: string; // backwards compatibility alias
   coverGradient?: [string, string]; // gradient start/end
   listenCount: number;
   likeCount: number;
@@ -39,16 +47,34 @@ export interface AudioPost {
   tags?: string[];
   createdAt: string;
   // Source metadata
-  sourceName?: string; // "The Tim Ferriss Show", "Lex Fridman Podcast"
+  sourceName?: string; // e.g. "The Tim Ferriss Show", "Lex Fridman Podcast"
   sourceType?: 'podcast' | 'interview' | 'documentary' | 'other';
 }
 
+// Alias AudioPost to Blipp for seamless compatibility
+export type AudioPost = Blipp;
+
 export interface FeedState {
-  posts: AudioPost[];
+  posts: Blipp[];
   sort: FeedSort;
   isLoading: boolean;
   isRefreshing: boolean;
   error: string | null;
+}
+
+// ─── Telemetry & Device Signals ───────────────────────────────────────────────
+
+export type DeviceSignal =
+  | 'screen_on'
+  | 'screen_off'
+  | 'bluetooth_connected'
+  | 'app_backgrounded';
+
+export interface PlaybackTelemetryPayload {
+  blipp_id: string;
+  position_seconds: number;
+  duration_seconds: number;
+  device_signal: DeviceSignal;
 }
 
 // ─── Player ──────────────────────────────────────────────────────────────────
