@@ -126,6 +126,8 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   };
 
   // Waveform animation strictly bound to active playback (functional motion)
+  // Progress is driven by audio.timeupdate event — this effect only handles
+  // waveform animation and telemetry emission.
   useEffect(() => {
     if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
@@ -148,23 +150,17 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
 
+      // Telemetry-only interval — progress is driven by audio.timeupdate
       let secondsElapsed = 0;
       const interval = setInterval(() => {
         secondsElapsed += 1;
-        setProgress((p) => {
-          if (p >= 1) {
-            setIsPlaying(false);
-            return 0;
-          }
-          return p + 1 / (item.duration || 1);
-        });
-
-        // Telemetry emitter during playback
         if (secondsElapsed % 3 === 0) {
           const activeSignal = getDeviceSignal(true);
+          const audio = audioRef.current;
+          const positionSeconds = audio ? Math.floor(audio.currentTime) : secondsElapsed;
           telemetryApi.recordPlayProgress({
             blipp_id: item.id,
-            position_seconds: secondsElapsed,
+            position_seconds: positionSeconds,
             duration_seconds: item.duration,
             device_signal: activeSignal,
           });

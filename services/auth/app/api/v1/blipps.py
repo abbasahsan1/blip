@@ -152,7 +152,7 @@ async def get_feed():
     return FeedResponse(items=items, next_cursor=None)
 
 
-@router.get("/audio/{filename}")
+@router.api_route("/audio/{filename}", methods=["GET", "HEAD"])
 async def stream_audio(filename: str):
     """
     Public audio stream endpoint with HTTP Range / Partial Content support for local storage fallback.
