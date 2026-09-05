@@ -163,11 +163,25 @@ export const authApi = {
   },
 
   async login(req: LoginRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    const r = await request<LoginResponse>('/auth/login', {
+    const username = req.username || req.email || '';
+    const password = req.password;
+    const body = `client_id=blipp-app&grant_type=password&username=${encodeURIComponent(username)}&password=${password}`;
+
+    const res = await fetch('/keycloak/realms/blipp/protocol/openid-connect/token', {
       method: 'POST',
-      body: req,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
     });
-    const tokens = toTokens(r);
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = data?.error_description || data?.error || `Login failed: ${res.status}`;
+      throw new ApiError(msg, res.status, data);
+    }
+
+    const tokens = toTokens(data as LoginResponse);
     const me = await authApi.me(tokens.accessToken);
     return { tokens, user: me };
   },
@@ -184,11 +198,24 @@ export const authApi = {
   },
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
-    const r = await request<LoginResponse>('/auth/refresh', {
+    const params = new URLSearchParams();
+    params.append('client_id', 'blipp-app');
+    params.append('grant_type', 'refresh_token');
+    params.append('refresh_token', refreshToken);
+
+    const res = await fetch('/keycloak/realms/blipp/protocol/openid-connect/token', {
       method: 'POST',
-      body: { refresh_token: refreshToken },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params.toString(),
     });
-    return toTokens(r);
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new ApiError(data?.error_description || 'Refresh failed', res.status, data);
+    }
+    return toTokens(data as LoginResponse);
   },
 
   async logout(token: string): Promise<void> {

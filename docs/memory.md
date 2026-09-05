@@ -193,7 +193,7 @@ Token validation: RS256, JWKS cached from Keycloak service internally (`JWKS_CAC
 - KC_PROXY_HEADERS=xforwarded
 - Realm: `blipp` (pre-seeded via configmap)
 - Client: `blipp-app` (public, Direct Access Grants enabled)
-- Test user: `testuser` / `TestPassword123!`
+- Test user: `testuser` / `TestPassword123` (or `TestPassword123!`)
 - Admin: `admin` / `admin_master_password`
 - Google OAuth: NOT YET CONFIGURED (pending credentials from user)
 
@@ -310,3 +310,19 @@ curl -s -I http://100.122.207.32:8419/api/docs
 curl -s http://100.122.207.32:8419/api/health | jq .
 kubectl get pods -n blipp
 ```
+
+---
+
+## 14. Playwright End-to-End Verification
+
+The complete vertical slice has been verified with automated Playwright headless tests:
+- Test script: `playwright_test.js` (installed with Chromium in `/home/ali/.cache/ms-playwright/`)
+- User journey tested:
+  1. Unauthenticated load &rarr; redirect to `/auth/sign-in`.
+  2. Submits `testuser` / `TestPassword123` &rarr; Direct Keycloak token grant.
+  3. Validates JWT against FastAPI `/v1/auth/me` with cached JWKS.
+  4. Redirection to feed &rarr; fetches live PostgreSQL items (`GET /v1/blipps/feed`).
+  5. Clicks Play &rarr; streams audio (`GET /v1/blipps/audio/{filename}`) over HTTP 206 Partial Content.
+  6. Navigates to `/upload` and `/profile` tabs.
+- Visual proof saved in conversation artifacts (`playwright_1_signin_screen.png` through `playwright_6_profile_tab.png`).
+

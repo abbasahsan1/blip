@@ -16,23 +16,18 @@ import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export default function SignInScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [step, setStep] = useState<'email' | 'otp'>('email');
-  const [email, setEmail] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [touched, setTouched] = useState({ email: false, otp: false });
-  const [resendCooldown, setResendCooldown] = useState(0);
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [touched, setTouched] = useState({ identifier: false, password: false });
 
   const isSubmitting = useSessionStore((s) => s.isSubmitting);
   const error = useSessionStore((s) => s.error);
   const status = useSessionStore((s) => s.status);
-  const requestOtp = useSessionStore((s) => s.requestOtp);
-  const verifyOtp = useSessionStore((s) => s.verifyOtp);
+  const signInWithEmail = useSessionStore((s) => s.signInWithEmail);
   const signInWithOAuth = useSessionStore((s) => s.signInWithOAuth);
   const clearError = useSessionStore((s) => s.clearError);
 
@@ -45,15 +40,7 @@ export default function SignInScreen() {
 
   useEffect(() => {
     clearError();
-  }, [clearError, step]);
-
-  // Resend cooldown timer
-  useEffect(() => {
-    if (resendCooldown > 0) {
-      const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [resendCooldown]);
+  }, [clearError]);
 
   // Waveform animation
   const bars = useRef(Array.from({ length: 24 }, () => new Animated.Value(0.3))).current;
@@ -80,29 +67,20 @@ export default function SignInScreen() {
     return () => animations.forEach((a) => a.stop());
   }, [bars]);
 
-  const emailError =
-    touched.email && !EMAIL_RE.test(email.trim()) ? 'Enter a valid email address' : null;
-  const otpError =
-    touched.otp && otpCode.trim().length !== 6 ? 'Enter the 6-digit verification code' : null;
+  const identifierError =
+    touched.identifier && identifier.trim().length === 0
+      ? 'Enter your username or email'
+      : null;
+  const passwordError =
+    touched.password && password.length === 0 ? 'Enter your password' : null;
   const authError = error?.message || null;
 
-  const canRequestCode = EMAIL_RE.test(email.trim()) && !isSubmitting;
-  const canVerify = otpCode.trim().length === 6 && !isSubmitting;
+  const canSubmit = identifier.trim().length > 0 && password.length > 0 && !isSubmitting;
 
-  async function handleSendCode() {
-    setTouched((t) => ({ ...t, email: true }));
-    if (!canRequestCode) return;
-    const ok = await requestOtp(email.trim().toLowerCase());
-    if (ok) {
-      setStep('otp');
-      setResendCooldown(30);
-    }
-  }
-
-  async function handleVerifyCode() {
-    setTouched((t) => ({ ...t, otp: true }));
-    if (!canVerify) return;
-    await verifyOtp(email.trim().toLowerCase(), otpCode.trim());
+  async function handleSignIn() {
+    setTouched({ identifier: true, password: true });
+    if (!canSubmit) return;
+    await signInWithEmail(identifier.trim(), password);
   }
 
   async function handleAppleSignIn() {
@@ -154,14 +132,8 @@ export default function SignInScreen() {
 
         {/* Card */}
         <View style={styles.card}>
-          <Text style={styles.heading}>
-            {step === 'email' ? 'Welcome to Blipp' : 'Check your email'}
-          </Text>
-          <Text style={styles.subheading}>
-            {step === 'email'
-              ? 'Passwordless login with Email & OTP'
-              : `We sent a 6-digit code to ${email}`}
-          </Text>
+          <Text style={styles.heading}>Welcome to Blipp</Text>
+          <Text style={styles.subheading}>Sign in to your account</Text>
 
           {/* Auth error banner */}
           {authError && (
@@ -170,147 +142,95 @@ export default function SignInScreen() {
             </View>
           )}
 
-          {step === 'email' ? (
-            <>
-              {/* Email */}
-              <View style={styles.field}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  id="sign-in-email"
-                  style={[styles.input, emailError ? styles.inputError : null]}
-                  value={email}
-                  onChangeText={setEmail}
-                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-                  placeholder="you@example.com"
-                  placeholderTextColor={PALETTE.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  autoCorrect={false}
-                  textContentType="emailAddress"
-                  returnKeyType="done"
-                  onSubmitEditing={handleSendCode}
-                  accessibilityLabel="Email address"
-                />
-                {emailError && <Text style={styles.fieldError}>{emailError}</Text>}
-              </View>
+          {/* Identifier (Username or Email) */}
+          <View style={styles.field}>
+            <Text style={styles.label}>Username or Email</Text>
+            <TextInput
+              id="sign-in-email"
+              style={[styles.input, identifierError ? styles.inputError : null]}
+              value={identifier}
+              onChangeText={setIdentifier}
+              onBlur={() => setTouched((t) => ({ ...t, identifier: true }))}
+              placeholder="testuser or testuser@blipp.local"
+              placeholderTextColor={PALETTE.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="next"
+              accessibilityLabel="Username or email address"
+            />
+            {identifierError && <Text style={styles.fieldError}>{identifierError}</Text>}
+          </View>
 
-              {/* Continue with Email button */}
-              <Pressable
-                id="sign-in-send-code"
-                style={({ pressed }) => [
-                  styles.button,
-                  pressed && styles.buttonPressed,
-                  !canRequestCode && styles.buttonDisabled,
-                ]}
-                onPress={handleSendCode}
-                disabled={!canRequestCode}
-                accessibilityRole="button"
-                accessibilityLabel="Send verification code"
-              >
-                <Text style={styles.buttonText}>
-                  {isSubmitting ? 'Sending code…' : 'Continue with Email'}
-                </Text>
+          {/* Password */}
+          <View style={styles.field}>
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              id="sign-in-password"
+              style={[styles.input, passwordError ? styles.inputError : null]}
+              value={password}
+              onChangeText={setPassword}
+              onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+              placeholder="••••••••"
+              placeholderTextColor={PALETTE.textMuted}
+              secureTextEntry
+              returnKeyType="done"
+              onSubmitEditing={handleSignIn}
+              accessibilityLabel="Password"
+            />
+            {passwordError && <Text style={styles.fieldError}>{passwordError}</Text>}
+          </View>
+
+          {/* Sign In button */}
+          <Pressable
+            id="sign-in-submit"
+            style={({ pressed }) => [
+              styles.button,
+              pressed && styles.buttonPressed,
+              !canSubmit && styles.buttonDisabled,
+            ]}
+            onPress={handleSignIn}
+            disabled={!canSubmit}
+            accessibilityRole="button"
+            accessibilityLabel="Sign In"
+          >
+            <Text style={styles.buttonText}>
+              {isSubmitting ? 'Signing in…' : 'Sign In'}
+            </Text>
+          </Pressable>
+
+          {/* Divider */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or continue with</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Federated OAuth Buttons */}
+          <View style={styles.oauthRow}>
+            <GoogleSignInButton />
+            <Pressable
+              style={({ pressed }) => [
+                styles.appleButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleAppleSignIn}
+              accessibilityRole="button"
+              accessibilityLabel="Continue with Apple"
+            >
+              <Text style={styles.appleButtonText}> Apple</Text>
+            </Pressable>
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>New to Blipp?{' '}</Text>
+            <Link href="/auth/sign-up" asChild>
+              <Pressable accessibilityRole="link">
+                <Text style={styles.footerLink}>Create account</Text>
               </Pressable>
-
-              {/* Divider */}
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or continue with</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              {/* Federated OAuth Buttons */}
-              <View style={styles.oauthRow}>
-                <GoogleSignInButton />
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.appleButton,
-                    pressed && styles.buttonPressed,
-                  ]}
-                  onPress={handleAppleSignIn}
-                  accessibilityRole="button"
-                  accessibilityLabel="Continue with Apple"
-                >
-                  <Text style={styles.appleButtonText}> Apple</Text>
-                </Pressable>
-              </View>
-
-              {/* Footer */}
-              <View style={styles.footer}>
-                <Text style={styles.footerText}>New to Blipp?{' '}</Text>
-                <Link href="/auth/sign-up" asChild>
-                  <Pressable accessibilityRole="link">
-                    <Text style={styles.footerLink}>Create account</Text>
-                  </Pressable>
-                </Link>
-              </View>
-            </>
-          ) : (
-            <>
-              {/* OTP Code */}
-              <View style={styles.field}>
-                <View style={styles.otpHeaderRow}>
-                  <Text style={styles.label}>Verification Code</Text>
-                  <Pressable onPress={() => setStep('email')}>
-                    <Text style={styles.changeEmailText}>Change email</Text>
-                  </Pressable>
-                </View>
-                <TextInput
-                  id="sign-in-otp"
-                  style={[styles.input, styles.otpInput, otpError ? styles.inputError : null]}
-                  value={otpCode}
-                  onChangeText={(text) => setOtpCode(text.replace(/[^0-9]/g, '').slice(0, 6))}
-                  placeholder="123456"
-                  placeholderTextColor={PALETTE.textMuted}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  returnKeyType="done"
-                  onSubmitEditing={handleVerifyCode}
-                  accessibilityLabel="Verification Code"
-                  autoFocus
-                />
-                {otpError && <Text style={styles.fieldError}>{otpError}</Text>}
-              </View>
-
-              {/* Verify & Sign In button */}
-              <Pressable
-                id="sign-in-verify-code"
-                style={({ pressed }) => [
-                  styles.button,
-                  pressed && styles.buttonPressed,
-                  !canVerify && styles.buttonDisabled,
-                ]}
-                onPress={handleVerifyCode}
-                disabled={!canVerify}
-                accessibilityRole="button"
-                accessibilityLabel="Verify and sign in"
-              >
-                <Text style={styles.buttonText}>
-                  {isSubmitting ? 'Verifying…' : 'Verify & Sign In'}
-                </Text>
-              </Pressable>
-
-              {/* Resend code */}
-              <View style={styles.resendRow}>
-                <Pressable
-                  disabled={resendCooldown > 0 || isSubmitting}
-                  onPress={handleSendCode}
-                >
-                  <Text
-                    style={[
-                      styles.resendText,
-                      resendCooldown > 0 && styles.resendTextDisabled,
-                    ]}
-                  >
-                    {resendCooldown > 0
-                      ? `Resend code in ${resendCooldown}s`
-                      : 'Resend code'}
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          )}
+            </Link>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
