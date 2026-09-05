@@ -1,3 +1,5 @@
+from typing import Any
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +23,39 @@ class Settings(BaseSettings):
 
     # JWKS URL for local signature validation
     JWKS_URL: str = ""
+
+    # PostgreSQL Database
+    POSTGRES_HOST: str = "postgres.blipp.svc.cluster.local"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "keycloak"
+    POSTGRES_PASSWORD: str = "keycloak_secure_db_pass"
+    POSTGRES_DB: str = "blipp"
+
+    @field_validator("POSTGRES_PORT", mode="before")
+    @classmethod
+    def parse_postgres_port(cls, v: Any) -> int:
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            if ":" in v:
+                v = v.split(":")[-1]
+            try:
+                return int(v)
+            except ValueError:
+                return 5432
+        return 5432
+
+    # S3 / Cloudflare R2 Object Storage
+    S3_ENDPOINT_URL: str = ""
+    S3_BUCKET_NAME: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_REGION_NAME: str = "auto"
+    S3_PUBLIC_URL: str = ""
+
+    # Local storage fallback directory & public URL
+    STORAGE_LOCAL_DIR: str = "/app/data/uploads"
+    PUBLIC_BASE_URL: str = "http://100.122.207.32:8419"
 
     def get_jwks_url(self) -> str:
         if self.JWKS_URL:

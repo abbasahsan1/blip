@@ -26,3 +26,28 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     keycloak_status: str
+
+
+class BlippResponse(BaseModel):
+    blipp_id: uuid.UUID
+    creator_id: uuid.UUID
+    title: str
+    audio_url: str
+    audio_variants: dict = Field(default_factory=dict)
+    duration_seconds: int = 0
+    status: str = "published"
+    created_at: Optional[str] = None
+
+
+class FeedItemResponse(BaseModel):
+    blipp_id: uuid.UUID
+    creator_id: uuid.UUID
+    title: str
+    audio_url: str
+    audio_variants: dict = Field(default_factory=dict)
+    duration_seconds: int = 0
+
+
+class FeedResponse(BaseModel):
+    items: List[FeedItemResponse] = Field(default_factory=list)
+    next_cursor: Optional[str] = None

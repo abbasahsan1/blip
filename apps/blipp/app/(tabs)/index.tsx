@@ -123,6 +123,15 @@ export default function FeedScreen() {
               colors={[PALETTE.accent]}
             />
           }
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🎙</Text>
+              <Text style={styles.emptyHeading}>No blipps yet</Text>
+              <Text style={styles.emptySub}>
+                Be the first to share an audio clip! Tap the Upload tab to post.
+              </Text>
+            </View>
+          }
           getItemLayout={(_data, index) => ({
             length: pageHeight,
             offset: pageHeight * index,
@@ -197,5 +206,30 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: PALETTE.card,
     opacity: 0.6,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 180,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyHeading: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 20,
+    color: PALETTE.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    color: PALETTE.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 320,
   },
 });

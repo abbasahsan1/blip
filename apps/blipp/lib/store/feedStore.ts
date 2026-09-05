@@ -1,153 +1,15 @@
 import { create } from 'zustand';
+import { blippApi } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
-// ─── Feed Posts ──────────────────────────────────────────────────────────────
-// Posts are consumed directly as returned by the server feed contract.
-// No client-side ad interleaving (e.g. index % 5 -> inject ad) is permitted;
-// any sponsored/ad units are served directly in the API feed stream.
-
-const INITIAL_POSTS: Blipp[] = [
-  {
-    id: '1',
-    title: 'The Art of Deliberate Practice',
-    author: 'Tim Ferriss',
-    authorId: 'u1',
-    duration: 318, // 5:18
-    audio_url: 'https://example.com/audio/1/master.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/1/low.mp3',
-      standard: 'https://example.com/audio/1/standard.mp3',
-      high: 'https://example.com/audio/1/high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/1/master.mp3',
-    coverGradient: ['#6366f1', '#8b5cf6'],
-    listenCount: 12400,
-    likeCount: 891,
-    sourceName: 'The Tim Ferriss Show',
-    sourceType: 'podcast',
-    tags: ['productivity', 'mindset'],
-    createdAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: '2',
-    title: 'First Principles Thinking',
-    author: 'Lex Fridman',
-    authorId: 'u2',
-    duration: 247,
-    audio_url: 'https://example.com/audio/2/master.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/2/low.mp3',
-      standard: 'https://example.com/audio/2/standard.mp3',
-      high: 'https://example.com/audio/2/high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/2/master.mp3',
-    coverGradient: ['#0f172a', '#1e3a5f'],
-    listenCount: 8900,
-    likeCount: 672,
-    sourceName: 'Lex Fridman Podcast',
-    sourceType: 'podcast',
-    tags: ['philosophy', 'science'],
-    createdAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: '3',
-    title: 'How the Brain Processes Audio',
-    author: 'Andrew Huberman',
-    authorId: 'u3',
-    duration: 192,
-    audio_url: 'https://example.com/audio/3/master.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/3/low.mp3',
-      standard: 'https://example.com/audio/3/standard.mp3',
-      high: 'https://example.com/audio/3/high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/3/master.mp3',
-    coverGradient: ['#064e3b', '#065f46'],
-    listenCount: 21300,
-    likeCount: 1840,
-    sourceName: 'Huberman Lab',
-    sourceType: 'podcast',
-    tags: ['neuroscience', 'health'],
-    createdAt: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: '4',
-    title: 'Naval on Wealth and Happiness',
-    author: 'Naval Ravikant',
-    authorId: 'u4',
-    duration: 404,
-    audio_url: 'https://example.com/audio/4/master.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/4/low.mp3',
-      standard: 'https://example.com/audio/4/standard.mp3',
-      high: 'https://example.com/audio/4/high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/4/master.mp3',
-    coverGradient: ['#78350f', '#92400e'],
-    listenCount: 54200,
-    likeCount: 4210,
-    sourceName: 'The Knowledge Project',
-    sourceType: 'interview',
-    tags: ['philosophy', 'wealth'],
-    createdAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: '5',
-    title: 'The Power of Deep Work',
-    author: 'Cal Newport',
-    authorId: 'u5',
-    duration: 285,
-    audio_url: 'https://example.com/audio/5/master.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/5/low.mp3',
-      standard: 'https://example.com/audio/5/standard.mp3',
-      high: 'https://example.com/audio/5/high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/5/master.mp3',
-    coverGradient: ['#1e1b4b', '#312e81'],
-    listenCount: 9800,
-    likeCount: 756,
-    sourceName: 'Deep Questions',
-    sourceType: 'podcast',
-    tags: ['productivity', 'focus'],
-    createdAt: new Date(Date.now() - 36 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'ad-1',
-    title: 'Supercharge Your Engineering Workflow with Linear',
-    author: 'Linear',
-    authorId: 'sponsor-linear',
-    duration: 60,
-    audio_url: 'https://example.com/audio/ads/linear-spot.mp3',
-    audio_variants: {
-      low: 'https://example.com/audio/ads/linear-low.mp3',
-      standard: 'https://example.com/audio/ads/linear-standard.mp3',
-      high: 'https://example.com/audio/ads/linear-high.mp3',
-    },
-    audioUrl: 'https://example.com/audio/ads/linear-spot.mp3',
-    coverGradient: ['#5e6ad2', '#27282b'],
-    listenCount: 45000,
-    likeCount: 3120,
-    sourceName: 'Partner Spotlight',
-    sourceType: 'other',
-    // Server-hydrated sponsored ad slot (§6.4)
-    is_sponsored: true,
-    sponsor: {
-      name: 'Linear',
-      tagline: 'The purpose-built tool for modern product teams',
-      cta_text: 'Try Linear for Free',
-      cta_url: 'https://linear.app',
-      logo_url: 'https://linear.app/favicon.ico',
-    },
-    ad_metadata: {
-      campaign_id: 'cmp_linear_q3_audio',
-      impression_url: 'https://api.blipp.local/v1/telemetry/ad/impression?cmp=linear',
-    },
-    createdAt: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
-  },
+const GRADIENTS: [string, string][] = [
+  ['#2563eb', '#8b5cf6'],
+  ['#6366f1', '#a855f7'],
+  ['#0f172a', '#1e3a5f'],
+  ['#064e3b', '#065f46'],
+  ['#78350f', '#92400e'],
+  ['#1e1b4b', '#312e81'],
 ];
-
-// ─── Store ────────────────────────────────────────────────────────────────────
 
 interface FeedStore {
   posts: Blipp[];
@@ -164,7 +26,7 @@ interface FeedStore {
 
 export const useFeedStore = create<FeedStore>((set, get) => ({
   posts: [],
-  sort: 'most_listened',
+  sort: 'newest',
   isLoading: false,
   isRefreshing: false,
   error: null,
@@ -178,20 +40,45 @@ export const useFeedStore = create<FeedStore>((set, get) => ({
     const { sort } = get();
     set({ isLoading: true, error: null });
 
-    // Simulate network delay for realistic loading state
-    await new Promise((r) => setTimeout(r, 400));
+    try {
+      const response = await blippApi.getFeed();
+      const serverItems = response?.items || [];
 
-    // Consumes items directly without client-side ad interleaving
-    const items = [...INITIAL_POSTS];
+      const mapped: Blipp[] = serverItems.map((item, idx) => {
+        const standardUrl = item.audio_variants?.standard || item.audio_url || '';
+        return {
+          id: item.blipp_id,
+          title: item.title,
+          author: 'Creator',
+          authorId: item.creator_id,
+          duration: item.duration_seconds || 30,
+          audio_url: item.audio_url,
+          audio_variants: {
+            standard: standardUrl,
+            low: item.audio_variants?.low || standardUrl,
+            high: item.audio_variants?.high || standardUrl,
+          },
+          audioUrl: standardUrl,
+          coverGradient: GRADIENTS[idx % GRADIENTS.length],
+          listenCount: 0,
+          likeCount: 0,
+          isLiked: false,
+          createdAt: new Date().toISOString(),
+        };
+      });
 
-    const sorted = items.sort((a, b) => {
-      if (sort === 'newest') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      }
-      return b.listenCount - a.listenCount;
-    });
+      const sorted = mapped.sort((a, b) => {
+        if (sort === 'newest') {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        return b.listenCount - a.listenCount;
+      });
 
-    set({ posts: sorted, isLoading: false });
+      set({ posts: sorted, isLoading: false });
+    } catch (err) {
+      console.warn('Failed to load blipp feed from backend:', err);
+      set({ isLoading: false, error: 'Could not load feed from server.' });
+    }
   },
 
   async refresh(viewerId) {

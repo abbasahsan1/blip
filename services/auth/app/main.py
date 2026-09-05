@@ -22,6 +22,8 @@ from app.core.exceptions import (
 )
 from app.api.v1.auth import router as auth_router
 from app.api.v1.protected import router as protected_router
+from app.api.v1.blipps import router as blipps_router
+from app.core.database import init_db, close_db
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
@@ -35,7 +37,15 @@ logger = logging.getLogger("auth-service.main")
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Connected Keycloak Realm: {settings.KEYCLOAK_REALM} at {settings.KEYCLOAK_INTERNAL_URL}")
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error(f"Database startup initialization note: {e}")
     yield
+    try:
+        await close_db()
+    except Exception as e:
+        logger.error(f"Database shutdown note: {e}")
     logger.info(f"Shutting down {settings.APP_NAME}")
 
 
@@ -212,8 +222,10 @@ async def docs_redirect():
 # Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
 app.include_router(auth_router, prefix="/api")
 app.include_router(protected_router, prefix="/api")
+app.include_router(blipps_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
 app.include_router(protected_router, prefix="/v1")
+app.include_router(blipps_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

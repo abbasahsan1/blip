@@ -135,10 +135,27 @@ Base paths: `/v1/auth` and `/api/auth`
 |---|---|---|---|
 | GET | `/v1/auth/me` (or `/api/auth/me`) | Bearer | Validates JWT against cached Keycloak JWKS, extracts `sub` as UUID `user_id` |
 | GET | `/v1/auth/verify` (or `/api/auth/verify`) | Bearer | Lightweight session verification endpoint |
+| POST | `/v1/blipps/upload` | Bearer | Direct multipart audio upload to S3/R2 & PostgreSQL |
+| GET | `/v1/blipps/feed` | None/Bearer | Chronological feed of published blipps |
+| GET | `/v1/blipps/audio/{filename}` | None | Audio stream endpoint with HTTP Range support |
 | GET | `/v1/protected/data` (or `/api/protected/data`) | Bearer | Sample protected resource |
 | GET | `/v1/health` / `/api/health` / `/health` | None | Health + Keycloak connectivity probe |
 
 *Note: Custom proxy login/register routes (`/login`, `/register`, `/refresh`, `/logout`) have been removed. Clients authenticate directly with Keycloak OIDC endpoints, and services validate JWTs locally using cached JWKS (`get_current_user`).*
+
+### PostgreSQL Content Table (`blipp` database)
+```sql
+CREATE TABLE IF NOT EXISTS blipps (
+    blipp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    creator_id UUID NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    audio_url TEXT NOT NULL,
+    audio_variants JSONB NOT NULL DEFAULT '{}'::jsonb,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(50) NOT NULL DEFAULT 'published',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ### Strict Error Envelope Contract (All 4xx/5xx Responses)
 ```json

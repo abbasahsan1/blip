@@ -70,6 +70,77 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     }
   }, [isActive, glowAnim]);
 
+  // HTML5 Audio ref for real web stream playback
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
+
+    if (audioSource) {
+      const audio = new Audio(audioSource);
+      audioRef.current = audio;
+
+      const handleTimeUpdate = () => {
+        if (audio.duration && audio.duration > 0) {
+          setProgress(audio.currentTime / audio.duration);
+        }
+      };
+      const handleEnded = () => {
+        setIsPlaying(false);
+        setProgress(0);
+      };
+      const handlePause = () => {
+        setIsPlaying(false);
+      };
+      const handlePlay = () => {
+        setIsPlaying(true);
+      };
+
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      audio.addEventListener('ended', handleEnded);
+      audio.addEventListener('pause', handlePause);
+      audio.addEventListener('play', handlePlay);
+
+      return () => {
+        audio.pause();
+        audio.removeEventListener('timeupdate', handleTimeUpdate);
+        audio.removeEventListener('ended', handleEnded);
+        audio.removeEventListener('pause', handlePause);
+        audio.removeEventListener('play', handlePlay);
+        audio.src = '';
+        audioRef.current = null;
+      };
+    }
+  }, [audioSource]);
+
+  // Pause playback if reel becomes inactive
+  useEffect(() => {
+    if (!isActive && audioRef.current && isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, [isActive, isPlaying]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      setIsPlaying((p) => !p);
+      return;
+    }
+
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((e) => {
+        console.warn('Audio playback error:', e);
+        setIsPlaying(true);
+      });
+    }
+  };
+
   useEffect(() => {
     if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
@@ -211,7 +282,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         <View style={styles.controls}>
           <Pressable
             style={[styles.playBtn, { backgroundColor: grad1 }]}
-            onPress={() => setIsPlaying((p) => !p)}
+            onPress={togglePlay}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
           >

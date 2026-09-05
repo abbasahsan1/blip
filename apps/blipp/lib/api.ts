@@ -1,8 +1,9 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
 
 // All API calls are relative — the SPA and API share the same origin
-// via Traefik routing: / → blipp-app, /api or /v1 → auth-service
-const BASE = '/api';
+// via Traefik routing: / → blipp-app, /v1 or /api → backend services
+const BASE = '/v1';
 
 // ─── Request Helper ───────────────────────────────────────────────────────────
 
@@ -15,18 +16,34 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { body, token, ...rest } = opts;
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  // Only set application/json if body is not FormData
+  if (!(body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${BASE}${path}`, {
+  // Automatically attach stored Keycloak access token if not explicitly provided
+  let activeToken = token;
+  if (activeToken === undefined) {
+    try {
+      activeToken = await AsyncStorage.getItem('blipp:access_token');
+    } catch {
+      activeToken = null;
+    }
+  }
+
+  if (activeToken) {
+    headers['Authorization'] = `Bearer ${activeToken}`;
+  }
+
+  const endpointUrl = path.startsWith('/v1') || path.startsWith('/api') ? path : `${BASE}${path}`;
+
+  const response = await fetch(endpointUrl, {
     ...rest,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   const data = await response.json().catch(() => null);
@@ -197,5 +214,46 @@ export const telemetryApi = {
     } catch {
       // Non-blocking telemetry — fail silently to never disrupt audio consumption
     }
+  },
+};
+
+// ─── Blipps Content API ───────────────────────────────────────────────────────
+
+export interface BlippUploadResponse {
+  blipp_id: string;
+  creator_id: string;
+  title: string;
+  audio_url: string;
+  audio_variants: { standard?: string; low?: string; high?: string };
+  duration_seconds: number;
+  status: string;
+  created_at?: string;
+}
+
+export interface FeedResponseItem {
+  blipp_id: string;
+  creator_id: string;
+  title: string;
+  audio_url: string;
+  audio_variants: { standard?: string; low?: string; high?: string };
+  duration_seconds: number;
+}
+
+export interface FeedResponse {
+  items: FeedResponseItem[];
+  next_cursor: string | null;
+}
+
+export const blippApi = {
+  async getFeed(): Promise<FeedResponse> {
+    return request<FeedResponse>('/blipps/feed', { method: 'GET' });
+  },
+
+  async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
+    return request<BlippUploadResponse>('/blipps/upload', {
+      method: 'POST',
+      body: formData,
+      token,
+    });
   },
 };
