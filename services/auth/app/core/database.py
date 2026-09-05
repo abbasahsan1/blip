@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import asyncpg
 from typing import Optional
@@ -36,6 +37,16 @@ CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username
 
 async def get_db_pool() -> asyncpg.Pool:
     global _pool
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _pool is not None:
+        pool_loop = getattr(_pool, "_loop", None)
+        if pool_loop and (pool_loop.is_closed() or (current_loop and pool_loop != current_loop)):
+            _pool = None
+
     if _pool is None:
         await init_db()
     return _pool

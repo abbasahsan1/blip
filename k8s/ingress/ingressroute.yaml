@@ -108,6 +108,13 @@ spec:
         - name: auth-service
           port: 8000
 
+    # Readiness Probe
+    - match: PathPrefix(`/readyz`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8000
+
     # Frontend Expo Web Client
     - match: PathPrefix(`/`)
       kind: Rule

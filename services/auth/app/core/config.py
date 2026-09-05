@@ -45,12 +45,22 @@ class Settings(BaseSettings):
                 return 5432
         return 5432
 
-    # S3 / Cloudflare R2 Object Storage
-    S3_ENDPOINT_URL: str = ""
-    S3_BUCKET_NAME: str = ""
-    S3_ACCESS_KEY_ID: str = ""
-    S3_SECRET_ACCESS_KEY: str = ""
-    S3_REGION_NAME: str = "auto"
+    # NATS JetStream Event Bus
+    NATS_URL: str = "nats://nats.blipp.svc.cluster.local:4222"
+    NATS_STREAM_UPLOADS: str = "UPLOADS"
+    NATS_STREAM_ENGAGEMENT: str = "ENGAGEMENT"
+    NATS_SUBJECT_UPLOADS: str = "upload.>"
+    NATS_SUBJECT_ENGAGEMENT: str = "engagement.>"
+
+    # S3 / MinIO Object Storage
+    S3_ENDPOINT_URL: str = "http://minio.blipp.svc.cluster.local:9000"
+    S3_BUCKET_NAME: str = "blipp-raw-uploads"
+    S3_BUCKET_RAW_UPLOADS: str = "blipp-raw-uploads"
+    S3_BUCKET_AUDIO_VARIANTS: str = "blipp-audio-variants"
+    S3_ACCESS_KEY_ID: str = "minioadmin"
+    S3_SECRET_ACCESS_KEY: str = "minioadmin"
+    S3_REGION_NAME: str = "us-east-1"
+    S3_USE_SSL: bool = False
     S3_PUBLIC_URL: str = ""
     PUBLIC_STORAGE_BASE_URL: str = ""
 

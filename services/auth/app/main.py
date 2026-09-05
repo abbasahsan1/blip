@@ -26,7 +26,9 @@ from app.api.v1.blipps import router as blipps_router
 from app.api.v1.uploads import router as uploads_router
 from app.api.v1.events import router as events_router
 from app.api.v1.profiles import router as profiles_router
-from app.core.database import init_db, close_db
+from app.core.database import init_db, close_db, get_db_pool
+from app.core.storage import storage_service
+from app.core.events import event_bus
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
@@ -44,7 +46,15 @@ async def lifespan(app: FastAPI):
         await init_db()
     except Exception as e:
         logger.error(f"Database startup initialization note: {e}")
+    try:
+        await event_bus.connect()
+    except Exception as e:
+        logger.error(f"Event bus startup connection note: {e}")
     yield
+    try:
+        await event_bus.close()
+    except Exception as e:
+        logger.error(f"Event bus shutdown note: {e}")
     try:
         await close_db()
     except Exception as e:
@@ -255,3 +265,56 @@ async def health_check():
         version=settings.APP_VERSION,
         keycloak_status=keycloak_status
     )
+
+
+@app.get("/readyz", tags=["Health"])
+@app.get("/api/readyz", tags=["Health"])
+@app.get("/v1/readyz", tags=["Health"])
+async def readiness_check():
+    """
+    Readiness probe verifying PostgreSQL, MinIO S3 object storage, and NATS JetStream connectivity.
+    Returns HTTP 200 if all components are healthy, otherwise HTTP 503.
+    """
+    db_healthy = False
+    storage_healthy = False
+    event_bus_healthy = False
+
+    # 1. Check Database
+    try:
+        pool = await get_db_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                val = await conn.fetchval("SELECT 1")
+                if val == 1:
+                    db_healthy = True
+    except Exception as e:
+        logger.warning(f"Readiness check DB error: {e}")
+
+    # 2. Check MinIO / S3 Storage
+    try:
+        storage_healthy = await storage_service.check_health()
+    except Exception as e:
+        logger.warning(f"Readiness check storage error: {e}")
+
+    # 3. Check NATS JetStream Event Bus
+    try:
+        event_bus_healthy = await event_bus.check_health()
+    except Exception as e:
+        logger.warning(f"Readiness check event bus error: {e}")
+
+    all_ready = db_healthy and storage_healthy and event_bus_healthy
+    status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if all_ready else "not_ready",
+            "version": settings.APP_VERSION,
+            "components": {
+                "database": "healthy" if db_healthy else "unhealthy",
+                "storage": "healthy" if storage_healthy else "unhealthy",
+                "event_bus": "healthy" if event_bus_healthy else "unhealthy",
+            }
+        }
+    )
+

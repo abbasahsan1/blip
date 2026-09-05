@@ -1,8 +1,9 @@
 import os
 import uuid
 import logging
+import asyncio
 from pathlib import Path
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Optional, Union
 import boto3
 from botocore.client import Config
 from app.core.config import settings
@@ -12,37 +13,173 @@ logger = logging.getLogger("auth-service.storage")
 
 class StorageService:
     def __init__(self):
-        self.s3_client = None
-        self.bucket_name = settings.S3_BUCKET_NAME
+        self.bucket_name = settings.S3_BUCKET_NAME or settings.S3_BUCKET_RAW_UPLOADS or "blipp-raw-uploads"
+        self.raw_bucket = settings.S3_BUCKET_RAW_UPLOADS or "blipp-raw-uploads"
+        self.variants_bucket = settings.S3_BUCKET_AUDIO_VARIANTS or "blipp-audio-variants"
         self.use_s3 = False
+        self.s3_client = None
 
-        if settings.S3_BUCKET_NAME and settings.S3_ACCESS_KEY_ID and settings.S3_SECRET_ACCESS_KEY:
+        if settings.S3_ACCESS_KEY_ID and settings.S3_SECRET_ACCESS_KEY:
             try:
-                client_kwargs = {
-                    "aws_access_key_id": settings.S3_ACCESS_KEY_ID,
-                    "aws_secret_access_key": settings.S3_SECRET_ACCESS_KEY,
-                    "config": Config(signature_version="s3v4"),
-                }
-                if settings.S3_ENDPOINT_URL:
-                    client_kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
-                if settings.S3_REGION_NAME:
-                    client_kwargs["region_name"] = settings.S3_REGION_NAME
-
+                client_kwargs = self._get_client_kwargs()
                 self.s3_client = boto3.client("s3", **client_kwargs)
                 self.use_s3 = True
-                logger.info(f"S3/R2 storage adapter initialized with bucket '{self.bucket_name}'")
+                logger.info(f"S3/MinIO storage adapter initialized with default bucket '{self.bucket_name}'")
             except Exception as e:
                 logger.warning(f"Failed to initialize S3 client: {e}. Falling back to local storage.")
 
-        # Ensure local upload directory exists
+        # Ensure local upload directory exists as a fallback
         self.local_dir = Path(settings.STORAGE_LOCAL_DIR)
         try:
             self.local_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
-            # Fallback to /tmp/uploads if directory permission issues arise
             self.local_dir = Path("/tmp/blipp_uploads")
             self.local_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Local storage fallback initialized at '{self.local_dir}'")
+
+    def _get_client_kwargs(self) -> dict:
+        kwargs = {
+            "aws_access_key_id": settings.S3_ACCESS_KEY_ID,
+            "aws_secret_access_key": settings.S3_SECRET_ACCESS_KEY,
+            "config": Config(signature_version="s3v4"),
+        }
+        if settings.S3_ENDPOINT_URL:
+            kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
+        if settings.S3_REGION_NAME:
+            kwargs["region_name"] = settings.S3_REGION_NAME
+        if hasattr(settings, "S3_USE_SSL"):
+            kwargs["use_ssl"] = settings.S3_USE_SSL
+        return kwargs
+
+    async def upload_file(
+        self,
+        data: Union[bytes, BinaryIO],
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        """
+        Asynchronously upload bytes or a file stream to S3/MinIO.
+        """
+        return await asyncio.to_thread(
+            self._upload_file_sync, data, storage_key, bucket_name, content_type
+        )
+
+    def _upload_file_sync(
+        self,
+        data: Union[bytes, BinaryIO],
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        bucket = bucket_name or self.bucket_name
+        mime = content_type or self.normalize_mime_type(storage_key)
+
+        if self.use_s3 and self.s3_client:
+            try:
+                if isinstance(data, (bytes, bytearray)):
+                    self.s3_client.put_object(
+                        Bucket=bucket,
+                        Key=storage_key,
+                        Body=data,
+                        ContentType=mime,
+                    )
+                else:
+                    data.seek(0)
+                    self.s3_client.upload_fileobj(
+                        data,
+                        bucket,
+                        storage_key,
+                        ExtraArgs={"ContentType": mime},
+                    )
+                return self.get_playback_url(storage_key, bucket_name=bucket)
+            except Exception as e:
+                logger.error(f"Async S3 upload error: {e}. Falling back to local disk.")
+
+        # Local storage fallback
+        local_path = self.local_dir / storage_key.lstrip("/")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(local_path, "wb") as f:
+            if isinstance(data, (bytes, bytearray)):
+                f.write(data)
+            else:
+                data.seek(0)
+                while chunk := data.read(1024 * 1024):
+                    f.write(chunk)
+
+        base_url = settings.PUBLIC_BASE_URL.rstrip("/")
+        return f"{base_url}/v1/blipps/audio/{storage_key.lstrip('/')}"
+
+    async def download_file(
+        self,
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+    ) -> bytes:
+        """
+        Asynchronously download an object's bytes from S3/MinIO.
+        """
+        return await asyncio.to_thread(self._download_file_sync, storage_key, bucket_name)
+
+    def _download_file_sync(
+        self,
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+    ) -> bytes:
+        bucket = bucket_name or self.bucket_name
+        safe_key = self.extract_storage_key(storage_key)
+
+        if self.use_s3 and self.s3_client:
+            response = self.s3_client.get_object(Bucket=bucket, Key=safe_key)
+            return response["Body"].read()
+
+        local_path = self.get_local_path(safe_key)
+        if local_path and local_path.is_file():
+            with open(local_path, "rb") as f:
+                return f.read()
+
+        raise FileNotFoundError(f"Object '{safe_key}' not found in storage")
+
+    async def check_health(self) -> bool:
+        """
+        Health probe to verify S3/MinIO connectivity and bucket accessibility.
+        """
+        return await asyncio.to_thread(self._check_health_sync)
+
+    def _check_health_sync(self) -> bool:
+        if not self.use_s3 or not self.s3_client:
+            return self.local_dir.exists()
+        try:
+            resp = self.s3_client.list_buckets()
+            bucket_names = [b["Name"] for b in resp.get("Buckets", [])]
+            logger.debug(f"S3/MinIO health check detected buckets: {bucket_names}")
+            return True
+        except Exception as e:
+            logger.warning(f"S3/MinIO health check failed: {e}")
+            return False
+
+    def generate_presigned_put_url(
+        self,
+        storage_key: str,
+        content_type: str = "audio/mpeg",
+        bucket_name: Optional[str] = None,
+        expires_in: int = 3600,
+    ) -> str:
+        """
+        Generate a presigned PUT URL for direct client upload.
+        """
+        bucket = bucket_name or self.bucket_name
+        if self.use_s3 and self.s3_client:
+            return self.s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": storage_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=expires_in,
+            )
+        base_url = settings.PUBLIC_BASE_URL.rstrip("/")
+        return f"{base_url}/v1/uploads/direct/{storage_key}"
 
     def save_file(
         self,
@@ -50,30 +187,30 @@ class StorageService:
         original_filename: str,
         content_type: Optional[str] = None,
         creator_id: Optional[str] = None,
+        bucket_name: Optional[str] = None,
     ) -> str:
         """
-        Saves the file to S3/R2 or local filesystem and returns canonical public audio_url.
+        Synchronously saves the file to S3/MinIO or local filesystem and returns canonical audio_url.
         """
-        ext = os.path.splitext(original_filename)[1].lower()
-        if not ext:
-            ext = ".mp3"
+        ext = os.path.splitext(original_filename)[1].lower() or ".mp3"
+        bucket = bucket_name or self.bucket_name
 
         if creator_id:
             unique_key = f"{creator_id}/{uuid.uuid4()}{ext}"
         else:
             unique_key = f"{uuid.uuid4()}{ext}"
-        mime = content_type or "audio/mpeg"
+        mime = content_type or self.normalize_mime_type(original_filename)
 
-        if self.use_s3 and self.s3_client and self.bucket_name:
+        if self.use_s3 and self.s3_client:
             try:
                 file_obj.seek(0)
                 self.s3_client.upload_fileobj(
                     file_obj,
-                    self.bucket_name,
+                    bucket,
                     unique_key,
-                    ExtraArgs={"ContentType": mime}
+                    ExtraArgs={"ContentType": mime},
                 )
-                return self.get_playback_url(unique_key)
+                return self.get_playback_url(unique_key, bucket_name=bucket)
             except Exception as e:
                 logger.error(f"Failed to upload to S3: {e}. Falling back to local disk.")
 
@@ -89,9 +226,7 @@ class StorageService:
         return f"{base_url}/v1/blipps/audio/{unique_key}"
 
     def normalize_mime_type(self, filename: str, mime_type: Optional[str] = None) -> str:
-        """
-        Normalizes MIME types to prevent S3 signature mismatches across platforms.
-        """
+        """Normalizes MIME types to prevent S3 signature mismatches."""
         ext = os.path.splitext(filename)[1].lower()
         ext_map = {
             ".mp3": "audio/mpeg",
@@ -126,32 +261,40 @@ class StorageService:
         if key_or_url.startswith("http://") or key_or_url.startswith("https://"):
             from urllib.parse import urlparse
             path = urlparse(key_or_url).path.lstrip("/")
-            if self.bucket_name and path.startswith(f"{self.bucket_name}/"):
-                return path[len(self.bucket_name) + 1:]
+            for b in (self.bucket_name, self.raw_bucket, self.variants_bucket):
+                if b and path.startswith(f"{b}/"):
+                    return path[len(b) + 1:]
             return path
         return key_or_url.lstrip("/")
 
-    def get_playback_url(self, storage_key: str) -> str:
+    def get_playback_url(
+        self,
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+        expires_in: int = 86400,
+    ) -> str:
         """
-        Generates presigned download URLs if PUBLIC_STORAGE_BASE_URL is not set to a public CDN.
-        Prevents 403 Forbidden on private Backblaze B2/S3 buckets.
+        Generates presigned download URLs or public CDN URLs.
         """
         safe_key = self.extract_storage_key(storage_key)
         if not safe_key:
             return storage_key
 
+        bucket = bucket_name or self.bucket_name
         cdn_base = settings.PUBLIC_STORAGE_BASE_URL or settings.S3_PUBLIC_URL
         if cdn_base:
             return f"{cdn_base.rstrip('/')}/{safe_key}"
-        if self.use_s3 and self.s3_client and self.bucket_name:
+
+        if self.use_s3 and self.s3_client:
             try:
                 return self.s3_client.generate_presigned_url(
                     ClientMethod="get_object",
-                    Params={"Bucket": self.bucket_name, "Key": safe_key},
-                    ExpiresIn=86400,  # 24 hours
+                    Params={"Bucket": bucket, "Key": safe_key},
+                    ExpiresIn=expires_in,
                 )
             except Exception as e:
                 logger.warning(f"Failed to generate presigned playback URL: {e}")
+
         base_url = settings.PUBLIC_BASE_URL.rstrip("/")
         return f"{base_url}/v1/blipps/audio/{safe_key}"
 

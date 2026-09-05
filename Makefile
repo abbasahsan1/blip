@@ -96,6 +96,10 @@ deploy:
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "💾 Deploying PostgreSQL..."
 	@kubectl apply -f k8s/postgres/
+	@echo "📡 Deploying NATS JetStream..."
+	@kubectl apply -f k8s/nats/
+	@echo "🪣 Deploying MinIO Object Storage..."
+	@kubectl apply -f k8s/minio/
 	@echo "🔑 Deploying Keycloak..."
 	@kubectl apply -f k8s/keycloak/
 	@echo "⚡ Deploying FastAPI Auth Service via Helm chart..."
@@ -110,6 +114,10 @@ deploy:
 wait:
 	@echo "⏳ Waiting for PostgreSQL readiness..."
 	@kubectl rollout status deployment/postgres -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for NATS JetStream readiness..."
+	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for MinIO readiness..."
+	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Keycloak readiness (this can take ~30-60s on initial DB migration)..."
 	@kubectl rollout status deployment/keycloak -n $(NAMESPACE) --timeout=180s
 	@echo "⏳ Waiting for FastAPI Auth Service readiness..."
@@ -117,6 +125,17 @@ wait:
 	@echo "⏳ Waiting for Blipp Expo App readiness..."
 	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
 	@echo "✅ All microservices are healthy and ready!"
+
+deploy-nats:
+	@kubectl apply -f k8s/nats/
+	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
+
+deploy-minio:
+	@kubectl apply -f k8s/minio/
+	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=120s
+
+verify-infra:
+	@python3 services/auth/tests/verify_infra.py
 
 # Show cluster and pod status
 status:

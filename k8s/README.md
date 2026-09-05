@@ -19,4 +19,11 @@ All services operate within the isolated `blipp` namespace.
   - `deployment.yaml`: High-performance Nginx container serving compiled Expo web SPA.
   - `service.yaml`: ClusterIP service on port 80.
 - `ingress/`:
-  - `ingress.yaml`: Traefik Ingress routing all host port 8419 requests to respective cluster services.
+  - `ingressroute.yaml`: Traefik IngressRoute routing all host port 8419 requests to respective cluster services.
+- `nats/`:
+  - `deployment.yaml`: NATS 2.10 server with JetStream (`-js`) and persistent storage (`nats-pvc`).
+  - `service.yaml`: ClusterIP service exposing client port 4222 and monitoring port 8222.
+- `minio/`:
+  - `deployment.yaml`: Standalone S3-compatible MinIO object storage with persistent volume (`minio-pvc`) and automated bucket directory creation.
+  - `service.yaml`: ClusterIP service exposing S3 API on port 9000 and Web Console on port 9001.
+  - `setup-job.yaml`: Post-deployment bucket provisioner ensuring `blipp-raw-uploads` and `blipp-audio-variants` exist with download policies.
