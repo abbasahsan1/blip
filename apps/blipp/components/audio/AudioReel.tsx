@@ -10,6 +10,7 @@ import {
 import { PALETTE } from '@/lib/palette';
 import { telemetryApi } from '@/lib/api';
 import { getDeviceSignal, subscribeDeviceSignal } from '@/lib/deviceSignal';
+import { PlayMark, PauseMark, HeartMark } from '@/components/common/Icons';
 import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
 
 function formatDuration(secs: number): string {
@@ -39,8 +40,8 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   // Stream source resolved from audio_variants.standard with fallback to canonical audio_url
   const audioSource = item?.audio_variants?.standard || item?.audio_url || item?.audioUrl || '';
 
-  // Device signal state tracked via high-fidelity device signal engine (§5.8)
-  const [deviceSignal, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));
+  // Device signal state tracked via high-fidelity device signal engine
+  const [, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));
 
   useEffect(() => {
     const unsubscribe = subscribeDeviceSignal((nextSignal) => {
@@ -49,26 +50,9 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     return unsubscribe;
   }, []);
 
-  // Animated waveform bars
-  const bars = useRef(Array.from({ length: 40 }, () => new Animated.Value(0.15))).current;
+  // Animated waveform bars: responds strictly to playback state
+  const bars = useRef(Array.from({ length: 36 }, () => new Animated.Value(0.2))).current;
   const playAnim = useRef<Animated.CompositeAnimation | null>(null);
-
-  // Glow pulse for active card
-  const glowAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (isActive) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, { toValue: 1, duration: 1800, useNativeDriver: false }),
-          Animated.timing(glowAnim, { toValue: 0, duration: 1800, useNativeDriver: false }),
-        ]),
-      ).start();
-    } else {
-      glowAnim.stopAnimation();
-      glowAnim.setValue(0);
-    }
-  }, [isActive, glowAnim]);
 
   // HTML5 Audio ref for real web stream playback
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -141,20 +125,21 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     }
   };
 
+  // Waveform animation strictly bound to active playback (functional motion)
   useEffect(() => {
     if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
         Animated.loop(
           Animated.sequence([
-            Animated.delay(i * 40),
+            Animated.delay(i * 35),
             Animated.timing(bar, {
-              toValue: 0.2 + Math.random() * 0.8,
-              duration: 300 + Math.random() * 300,
+              toValue: 0.25 + Math.random() * 0.75,
+              duration: 250 + Math.random() * 250,
               useNativeDriver: false,
             }),
             Animated.timing(bar, {
-              toValue: 0.1 + Math.random() * 0.3,
-              duration: 300 + Math.random() * 200,
+              toValue: 0.12 + Math.random() * 0.25,
+              duration: 250 + Math.random() * 200,
               useNativeDriver: false,
             }),
           ]),
@@ -163,7 +148,6 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
 
-      // Progress animation & telemetry emitter
       let secondsElapsed = 0;
       const interval = setInterval(() => {
         secondsElapsed += 1;
@@ -172,11 +156,10 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
             setIsPlaying(false);
             return 0;
           }
-          const nextP = p + 1 / (item.duration || 1);
-          return nextP;
+          return p + 1 / (item.duration || 1);
         });
 
-        // Emit telemetry every 3 seconds of active playback with dynamic device signal
+        // Telemetry emitter during playback
         if (secondsElapsed % 3 === 0) {
           const activeSignal = getDeviceSignal(true);
           telemetryApi.recordPlayProgress({
@@ -195,38 +178,23 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     } else {
       playAnim.current?.stop();
       bars.forEach((b) => {
-        Animated.timing(b, { toValue: 0.15, duration: 200, useNativeDriver: false }).start();
+        Animated.timing(b, { toValue: 0.2, duration: 180, useNativeDriver: false }).start();
       });
     }
   }, [isPlaying, bars, item?.duration, item?.id]);
 
-  const [grad1 = PALETTE.accent, grad2 = '#8b5cf6'] = item?.coverGradient ?? [];
+  const currentSeconds = Math.floor(progress * (item?.duration || 0));
 
   return (
     <View style={[styles.root, { height }]}>
-      {/* Background gradient */}
-      <View style={[styles.bg, { backgroundColor: grad1 }]} />
-      <View style={[StyleSheet.absoluteFill, styles.bgOverlay]} />
+      {/* Studio console backdrop: solid, deadened acoustics */}
+      <View style={styles.consoleBackdrop} />
 
-      {/* Glow ring on active */}
-      {isActive && (
-        <Animated.View
-          style={[
-            styles.glowRing,
-            {
-              opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.0, 0.15] }),
-              backgroundColor: grad1,
-            },
-          ]}
-          pointerEvents="none"
-        />
-      )}
-
-      {/* Content */}
+      {/* Main sound deck content */}
       <View style={styles.content}>
-        {/* Header row: Source chip & Sponsored indicator */}
+        {/* Header telemetry row: Source chip & Sponsored indicator */}
         <View style={styles.headerRow}>
-          {item.sourceName && (
+          {item?.sourceName && (
             <View style={styles.sourceChip}>
               <Text style={styles.sourceText} numberOfLines={1}>
                 {item.sourceName}
@@ -234,92 +202,133 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
             </View>
           )}
 
-          {item.is_sponsored && (
+          {item?.is_sponsored && (
             <View style={styles.sponsoredBadge}>
-              <Text style={styles.sponsoredBadgeText}>SPONSORED</Text>
+              <Text style={styles.sponsoredBadgeText}>Sponsored Broadcast</Text>
             </View>
           )}
         </View>
 
-        {/* Title */}
-        <Text style={styles.title} numberOfLines={3}>{item.title}</Text>
+        {/* Blipp Title: Sora Display Typography */}
+        <Text style={styles.title} numberOfLines={3}>
+          {item?.title}
+        </Text>
 
-        {/* Author / Sponsor */}
+        {/* Creator Attribution */}
         <View style={styles.authorRow}>
-          <Text style={styles.author}>{item.author}</Text>
-          {item.sponsor?.tagline && (
+          <Text style={styles.author}>{item?.author}</Text>
+          {item?.sponsor?.tagline && (
             <Text style={styles.sponsorTagline} numberOfLines={1}>
               · {item.sponsor.tagline}
             </Text>
           )}
         </View>
 
-        {/* Waveform */}
-        <View style={styles.waveform}>
-          {bars.map((bar, i) => (
-            <Animated.View
-              key={i}
-              style={[
-                styles.waveBar,
-                {
-                  height: bar.interpolate({ inputRange: [0, 1], outputRange: ['5%', '100%'] }),
-                  backgroundColor: i % 2 === 0 ? grad1 : grad2,
-                  opacity: isPlaying
-                    ? bar.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] })
-                    : 0.3,
-                },
-              ]}
-            />
-          ))}
+        {/* Waveform Frequency Meters */}
+        <View style={styles.waveformContainer}>
+          <View style={styles.waveform}>
+            {bars.map((bar, i) => {
+              const barFraction = i / bars.length;
+              const hasPassed = barFraction <= progress;
+              return (
+                <Animated.View
+                  key={i}
+                  style={[
+                    styles.waveBar,
+                    {
+                      height: bar.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['8%', '100%'],
+                      }),
+                      backgroundColor: hasPassed ? PALETTE.accent : '#27272a',
+                      opacity: isPlaying ? 1 : 0.45,
+                    },
+                  ]}
+                />
+              );
+            })}
+          </View>
+
+          {/* Timecode Needle Track */}
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+          </View>
         </View>
 
-        {/* Progress bar */}
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-        </View>
-
-        {/* Controls row */}
+        {/* Tactile Controls Cluster */}
         <View style={styles.controls}>
           <Pressable
-            style={[styles.playBtn, { backgroundColor: grad1 }]}
+            style={({ pressed }) => [
+              styles.playBtn,
+              pressed && styles.playBtnPressed,
+            ]}
             onPress={togglePlay}
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+            accessibilityLabel={isPlaying ? 'Pause audio' : 'Play audio'}
           >
-            <Text style={styles.playBtnText}>{isPlaying ? '⏸' : '▶'}</Text>
+            {isPlaying ? (
+              <PauseMark size={20} color="#ffffff" />
+            ) : (
+              <PlayMark size={20} color="#ffffff" />
+            )}
           </Pressable>
 
           <View style={styles.meta}>
-            <Text style={styles.metaText}>{formatDuration(item.duration)}</Text>
-            <Text style={styles.metaDot}>·</Text>
-            <Text style={styles.metaText}>{formatListens(item.listenCount)} plays</Text>
+            <Text style={styles.timecodeActive}>
+              {formatDuration(currentSeconds)}
+            </Text>
+            <Text style={styles.metaDivider}>/</Text>
+            <Text style={styles.timecodeTotal}>
+              {formatDuration(item?.duration || 0)}
+            </Text>
+            <Text style={styles.metaDot}>•</Text>
+            <Text style={styles.metaPlays}>
+              {formatListens(item?.listenCount || 0)} plays
+            </Text>
           </View>
 
           <Pressable
-            style={styles.likeBtn}
+            style={({ pressed }) => [
+              styles.likeBtn,
+              pressed && styles.likeBtnPressed,
+            ]}
             onPress={onLike}
             accessibilityRole="button"
-            accessibilityLabel={item.isLiked ? 'Unlike' : 'Like'}
+            accessibilityLabel={item?.isLiked ? 'Unlike audio' : 'Like audio'}
           >
-            <Text style={styles.likeIcon}>{item.isLiked ? '♥' : '♡'}</Text>
-            <Text style={styles.likeCount}>{formatListens(item.likeCount)}</Text>
+            <HeartMark
+              size={20}
+              color={item?.isLiked ? PALETTE.accent : PALETTE.textSecondary}
+              filled={item?.isLiked}
+            />
+            <Text
+              style={[
+                styles.likeCount,
+                item?.isLiked && styles.likeCountActive,
+              ]}
+            >
+              {formatListens(item?.likeCount || 0)}
+            </Text>
           </Pressable>
         </View>
 
-        {/* Sponsored Call To Action Button */}
-        {item.is_sponsored && item.sponsor && (
+        {/* Sponsored Call To Action: Clean text trigger, no decorative arrows */}
+        {item?.is_sponsored && item?.sponsor && (
           <Pressable
-            style={styles.ctaButton}
+            style={({ pressed }) => [
+              styles.ctaButton,
+              pressed && styles.ctaButtonPressed,
+            ]}
             onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
             accessibilityRole="button"
             accessibilityLabel={item.sponsor.cta_text || 'Learn more'}
           >
-            <Text style={styles.ctaText}>{item.sponsor.cta_text || 'Learn More'} ↗</Text>
+            <Text style={styles.ctaText}>{item.sponsor.cta_text || 'Learn More'}</Text>
           </Pressable>
         )}
 
-        {/* Tags */}
-        {item.tags && item.tags.length > 0 && !item.is_sponsored && (
+        {/* Content Tags */}
+        {item?.tags && item.tags.length > 0 && !item.is_sponsored && (
           <View style={styles.tags}>
             {item.tags.map((tag) => (
               <View key={tag} style={styles.tag}>
@@ -338,25 +347,22 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: PALETTE.bg,
     overflow: 'hidden',
+    position: 'relative',
   },
-  bg: {
+  consoleBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.25,
-  },
-  bgOverlay: {
-    backgroundColor: 'rgba(9,9,11,0.75)',
-  },
-  glowRing: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 0,
+    backgroundColor: PALETTE.bg,
   },
   content: {
     flex: 1,
     justifyContent: 'flex-end',
     paddingHorizontal: 24,
-    paddingBottom: 80,
-    paddingTop: 100,
-    gap: 12,
+    paddingBottom: 84,
+    paddingTop: 80,
+    gap: 14,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
   },
   headerRow: {
     flexDirection: 'row',
@@ -365,37 +371,38 @@ const styles = StyleSheet.create({
   },
   sourceChip: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    backgroundColor: PALETTE.card,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: PALETTE.border,
   },
   sourceText: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
+    color: PALETTE.textSecondary,
+    letterSpacing: 0.2,
   },
   sponsoredBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.4)',
+    borderColor: 'rgba(245, 158, 11, 0.3)',
   },
   sponsoredBadgeText: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 11,
     color: '#fbbf24',
-    letterSpacing: 0.5,
   },
   title: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Sora_700Bold',
     fontSize: 24,
-    color: '#fff',
+    color: PALETTE.text,
     lineHeight: 32,
+    letterSpacing: -0.5,
   },
   authorRow: {
     flexDirection: 'row',
@@ -403,75 +410,93 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   author: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.65)',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: PALETTE.textSecondary,
   },
   sponsorTagline: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
-    color: 'rgba(255,255,255,0.45)',
+    color: PALETTE.textMuted,
     flex: 1,
   },
-  // Waveform
+  waveformContainer: {
+    gap: 6,
+    marginVertical: 4,
+  },
   waveform: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 52,
-    gap: 2.5,
-    marginVertical: 4,
+    height: 48,
+    gap: 3,
   },
   waveBar: {
     flex: 1,
     borderRadius: 2,
     minHeight: 4,
   },
-  // Progress
   progressTrack: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 2,
+    height: 2,
+    backgroundColor: PALETTE.border,
+    borderRadius: 1,
+    overflow: 'hidden',
   },
   progressFill: {
-    height: 3,
-    backgroundColor: '#fff',
-    borderRadius: 2,
+    height: '100%',
+    backgroundColor: PALETTE.accent,
+    borderRadius: 1,
   },
-  // Controls
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
   },
   playBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: PALETTE.surface,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
   },
-  playBtnText: {
-    fontSize: 18,
-    color: '#fff',
+  playBtnPressed: {
+    backgroundColor: PALETTE.cardHover,
+    borderColor: PALETTE.accent,
   },
   meta: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
-  metaText: {
-    fontFamily: 'Inter_400Regular',
+  timecodeActive: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 13,
-    color: 'rgba(255,255,255,0.6)',
+    color: PALETTE.text,
+    fontVariant: ['tabular-nums'],
+  },
+  metaDivider: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
+    color: PALETTE.textMuted,
+  },
+  timecodeTotal: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: PALETTE.textMuted,
+    fontVariant: ['tabular-nums'],
   },
   metaDot: {
-    color: 'rgba(255,255,255,0.3)',
+    color: PALETTE.border,
+    marginHorizontal: 2,
+  },
+  metaPlays: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
+    color: PALETTE.textMuted,
+    fontVariant: ['tabular-nums'],
   },
   likeBtn: {
     alignItems: 'center',
@@ -479,45 +504,54 @@ const styles = StyleSheet.create({
     minWidth: 44,
     minHeight: 44,
     justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 6,
   },
-  likeIcon: {
-    fontSize: 22,
-    color: '#fff',
+  likeBtnPressed: {
+    opacity: 0.7,
   },
   likeCount: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.6)',
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 11,
+    color: PALETTE.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  likeCountActive: {
+    color: PALETTE.accent,
   },
   ctaButton: {
     backgroundColor: PALETTE.accent,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
   },
-  ctaText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
-    color: '#fff',
+  ctaButtonPressed: {
+    opacity: 0.85,
   },
-  // Tags
+  ctaText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: '#ffffff',
+  },
   tags: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
   tag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.borderSubtle,
   },
   tagText: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 12,
-    color: 'rgba(255,255,255,0.5)',
+    color: PALETTE.textMuted,
   },
 });

@@ -1,34 +1,35 @@
 export const PALETTE = {
-  // Backgrounds
-  bg: '#09090b',
-  surface: '#121215',
-  card: '#18181b',
-  cardHover: '#1c1c20',
+  // Studio Console Backgrounds
+  bg: '#09090b', // Charcoal Vinyl base
+  surface: '#121215', // Deck Console housing
+  card: '#18181b', // Module chassis
+  cardHover: '#1f1f24',
 
-  // Borders
-  border: '#27272a',
+  // Mechanical Borders
+  border: '#27272a', // Track groove border
   borderSubtle: '#1c1c1f',
 
-  // Text
-  text: '#fafafa',
-  textSecondary: '#a1a1aa',
-  textMuted: '#71717a',
+  // Readout Typography
+  text: '#fafafa', // Signal High
+  textSecondary: '#a1a1aa', // Studio Readout
+  textMuted: '#71717a', // Acoustic Low
 
-  // Brand
+  // Frequency Brand Accent
   primary: '#ffffff',
-  accent: '#6366f1', // indigo — audio platform feel
+  accent: '#6366f1', // Resonance Violet: audio frequency needle
   accentDim: 'rgba(99, 102, 241, 0.15)',
 
-  // State
+  // Status Indicators
   success: '#10b981',
   error: '#ef4444',
   errorDim: 'rgba(239, 68, 68, 0.12)',
   warning: '#f59e0b',
 
-  // Overlays
-  overlay: 'rgba(0,0,0,0.7)',
-  glass: 'rgba(255,255,255,0.04)',
-  glassBorder: 'rgba(255,255,255,0.08)',
+  // Console Overlays (replacing liquid glass)
+  overlay: 'rgba(9, 9, 11, 0.85)',
+  glass: '#16161a', // Solid console inset, eliminating frosted glass
+  glassBorder: '#27272a',
 } as const;
 
 export type PaletteKey = keyof typeof PALETTE;
+

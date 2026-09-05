@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { StatusAlertMark } from '@/components/common/Icons';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -23,6 +23,7 @@ export default function SignInScreen() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState({ identifier: false, password: false });
+  const [focusedField, setFocusedField] = useState<'identifier' | 'password' | null>(null);
 
   const isSubmitting = useSessionStore((s) => s.isSubmitting);
   const error = useSessionStore((s) => s.error);
@@ -31,7 +32,6 @@ export default function SignInScreen() {
   const signInWithOAuth = useSessionStore((s) => s.signInWithOAuth);
   const clearError = useSessionStore((s) => s.clearError);
 
-  // Navigate away when authenticated
   useEffect(() => {
     if (status === 'authenticated') {
       router.replace('/(tabs)');
@@ -41,31 +41,6 @@ export default function SignInScreen() {
   useEffect(() => {
     clearError();
   }, [clearError]);
-
-  // Waveform animation
-  const bars = useRef(Array.from({ length: 24 }, () => new Animated.Value(0.3))).current;
-
-  useEffect(() => {
-    const animations = bars.map((bar, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 60),
-          Animated.timing(bar, {
-            toValue: 0.2 + Math.random() * 0.8,
-            duration: 600 + Math.random() * 400,
-            useNativeDriver: false,
-          }),
-          Animated.timing(bar, {
-            toValue: 0.1 + Math.random() * 0.3,
-            duration: 400 + Math.random() * 300,
-            useNativeDriver: false,
-          }),
-        ]),
-      ),
-    );
-    Animated.parallel(animations).start();
-    return () => animations.forEach((a) => a.stop());
-  }, [bars]);
 
   const identifierError =
     touched.identifier && identifier.trim().length === 0
@@ -95,63 +70,48 @@ export default function SignInScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 32 },
+          { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 },
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Logo / Brand */}
+        {/* Brand Console Identity */}
         <View style={styles.brand}>
           <Text style={styles.logo}>blipp</Text>
-          <Text style={styles.tagline}>Audio worth hearing</Text>
-
-          {/* Waveform motif */}
-          <View style={styles.waveform} aria-hidden>
-            {bars.map((bar, i) => (
-              <Animated.View
-                key={i}
-                style={[
-                  styles.waveBar,
-                  {
-                    height: bar.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['4%', '100%'],
-                    }),
-                    backgroundColor:
-                      i % 3 === 0 ? PALETTE.accent : i % 3 === 1 ? '#8b5cf6' : '#a78bfa',
-                    opacity: bar.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.3, 0.9],
-                    }),
-                  },
-                ]}
-              />
-            ))}
-          </View>
+          <Text style={styles.tagline}>Acoustic broadcast console</Text>
         </View>
 
-        {/* Card */}
+        {/* Chassis Form Card */}
         <View style={styles.card}>
-          <Text style={styles.heading}>Welcome to Blipp</Text>
-          <Text style={styles.subheading}>Sign in to your account</Text>
+          <Text style={styles.heading}>Operator Sign In</Text>
+          <Text style={styles.subheading}>Access your studio and stream telemetry</Text>
 
-          {/* Auth error banner */}
+          {/* Error Banner */}
           {authError && (
-            <View style={styles.errorBanner}>
+            <View style={styles.errorBanner} accessibilityRole="alert">
+              <StatusAlertMark size={16} color={PALETTE.error} />
               <Text style={styles.errorBannerText}>{authError}</Text>
             </View>
           )}
 
-          {/* Identifier (Username or Email) */}
+          {/* Identifier Input */}
           <View style={styles.field}>
             <Text style={styles.label}>Username or Email</Text>
             <TextInput
               id="sign-in-email"
-              style={[styles.input, identifierError ? styles.inputError : null]}
+              style={[
+                styles.input,
+                focusedField === 'identifier' && styles.inputFocused,
+                identifierError ? styles.inputError : null,
+              ]}
               value={identifier}
               onChangeText={setIdentifier}
-              onBlur={() => setTouched((t) => ({ ...t, identifier: true }))}
-              placeholder="testuser or testuser@blipp.local"
+              onFocus={() => setFocusedField('identifier')}
+              onBlur={() => {
+                setFocusedField(null);
+                setTouched((t) => ({ ...t, identifier: true }));
+              }}
+              placeholder="operator or operator@blipp.local"
               placeholderTextColor={PALETTE.textMuted}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -162,15 +122,23 @@ export default function SignInScreen() {
             {identifierError && <Text style={styles.fieldError}>{identifierError}</Text>}
           </View>
 
-          {/* Password */}
+          {/* Password Input */}
           <View style={styles.field}>
             <Text style={styles.label}>Password</Text>
             <TextInput
               id="sign-in-password"
-              style={[styles.input, passwordError ? styles.inputError : null]}
+              style={[
+                styles.input,
+                focusedField === 'password' && styles.inputFocused,
+                passwordError ? styles.inputError : null,
+              ]}
               value={password}
               onChangeText={setPassword}
-              onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+              onFocus={() => setFocusedField('password')}
+              onBlur={() => {
+                setFocusedField(null);
+                setTouched((t) => ({ ...t, password: true }));
+              }}
               placeholder="••••••••"
               placeholderTextColor={PALETTE.textMuted}
               secureTextEntry
@@ -181,7 +149,7 @@ export default function SignInScreen() {
             {passwordError && <Text style={styles.fieldError}>{passwordError}</Text>}
           </View>
 
-          {/* Sign In button */}
+          {/* Primary Action Button */}
           <Pressable
             id="sign-in-submit"
             style={({ pressed }) => [
@@ -195,18 +163,18 @@ export default function SignInScreen() {
             accessibilityLabel="Sign In"
           >
             <Text style={styles.buttonText}>
-              {isSubmitting ? 'Signing in…' : 'Sign In'}
+              {isSubmitting ? 'Authenticating...' : 'Sign In'}
             </Text>
           </Pressable>
 
           {/* Divider */}
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
+            <Text style={styles.dividerText}>or continue via provider</Text>
             <View style={styles.dividerLine} />
           </View>
 
-          {/* Federated OAuth Buttons */}
+          {/* Federated Provider Row */}
           <View style={styles.oauthRow}>
             <GoogleSignInButton />
             <Pressable
@@ -218,18 +186,25 @@ export default function SignInScreen() {
               accessibilityRole="button"
               accessibilityLabel="Continue with Apple"
             >
-              <Text style={styles.appleButtonText}> Apple</Text>
+              <Text style={styles.appleButtonText}>Continue with Apple</Text>
             </Pressable>
           </View>
 
-          {/* Footer */}
+          {/* Account Creation Link */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>New to Blipp?{' '}</Text>
+            <Text style={styles.footerText}>New operator? </Text>
             <Link href="/auth/sign-up" asChild>
               <Pressable accessibilityRole="link">
                 <Text style={styles.footerLink}>Create account</Text>
               </Pressable>
             </Link>
+          </View>
+
+          {/* Legal Compliance Footer (Required Surface) */}
+          <View style={styles.legalFooter}>
+            <Text style={styles.legalText}>
+              By proceeding, you agree to our Terms of Service and Privacy Policy.
+            </Text>
           </View>
         </View>
       </ScrollView>
@@ -245,179 +220,138 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    alignItems: 'stretch',
+    maxWidth: 460,
+    width: '100%',
+    alignSelf: 'center',
   },
-  // Brand
   brand: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   logo: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 48,
+    fontFamily: 'Sora_700Bold',
+    fontSize: 42,
     color: PALETTE.text,
-    letterSpacing: -2,
+    letterSpacing: -1.5,
   },
   tagline: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 14,
     color: PALETTE.textMuted,
     marginTop: 4,
-    letterSpacing: 0.5,
   },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 48,
-    gap: 3,
-    marginTop: 24,
-    width: '100%',
-    maxWidth: 320,
-  },
-  waveBar: {
-    flex: 1,
-    borderRadius: 2,
-    minHeight: 4,
-  },
-  // Card
   card: {
     backgroundColor: PALETTE.surface,
-    borderRadius: 20,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: PALETTE.glassBorder,
-    padding: 28,
+    borderColor: PALETTE.border,
+    padding: 24,
     gap: 16,
   },
   heading: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 22,
+    fontFamily: 'Sora_700Bold',
+    fontSize: 20,
     color: PALETTE.text,
+    letterSpacing: -0.3,
   },
   subheading: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 14,
     color: PALETTE.textSecondary,
     marginTop: -8,
   },
-  // Error banner
   errorBanner: {
     backgroundColor: PALETTE.errorDim,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: `${PALETTE.error}40`,
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   errorBannerText: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 13,
     color: PALETTE.error,
+    flex: 1,
   },
-  // Fields
   field: {
     gap: 6,
   },
-  otpHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  changeEmailText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 12,
-    color: PALETTE.accent,
-  },
   label: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 13,
     color: PALETTE.textSecondary,
   },
   input: {
-    backgroundColor: PALETTE.glass,
+    backgroundColor: PALETTE.card,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontFamily: 'Inter_400Regular',
-    fontSize: 15,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 14,
     color: PALETTE.text,
-    minHeight: 50,
+    minHeight: 46,
   },
-  otpInput: {
-    fontSize: 22,
-    letterSpacing: 8,
-    textAlign: 'center',
-    fontFamily: 'Inter_700Bold',
+  inputFocused: {
+    borderColor: PALETTE.accent,
   },
   inputError: {
     borderColor: PALETTE.error,
   },
   fieldError: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 12,
     color: PALETTE.error,
   },
-  // Button
   button: {
     backgroundColor: PALETTE.accent,
-    borderRadius: 12,
-    paddingVertical: 16,
+    borderRadius: 8,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 4,
-    minHeight: 52,
     justifyContent: 'center',
+    marginTop: 4,
+    minHeight: 48,
   },
   buttonPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
+    opacity: 0.88,
   },
   buttonDisabled: {
-    opacity: 0.4,
+    opacity: 0.5,
   },
   buttonText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 15,
-    color: '#fff',
-    letterSpacing: 0.3,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: '#ffffff',
   },
-  // OAuth
   oauthRow: {
     flexDirection: 'column',
     gap: 10,
   },
   appleButton: {
-    backgroundColor: '#18181b',
+    backgroundColor: PALETTE.card,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 8,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 48,
   },
   appleButtonText: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 14,
     color: PALETTE.text,
   },
-  resendRow: {
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  resendText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 13,
-    color: PALETTE.accent,
-  },
-  resendTextDisabled: {
-    color: PALETTE.textMuted,
-  },
-  // Divider
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    marginVertical: 4,
   },
   dividerLine: {
     flex: 1,
@@ -425,25 +359,37 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.border,
   },
   dividerText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
     color: PALETTE.textMuted,
   },
-  // Footer
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     marginTop: 4,
   },
   footerText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 14,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
     color: PALETTE.textMuted,
   },
   footerLink: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
     color: PALETTE.accent,
+  },
+  legalFooter: {
+    borderTopWidth: 1,
+    borderTopColor: PALETTE.borderSubtle,
+    paddingTop: 12,
+    marginTop: 4,
+  },
+  legalText: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 11,
+    color: PALETTE.textMuted,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });

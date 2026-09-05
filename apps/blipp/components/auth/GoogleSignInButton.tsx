@@ -5,12 +5,6 @@ interface Props {
   onPress?: () => void;
 }
 
-/**
- * Google Sign-In button.
- * Phase 1: disabled — Google OAuth credentials not yet configured.
- * Phase 1.5: when GOOGLE_CLIENT_ID/SECRET are provided, this will trigger
- *   Keycloak's /realms/blipp/broker/google/endpoint flow via in-app browser.
- */
 export function GoogleSignInButton({ onPress }: Props) {
   return (
     <View style={styles.wrap}>
@@ -20,16 +14,15 @@ export function GoogleSignInButton({ onPress }: Props) {
         onPress={onPress}
         disabled={!onPress}
         accessibilityRole="button"
-        accessibilityLabel="Continue with Google (coming soon)"
-        accessibilityHint="Google sign-in will be available soon"
+        accessibilityLabel="Continue with Google"
+        accessibilityHint="Google authentication is scheduled for upcoming release"
       >
-        {/* Google G */}
         <View style={styles.gLogo}>
           <Text style={styles.gText}>G</Text>
         </View>
         <Text style={styles.btnText}>Continue with Google</Text>
         <View style={styles.comingSoon}>
-          <Text style={styles.comingSoonText}>Soon</Text>
+          <Text style={styles.comingSoonText}>Scheduled</Text>
         </View>
       </Pressable>
     </View>
@@ -43,50 +36,50 @@ const styles = StyleSheet.create({
   btn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: PALETTE.glass,
+    backgroundColor: PALETTE.surface,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 8,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     gap: 12,
-    minHeight: 50,
-    opacity: 0.5,
+    minHeight: 48,
+    opacity: 0.6,
   },
   btnPressed: {
-    opacity: 0.35,
+    opacity: 0.4,
   },
   gLogo: {
     width: 22,
     height: 22,
-    borderRadius: 11,
-    backgroundColor: '#fff',
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
   },
   gText: {
-    fontSize: 14,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 13,
+    fontFamily: 'Sora_700Bold',
     color: '#4285F4',
-    lineHeight: 18,
+    lineHeight: 16,
   },
   btnText: {
     flex: 1,
-    fontFamily: 'Inter_500Medium',
-    fontSize: 15,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 14,
     color: PALETTE.textSecondary,
   },
   comingSoon: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    backgroundColor: PALETTE.accentDim,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: PALETTE.card,
     borderWidth: 1,
-    borderColor: PALETTE.accent,
+    borderColor: PALETTE.border,
   },
   comingSoonText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 10,
-    color: PALETTE.accent,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 11,
+    color: PALETTE.textMuted,
   },
 });

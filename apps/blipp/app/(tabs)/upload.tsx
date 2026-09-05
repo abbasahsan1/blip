@@ -14,6 +14,11 @@ import { PALETTE } from '@/lib/palette';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { uploadAudioClip, getAudioDuration } from '@/lib/upload/audioUpload';
+import {
+  AudioReelMark,
+  StatusAlertMark,
+  StatusCheckMark,
+} from '@/components/common/Icons';
 
 export default function UploadScreen() {
   const router = useRouter();
@@ -27,10 +32,10 @@ export default function UploadScreen() {
   const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Trigger web file input
   const handleSelectFileClick = () => {
     setErrorMessage(null);
     if (fileInputRef.current) {
@@ -52,7 +57,6 @@ export default function UploadScreen() {
       setTitle(baseName);
     }
 
-    // Determine audio duration
     try {
       const dur = await getAudioDuration(file);
       setDuration(dur);
@@ -73,7 +77,7 @@ export default function UploadScreen() {
     }
 
     if (!title.trim()) {
-      setErrorMessage('Please provide a title for your blipp.');
+      setErrorMessage('Please provide a title for your audio broadcast.');
       return;
     }
 
@@ -91,8 +95,7 @@ export default function UploadScreen() {
     setIsUploading(false);
 
     if (result.success) {
-      setSuccessMessage('Blipp uploaded successfully! Redirecting to feed...');
-      // Refresh feed store so the new blipp appears immediately
+      setSuccessMessage('Broadcast uploaded successfully. Directing to feed...');
       await loadFeed();
       setTimeout(() => {
         setTitle('');
@@ -100,9 +103,9 @@ export default function UploadScreen() {
         setDuration(0);
         setSuccessMessage(null);
         router.replace('/(tabs)');
-      }, 1000);
+      }, 900);
     } else {
-      setErrorMessage(result.error || 'Failed to upload blipp. Please try again.');
+      setErrorMessage(result.error || 'Failed to upload audio. Please check network connection.');
     }
   };
 
@@ -111,11 +114,10 @@ export default function UploadScreen() {
       style={styles.container}
       contentContainerStyle={[
         styles.contentContainer,
-        { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 },
+        { paddingTop: insets.top + 28, paddingBottom: insets.bottom + 48 },
       ]}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Hidden file input for web */}
       <input
         type="file"
         ref={fileInputRef}
@@ -124,81 +126,104 @@ export default function UploadScreen() {
         style={{ display: 'none' }}
       />
 
-      {/* Header */}
+      {/* Header: Studio Console Header */}
       <View style={styles.header}>
-        <View style={styles.iconCircle}>
-          <Text style={styles.iconText}>🎙</Text>
+        <View style={styles.headerIconChassis}>
+          <AudioReelMark size={28} color={PALETTE.accent} />
         </View>
-        <Text style={styles.heading}>Create a Blipp</Text>
+        <Text style={styles.heading}>Broadcast Audio</Text>
         <Text style={styles.subheading}>
-          Share an engaging audio clip with the community. Audio files are streamed directly.
+          Encode and publish uncompressed or compressed audio directly to the community stream.
         </Text>
       </View>
 
-      {/* Feedback Banners */}
+      {/* Structured Feedback Banners with bespoke status marks */}
       {errorMessage && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>⚠ {errorMessage}</Text>
+        <View style={styles.errorBanner} accessibilityRole="alert">
+          <StatusAlertMark size={16} color={PALETTE.error} />
+          <Text style={styles.errorText}>{errorMessage}</Text>
         </View>
       )}
 
       {successMessage && (
-        <View style={styles.successBanner}>
-          <Text style={styles.successText}>✓ {successMessage}</Text>
+        <View style={styles.successBanner} accessibilityRole="alert">
+          <StatusCheckMark size={16} color={PALETTE.success} />
+          <Text style={styles.successText}>{successMessage}</Text>
         </View>
       )}
 
-      {/* Form Card */}
+      {/* Console Intake Chassis Card */}
       <View style={styles.card}>
-        {/* File Picker Zone */}
+        {/* Audio Intake Dropzone */}
         <Pressable
-          style={[styles.dropzone, selectedFile ? styles.dropzoneActive : null]}
+          style={[
+            styles.dropzone,
+            selectedFile ? styles.dropzoneActive : null,
+          ]}
           onPress={handleSelectFileClick}
           disabled={isUploading}
+          accessibilityRole="button"
+          accessibilityLabel={selectedFile ? `Selected: ${selectedFile.name}` : 'Select audio file'}
         >
-          <Text style={styles.dropzoneIcon}>{selectedFile ? '🎵' : '📁'}</Text>
+          <View style={styles.dropzoneIconWrap}>
+            <AudioReelMark
+              size={36}
+              color={selectedFile ? PALETTE.accent : PALETTE.textMuted}
+            />
+          </View>
           <Text style={styles.dropzoneTitle}>
-            {selectedFile ? selectedFile.name : 'Select Audio File'}
+            {selectedFile ? selectedFile.name : 'Select Audio Track'}
           </Text>
           <Text style={styles.dropzoneSub}>
             {selectedFile
               ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB${
-                  duration > 0 ? ` · ${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}` : ''
+                  duration > 0
+                    ? ` • ${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`
+                    : ''
                 }`
-              : 'MP3, WAV, M4A, or AAC (Tap to browse)'}
+              : 'MP3, WAV, M4A, or AAC formats supported'}
           </Text>
           {selectedFile && (
-            <Text style={styles.changeFilePrompt}>Tap to choose a different file</Text>
+            <Text style={styles.changeFilePrompt}>Select a different file</Text>
           )}
         </Pressable>
 
-        {/* Title Input */}
+        {/* Title Input Field */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Title</Text>
+          <Text style={styles.label}>Broadcast Title</Text>
           <TextInput
-            style={styles.input}
-            placeholder="e.g. Why Focus Beats Motivation"
+            style={[styles.input, isFocused && styles.inputFocused]}
+            placeholder="e.g. Field Recordings from the North Ridge"
             placeholderTextColor={PALETTE.textMuted}
             value={title}
             onChangeText={setTitle}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
             editable={!isUploading}
             maxLength={100}
+            accessibilityLabel="Broadcast Title"
           />
         </View>
 
-        {/* Upload Action Button */}
+        {/* Action Button */}
         <Pressable
-          style={[styles.submitButton, isUploading ? styles.submitButtonDisabled : null]}
+          style={({ pressed }) => [
+            styles.submitButton,
+            pressed && styles.submitButtonPressed,
+            isUploading ? styles.submitButtonDisabled : null,
+          ]}
           onPress={handleSubmit}
           disabled={isUploading}
+          accessibilityRole="button"
+          accessibilityLabel="Publish Broadcast"
         >
           {isUploading ? (
             <View style={styles.buttonRow}>
-              <ActivityIndicator size="small" color="#000" />
-              <Text style={styles.submitButtonText}>Uploading Audio...</Text>
+              <ActivityIndicator size="small" color="#09090b" />
+              <Text style={styles.submitButtonText}>Encoding & Publishing...</Text>
             </View>
           ) : (
-            <Text style={styles.submitButtonText}>Publish Blipp</Text>
+            <Text style={styles.submitButtonText}>Publish Broadcast</Text>
           )}
         </Pressable>
       </View>
@@ -212,18 +237,18 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.bg,
   },
   contentContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     alignItems: 'center',
   },
   header: {
     alignItems: 'center',
     marginBottom: 24,
-    maxWidth: 480,
+    maxWidth: 460,
   },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  headerIconChassis: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
     backgroundColor: PALETTE.surface,
     borderWidth: 1,
     borderColor: PALETTE.border,
@@ -231,129 +256,145 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 16,
   },
-  iconText: {
-    fontSize: 28,
-  },
   heading: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Sora_700Bold',
     fontSize: 22,
     color: PALETTE.text,
     marginBottom: 8,
     textAlign: 'center',
+    letterSpacing: -0.5,
   },
   subheading: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 14,
     color: PALETTE.textSecondary,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 22,
+    maxWidth: 380,
   },
   errorBanner: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: PALETTE.errorDim,
     borderWidth: 1,
-    borderColor: PALETTE.error,
+    borderColor: `${PALETTE.error}40`,
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   errorText: {
     color: PALETTE.error,
     fontSize: 13,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_500Medium',
+    flex: 1,
   },
   successBanner: {
     width: '100%',
     maxWidth: 480,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
     borderWidth: 1,
-    borderColor: PALETTE.success,
+    borderColor: `${PALETTE.success}40`,
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   successText: {
     color: PALETTE.success,
     fontSize: 13,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_500Medium',
+    flex: 1,
   },
   card: {
     width: '100%',
     maxWidth: 480,
     backgroundColor: PALETTE.surface,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    padding: 20,
-    gap: 18,
+    padding: 24,
+    gap: 20,
   },
   dropzone: {
-    borderWidth: 2,
+    borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: PALETTE.border,
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: PALETTE.card,
   },
   dropzoneActive: {
     borderColor: PALETTE.accent,
-    backgroundColor: 'rgba(37, 99, 235, 0.05)',
+    borderStyle: 'solid',
+    backgroundColor: PALETTE.accentDim,
   },
-  dropzoneIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+  dropzoneIconWrap: {
+    marginBottom: 10,
   },
   dropzoneTitle: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 15,
     color: PALETTE.text,
     textAlign: 'center',
     marginBottom: 4,
   },
   dropzoneSub: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
     color: PALETTE.textMuted,
     textAlign: 'center',
   },
   changeFilePrompt: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
     color: PALETTE.accent,
-    marginTop: 8,
+    marginTop: 10,
   },
   inputGroup: {
     gap: 6,
   },
   label: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 13,
     color: PALETTE.textSecondary,
   },
   input: {
     backgroundColor: PALETTE.card,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: PALETTE.border,
     color: PALETTE.text,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
+    minHeight: 46,
+  },
+  inputFocused: {
+    borderColor: PALETTE.accent,
   },
   submitButton: {
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
+    minHeight: 48,
+  },
+  submitButtonPressed: {
+    opacity: 0.88,
   },
   submitButtonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -361,8 +402,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitButtonText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 15,
-    color: '#000000',
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: '#09090b',
   },
 });

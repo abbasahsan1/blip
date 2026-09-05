@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioReel } from '@/components/audio/AudioReel';
+import { AcousticDeckMark } from '@/components/common/Icons';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
@@ -19,7 +20,7 @@ import type { AudioPost, FeedSort } from '@/lib/types';
 
 const SORTS: { value: FeedSort; label: string }[] = [
   { value: 'most_listened', label: 'Trending' },
-  { value: 'newest', label: 'New' },
+  { value: 'newest', label: 'Newest' },
 ];
 
 export default function FeedScreen() {
@@ -70,11 +71,11 @@ export default function FeedScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Header */}
+      {/* Studio Header Bar */}
       <View
         style={[
           styles.header,
-          { paddingTop: insets.top + 8 },
+          { paddingTop: insets.top + 10 },
         ]}
       >
         <Text style={styles.headerLogo}>blipp</Text>
@@ -95,11 +96,20 @@ export default function FeedScreen() {
         </View>
       </View>
 
-      {/* Loading state */}
+      {/* Structured Acoustic Loading Skeletons */}
       {isLoading && posts.length === 0 ? (
         <View style={styles.loadingState}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={styles.skeleton} />
+          {[0, 1].map((i) => (
+            <View key={i} style={styles.skeletonDeck}>
+              <View style={styles.skeletonTag} />
+              <View style={styles.skeletonTitle} />
+              <View style={styles.skeletonAuthor} />
+              <View style={styles.skeletonWaveform} />
+              <View style={styles.skeletonControls}>
+                <View style={styles.skeletonBtn} />
+                <View style={styles.skeletonMeta} />
+              </View>
+            </View>
           ))}
         </View>
       ) : (
@@ -125,10 +135,12 @@ export default function FeedScreen() {
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🎙</Text>
-              <Text style={styles.emptyHeading}>No blipps yet</Text>
+              <View style={styles.emptyIconWrap}>
+                <AcousticDeckMark size={48} color={PALETTE.textMuted} />
+              </View>
+              <Text style={styles.emptyHeading}>No broadcasts available</Text>
               <Text style={styles.emptySub}>
-                Be the first to share an audio clip! Tap the Upload tab to post.
+                The frequency is quiet. Switch tabs to upload an audio track or pull to refresh.
               </Text>
             </View>
           }
@@ -152,8 +164,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingHorizontal: 24,
+    paddingBottom: 14,
     backgroundColor: PALETTE.bg,
     borderBottomWidth: 1,
     borderBottomColor: PALETTE.borderSubtle,
@@ -164,7 +176,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   headerLogo: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: 'Sora_700Bold',
     fontSize: 22,
     color: PALETTE.text,
     letterSpacing: -1,
@@ -174,13 +186,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    backgroundColor: 'transparent',
-    minHeight: 32,
+    backgroundColor: PALETTE.surface,
+    minHeight: 30,
     justifyContent: 'center',
   },
   chipActive: {
@@ -188,48 +200,92 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.accent,
   },
   chipText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 13,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
     color: PALETTE.textMuted,
   },
   chipTextActive: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     color: PALETTE.accent,
   },
   loadingState: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 120,
+    paddingHorizontal: 24,
+    paddingTop: 140,
+    gap: 32,
+    maxWidth: 640,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  skeletonDeck: {
+    gap: 12,
+    paddingVertical: 16,
+  },
+  skeletonTag: {
+    width: 90,
+    height: 18,
+    borderRadius: 4,
+    backgroundColor: PALETTE.surface,
+  },
+  skeletonTitle: {
+    width: '80%',
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: PALETTE.surface,
+  },
+  skeletonAuthor: {
+    width: 140,
+    height: 16,
+    borderRadius: 4,
+    backgroundColor: PALETTE.surface,
+    opacity: 0.7,
+  },
+  skeletonWaveform: {
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: PALETTE.surface,
+    opacity: 0.5,
+  },
+  skeletonControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 16,
   },
-  skeleton: {
-    height: 200,
-    borderRadius: 20,
-    backgroundColor: PALETTE.card,
-    opacity: 0.6,
+  skeletonBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: PALETTE.surface,
+  },
+  skeletonMeta: {
+    width: 120,
+    height: 16,
+    borderRadius: 4,
+    backgroundColor: PALETTE.surface,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
-    paddingTop: 180,
+    paddingTop: 200,
   },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 16,
+  emptyIconWrap: {
+    marginBottom: 20,
+    opacity: 0.6,
   },
   emptyHeading: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 20,
+    fontFamily: 'Sora_600SemiBold',
+    fontSize: 18,
     color: PALETTE.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySub: {
-    fontFamily: 'Inter_400Regular',
+    fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 14,
     color: PALETTE.textMuted,
     textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 320,
+    lineHeight: 22,
+    maxWidth: 340,
   },
 });

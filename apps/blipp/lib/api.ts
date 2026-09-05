@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
 
-// All API calls are relative — the SPA and API share the same origin
+// All API calls are relative: the SPA and API share the same origin
 // via Traefik routing: / → blipp-app, /v1 or /api → backend services
 const BASE = '/v1';
 
@@ -220,12 +220,12 @@ export const authApi = {
 
   async logout(token: string): Promise<void> {
     await request('/auth/logout', { method: 'POST', token }).catch(() => {
-      // Ignore logout errors — we'll clear local state regardless
+      // Ignore logout errors - we'll clear local state regardless
     });
   },
 };
 
-// ─── Telemetry API ────────────────────────────────────────────────────────────
+// --- Telemetry API ------------------------------------------------------------
 
 export const telemetryApi = {
   /**
@@ -239,7 +239,7 @@ export const telemetryApi = {
         body: payload,
       });
     } catch {
-      // Non-blocking telemetry — fail silently to never disrupt audio consumption
+      // Non-blocking telemetry: fail silently
     }
   },
 };

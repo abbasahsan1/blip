@@ -2,20 +2,24 @@ import { Tabs } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PALETTE } from '@/lib/palette';
+import {
+  FeedConsoleMark,
+  UploadConsoleMark,
+  ProfileConsoleMark,
+} from '@/components/common/Icons';
 
-// Simple SVG-free icon set using Unicode + text
 function TabIcon({
   label,
   focused,
-  icon,
+  children,
 }: {
   label: string;
   focused: boolean;
-  icon: string;
+  children: React.ReactNode;
 }) {
   return (
     <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-      <Text style={[styles.iconGlyph, focused && styles.iconGlyphActive]}>{icon}</Text>
+      {children}
       <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>{label}</Text>
     </View>
   );
@@ -44,27 +48,42 @@ export default function TabLayout() {
         name="index"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon="◉" label="Feed" focused={focused} />
+            <TabIcon label="Feed" focused={focused}>
+              <FeedConsoleMark
+                size={20}
+                color={focused ? PALETTE.accent : PALETTE.textMuted}
+              />
+            </TabIcon>
           ),
-          tabBarAccessibilityLabel: 'Feed tab',
+          tabBarAccessibilityLabel: 'Feed console tab',
         }}
       />
       <Tabs.Screen
         name="upload"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon="+" label="Upload" focused={focused} />
+            <TabIcon label="Upload" focused={focused}>
+              <UploadConsoleMark
+                size={20}
+                color={focused ? PALETTE.accent : PALETTE.textMuted}
+              />
+            </TabIcon>
           ),
-          tabBarAccessibilityLabel: 'Upload tab',
+          tabBarAccessibilityLabel: 'Upload audio tab',
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon icon="◎" label="Profile" focused={focused} />
+            <TabIcon label="Profile" focused={focused}>
+              <ProfileConsoleMark
+                size={20}
+                color={focused ? PALETTE.accent : PALETTE.textMuted}
+              />
+            </TabIcon>
           ),
-          tabBarAccessibilityLabel: 'Profile tab',
+          tabBarAccessibilityLabel: 'Profile console tab',
         }}
       />
     </Tabs>
@@ -74,28 +93,21 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   iconWrap: {
     alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 12,
+    gap: 4,
+    paddingHorizontal: 16,
     paddingVertical: 4,
-    borderRadius: 10,
+    borderRadius: 8,
   },
   iconWrapActive: {
     backgroundColor: PALETTE.accentDim,
   },
-  iconGlyph: {
-    fontSize: 20,
-    color: PALETTE.textMuted,
-    lineHeight: 24,
-  },
-  iconGlyphActive: {
-    color: PALETTE.accent,
-  },
   iconLabel: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 10,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 11,
     color: PALETTE.textMuted,
   },
   iconLabelActive: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     color: PALETTE.accent,
   },
 });
