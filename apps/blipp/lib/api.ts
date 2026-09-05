@@ -332,12 +332,44 @@ export interface FeedResponseItem {
   audio_url: string;
   audio_variants: { standard?: string; low?: string; high?: string };
   duration_seconds: number;
+  author?: string;
+  username?: string;
+  display_name?: string;
+  avatar_url?: string;
 }
 
 export interface FeedResponse {
   items: FeedResponseItem[];
   next_cursor: string | null;
 }
+
+export interface UserProfile {
+  user_id: string;
+  username: string;
+  display_name: string;
+  bio?: string | null;
+  avatar_url?: string | null;
+  created_at?: string | null;
+}
+
+export const profileApi = {
+  async getMyProfile(): Promise<UserProfile> {
+    const res = await api.get<UserProfile>('/v1/profiles/me');
+    return res.data;
+  },
+
+  async updateMyProfile(update: {
+    display_name?: string;
+    bio?: string;
+    avatar_url?: string;
+  }): Promise<UserProfile> {
+    const res = await requestRaw<UserProfile>('/v1/profiles/me', {
+      method: 'PATCH',
+      body: update,
+    });
+    return res.data;
+  },
+};
 
 export const blippApi = {
   async getFeed(): Promise<FeedResponse> {

@@ -46,11 +46,18 @@ class FeedItemResponse(BaseModel):
     audio_url: str
     audio_variants: dict = Field(default_factory=dict)
     duration_seconds: int = 0
+    author: Optional[str] = None
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
 
 
 class FeedResponse(BaseModel):
     items: List[FeedItemResponse] = Field(default_factory=list)
     next_cursor: Optional[str] = None
+
+
+TokenData = AuthenticatedUser
 
 
 class UploadPresignRequest(BaseModel):

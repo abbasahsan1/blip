@@ -25,6 +25,7 @@ from app.api.v1.protected import router as protected_router
 from app.api.v1.blipps import router as blipps_router
 from app.api.v1.uploads import router as uploads_router
 from app.api.v1.events import router as events_router
+from app.api.v1.profiles import router as profiles_router
 from app.core.database import init_db, close_db
 from app.models.schemas import HealthResponse
 
@@ -180,7 +181,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
     if exc.status_code == 401:
         code = CODE_UNAUTHORIZED
-        message = "Invalid or expired token"
+        message = str(exc.detail) if exc.detail else "Invalid or expired access token"
 
     headers = getattr(exc, "headers", None) or {}
     headers["X-Request-ID"] = req_id
@@ -227,11 +228,13 @@ app.include_router(protected_router, prefix="/api")
 app.include_router(blipps_router, prefix="/api")
 app.include_router(uploads_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
+app.include_router(profiles_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
 app.include_router(protected_router, prefix="/v1")
 app.include_router(blipps_router, prefix="/v1")
 app.include_router(uploads_router, prefix="/v1")
 app.include_router(events_router, prefix="/v1")
+app.include_router(profiles_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

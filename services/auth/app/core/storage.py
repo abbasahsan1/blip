@@ -48,7 +48,8 @@ class StorageService:
         self,
         file_obj: BinaryIO,
         original_filename: str,
-        content_type: Optional[str] = None
+        content_type: Optional[str] = None,
+        creator_id: Optional[str] = None,
     ) -> str:
         """
         Saves the file to S3/R2 or local filesystem and returns canonical public audio_url.
@@ -57,7 +58,10 @@ class StorageService:
         if not ext:
             ext = ".mp3"
 
-        unique_key = f"{uuid.uuid4()}{ext}"
+        if creator_id:
+            unique_key = f"{creator_id}/{uuid.uuid4()}{ext}"
+        else:
+            unique_key = f"{uuid.uuid4()}{ext}"
         mime = content_type or "audio/mpeg"
 
         if self.use_s3 and self.s3_client and self.bucket_name:
@@ -69,19 +73,14 @@ class StorageService:
                     unique_key,
                     ExtraArgs={"ContentType": mime}
                 )
-                if settings.S3_PUBLIC_URL:
-                    base = settings.S3_PUBLIC_URL.rstrip("/")
-                    return f"{base}/{unique_key}"
-                if settings.S3_ENDPOINT_URL:
-                    base = settings.S3_ENDPOINT_URL.rstrip("/")
-                    return f"{base}/{self.bucket_name}/{unique_key}"
-                return f"https://{self.bucket_name}.s3.amazonaws.com/{unique_key}"
+                return self.get_playback_url(unique_key)
             except Exception as e:
                 logger.error(f"Failed to upload to S3: {e}. Falling back to local disk.")
 
         # Local storage fallback
         file_obj.seek(0)
         local_path = self.local_dir / unique_key
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         with open(local_path, "wb") as f:
             while chunk := file_obj.read(1024 * 1024):
                 f.write(chunk)
@@ -118,34 +117,67 @@ class StorageService:
                 return clean
         return "audio/mpeg"
 
-    def get_public_audio_url(self, storage_key: str) -> str:
+    def extract_storage_key(self, key_or_url: str) -> str:
+        """Extract relative storage key from a full URL or storage path."""
+        if not key_or_url:
+            return ""
+        if "/v1/blipps/audio/" in key_or_url:
+            return key_or_url.split("/v1/blipps/audio/", 1)[1]
+        if key_or_url.startswith("http://") or key_or_url.startswith("https://"):
+            from urllib.parse import urlparse
+            path = urlparse(key_or_url).path.lstrip("/")
+            if self.bucket_name and path.startswith(f"{self.bucket_name}/"):
+                return path[len(self.bucket_name) + 1:]
+            return path
+        return key_or_url.lstrip("/")
+
+    def get_playback_url(self, storage_key: str) -> str:
         """
-        Generates public playable CDN URL or presigned GET URL for private buckets.
+        Generates presigned download URLs if PUBLIC_STORAGE_BASE_URL is not set to a public CDN.
+        Prevents 403 Forbidden on private Backblaze B2/S3 buckets.
         """
-        safe_key = os.path.basename(storage_key)
-        if self.use_s3 and settings.S3_PUBLIC_URL:
-            base = settings.S3_PUBLIC_URL.rstrip("/")
-            return f"{base}/{safe_key}"
-        elif self.use_s3 and self.s3_client and self.bucket_name:
+        safe_key = self.extract_storage_key(storage_key)
+        if not safe_key:
+            return storage_key
+
+        cdn_base = settings.PUBLIC_STORAGE_BASE_URL or settings.S3_PUBLIC_URL
+        if cdn_base:
+            return f"{cdn_base.rstrip('/')}/{safe_key}"
+        if self.use_s3 and self.s3_client and self.bucket_name:
             try:
                 return self.s3_client.generate_presigned_url(
-                    "get_object",
+                    ClientMethod="get_object",
                     Params={"Bucket": self.bucket_name, "Key": safe_key},
-                    ExpiresIn=604800,  # 7 days
+                    ExpiresIn=86400,  # 24 hours
                 )
             except Exception as e:
-                logger.warning(f"Could not generate presigned GET url: {e}")
+                logger.warning(f"Failed to generate presigned playback URL: {e}")
         base_url = settings.PUBLIC_BASE_URL.rstrip("/")
         return f"{base_url}/v1/blipps/audio/{safe_key}"
 
+    def get_public_audio_url(self, storage_key: str) -> str:
+        return self.get_playback_url(storage_key)
+
     def get_local_path(self, filename: str) -> Optional[Path]:
         """Resolve safe local path for static streaming."""
-        # Sanitize filename
+        clean_name = filename.lstrip("/")
+        try:
+            candidate = (self.local_dir / clean_name).resolve()
+            if candidate.is_file() and str(candidate).startswith(str(self.local_dir.resolve())):
+                return candidate
+        except Exception:
+            pass
         safe_name = os.path.basename(filename)
-        candidate = self.local_dir / safe_name
-        if candidate.exists() and candidate.is_file():
-            return candidate
+        candidate_flat = self.local_dir / safe_name
+        if candidate_flat.exists() and candidate_flat.is_file():
+            return candidate_flat
         return None
 
 
 storage_service = StorageService()
+
+
+def get_playback_url(storage_key: str) -> str:
+    """Convenience module-level accessor for get_playback_url."""
+    return storage_service.get_playback_url(storage_key)
+

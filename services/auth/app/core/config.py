@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str = ""
     S3_REGION_NAME: str = "auto"
     S3_PUBLIC_URL: str = ""
+    PUBLIC_STORAGE_BASE_URL: str = ""
 
     # Local storage fallback directory & public URL
     STORAGE_LOCAL_DIR: str = "/app/data/uploads"

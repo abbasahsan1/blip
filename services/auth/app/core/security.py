@@ -61,7 +61,7 @@ async def get_jwks(force_refresh: bool = False) -> Dict[str, Any]:
     raise AppException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         code="UNAUTHORIZED",
-        message="Invalid or expired token",
+        message="Invalid or expired access token",
         headers={"WWW-Authenticate": "Bearer"}
     )
 
@@ -74,7 +74,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -83,7 +83,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -101,7 +101,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -124,7 +124,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
             raise AppException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 code="UNAUTHORIZED",
-                message="Invalid or expired token",
+                message="Invalid or expired access token",
                 headers={"WWW-Authenticate": "Bearer"}
             )
             
@@ -133,7 +133,7 @@ async def verify_token(token: str) -> Dict[str, Any]:
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -152,7 +152,7 @@ async def get_current_user(
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -164,7 +164,7 @@ async def get_current_user(
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
@@ -174,7 +174,7 @@ async def get_current_user(
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
-            message="Invalid or expired token",
+            message="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"}
         )
 

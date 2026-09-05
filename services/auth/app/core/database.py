@@ -20,6 +20,17 @@ CREATE TABLE IF NOT EXISTS blipps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_blipps_status_created ON blipps (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS users_profile (
+    user_id UUID PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    bio TEXT,
+    avatar_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username);
 """
 
 

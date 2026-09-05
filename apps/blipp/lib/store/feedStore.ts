@@ -55,7 +55,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         return {
           id: item.blipp_id || item.id,
           title: item.title,
-          author: item.author || 'Creator',
+          author: item.display_name || item.author || (item.username ? `@${item.username}` : 'Creator'),
           authorId: item.creator_id || item.authorId || '',
           duration: item.duration_seconds || item.duration || 30,
           audio_url: item.audio_url || standardUrl,

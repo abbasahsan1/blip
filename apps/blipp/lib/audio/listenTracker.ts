@@ -67,7 +67,11 @@ export async function recordPlayProgress(params: {
   session_id?: string;
 }): Promise<void> {
   const sessionUser = useSessionStore.getState().user;
-  const userId = params.user_id || sessionUser?.id || '00000000-0000-0000-0000-000000000000';
+  const userId = params.user_id || sessionUser?.id;
+  if (!userId) {
+    // Strictly require authenticated user; do not emit telemetry with dummy fallback UUIDs
+    return;
+  }
   const sessionId = params.session_id || getPlaybackSessionId();
   const deviceSignal = getActiveDeviceSignal(true);
 
