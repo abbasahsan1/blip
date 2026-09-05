@@ -89,6 +89,55 @@ class StorageService:
         base_url = settings.PUBLIC_BASE_URL.rstrip("/")
         return f"{base_url}/v1/blipps/audio/{unique_key}"
 
+    def normalize_mime_type(self, filename: str, mime_type: Optional[str] = None) -> str:
+        """
+        Normalizes MIME types to prevent S3 signature mismatches across platforms.
+        """
+        ext = os.path.splitext(filename)[1].lower()
+        ext_map = {
+            ".mp3": "audio/mpeg",
+            ".m4a": "audio/mp4",
+            ".mp4": "audio/mp4",
+            ".aac": "audio/aac",
+            ".wav": "audio/wav",
+            ".ogg": "audio/ogg",
+            ".flac": "audio/flac",
+            ".webm": "audio/webm",
+        }
+        if ext in ext_map:
+            return ext_map[ext]
+        if mime_type:
+            clean = mime_type.lower().split(";")[0].strip()
+            if clean in ("audio/mp3", "audio/mpeg3", "audio/x-mpeg-3"):
+                return "audio/mpeg"
+            if clean in ("audio/x-m4a", "audio/m4a"):
+                return "audio/mp4"
+            if clean in ("audio/x-wav", "audio/vnd.wave"):
+                return "audio/wav"
+            if clean.startswith("audio/"):
+                return clean
+        return "audio/mpeg"
+
+    def get_public_audio_url(self, storage_key: str) -> str:
+        """
+        Generates public playable CDN URL or presigned GET URL for private buckets.
+        """
+        safe_key = os.path.basename(storage_key)
+        if self.use_s3 and settings.S3_PUBLIC_URL:
+            base = settings.S3_PUBLIC_URL.rstrip("/")
+            return f"{base}/{safe_key}"
+        elif self.use_s3 and self.s3_client and self.bucket_name:
+            try:
+                return self.s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": self.bucket_name, "Key": safe_key},
+                    ExpiresIn=604800,  # 7 days
+                )
+            except Exception as e:
+                logger.warning(f"Could not generate presigned GET url: {e}")
+        base_url = settings.PUBLIC_BASE_URL.rstrip("/")
+        return f"{base_url}/v1/blipps/audio/{safe_key}"
+
     def get_local_path(self, filename: str) -> Optional[Path]:
         """Resolve safe local path for static streaming."""
         # Sanitize filename

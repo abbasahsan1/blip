@@ -63,6 +63,7 @@ class UploadPresignResponse(BaseModel):
     upload_id: str
     storage_key: str
     presigned_url: str
+    content_type: str
 
 
 class UploadCompleteRequest(BaseModel):

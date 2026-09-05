@@ -42,14 +42,14 @@ async def presign_upload(
     upload_id = str(uuid.uuid4())
     ext = os.path.splitext(req.file_name)[1].lower() or ".mp3"
     storage_key = f"{upload_id}{ext}"
-    mime_type = req.mime_type or "audio/mpeg"
+    content_type = storage_service.normalize_mime_type(req.file_name, req.mime_type)
 
     # Store staging metadata
     _pending_uploads[upload_id] = {
         "storage_key": storage_key,
         "creator_id": current_user.user_id,
         "file_name": req.file_name,
-        "mime_type": mime_type,
+        "mime_type": content_type,
         "size_bytes": req.size_bytes,
     }
 
@@ -60,7 +60,7 @@ async def presign_upload(
                 Params={
                     "Bucket": storage_service.bucket_name,
                     "Key": storage_key,
-                    "ContentType": mime_type,
+                    "ContentType": content_type,
                 },
                 ExpiresIn=3600,
             )
@@ -68,6 +68,7 @@ async def presign_upload(
                 upload_id=upload_id,
                 storage_key=storage_key,
                 presigned_url=presigned_url,
+                content_type=content_type,
             )
         except Exception as e:
             logger.warning(f"Failed to generate S3 presigned URL: {e}. Falling back to direct cluster upload.")
@@ -80,6 +81,7 @@ async def presign_upload(
         upload_id=upload_id,
         storage_key=storage_key,
         presigned_url=presigned_url,
+        content_type=content_type,
     )
 
 
@@ -117,16 +119,7 @@ async def complete_upload(
     upload_info = _pending_uploads.get(upload_id)
     storage_key = upload_info.get("storage_key") if upload_info else f"{upload_id}.mp3"
 
-    if storage_service.use_s3 and settings.S3_PUBLIC_URL:
-        base = settings.S3_PUBLIC_URL.rstrip("/")
-        audio_url = f"{base}/{storage_key}"
-    elif storage_service.use_s3 and settings.S3_ENDPOINT_URL:
-        base = settings.S3_ENDPOINT_URL.rstrip("/")
-        audio_url = f"{base}/{storage_service.bucket_name}/{storage_key}"
-    else:
-        base_url = settings.PUBLIC_BASE_URL.rstrip("/")
-        audio_url = f"{base_url}/v1/blipps/audio/{storage_key}"
-
+    audio_url = storage_service.get_public_audio_url(storage_key)
     audio_variants = {"standard": audio_url}
     new_blipp_id = uuid.uuid4()
     pool = await get_db_pool()
@@ -246,14 +239,3 @@ async def get_feed(cursor: Optional[str] = None, limit: int = 10):
 
     return FeedResponse(items=items, next_cursor=next_cursor)
 
-
-@router.post("/events", status_code=status.HTTP_200_OK)
-async def record_event(event: TelemetryEvent):
-    """
-    Ingest playback telemetry events.
-    """
-    logger.info(
-        f"Telemetry event: type={event.event_type} blipp_id={event.blipp_id} "
-        f"pos={event.position_seconds}/{event.duration_seconds}s signal={event.device_signal}"
-    )
-    return {"status": "ok"}

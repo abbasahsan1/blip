@@ -24,6 +24,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.protected import router as protected_router
 from app.api.v1.blipps import router as blipps_router
 from app.api.v1.uploads import router as uploads_router
+from app.api.v1.events import router as events_router
 from app.core.database import init_db, close_db
 from app.models.schemas import HealthResponse
 
@@ -225,10 +226,12 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(protected_router, prefix="/api")
 app.include_router(blipps_router, prefix="/api")
 app.include_router(uploads_router, prefix="/api")
+app.include_router(events_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
 app.include_router(protected_router, prefix="/v1")
 app.include_router(blipps_router, prefix="/v1")
 app.include_router(uploads_router, prefix="/v1")
+app.include_router(events_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

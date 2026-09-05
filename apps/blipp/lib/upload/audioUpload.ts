@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import { api, ApiError } from '../api';
 import { useUploadStore } from '../store/uploadStore';
 
@@ -7,8 +9,12 @@ export interface AudioDraft {
   durationSeconds: number;
 }
 
+export type UploadableFile =
+  | File
+  | { file?: File; uri: string; name?: string; size?: number; type?: string; fileName?: string };
+
 export interface UploadAudioParams {
-  file: File;
+  file: UploadableFile;
   draft: AudioDraft;
 }
 
@@ -43,9 +49,11 @@ export async function getAudioDuration(file: File | Blob): Promise<number> {
 }
 
 /**
- * Multi-stage real direct upload pipeline:
- * 1. Presign: Request upload ticket and direct S3/B2 PUT URL.
- * 2. Direct Binary Upload: Stream raw bytes via XMLHttpRequest, binding real upload progress.
+ * Cross-platform multi-stage real direct upload pipeline (Expo Web & Native):
+ * 1. Presign: Request upload ticket, storage key, presigned PUT URL, and normalized content_type.
+ * 2. Direct Binary Upload:
+ *    - Web: XMLHttpRequest streaming binary Blob with upload.onprogress
+ *    - Native: expo-file-system createUploadTask with BINARY_CONTENT
  * 3. Complete Ingest: Finalize ingest record and publish blipp in PostgreSQL.
  */
 export async function uploadAudio(params: UploadAudioParams): Promise<any> {
@@ -56,50 +64,80 @@ export async function uploadAudio(params: UploadAudioParams): Promise<any> {
   uploadStore.setIsUploading(true);
   uploadStore.setProgress(0);
 
+  const anyFile = file as any;
+  const fileName = anyFile?.name || anyFile?.fileName || anyFile?.file?.name || 'audio.mp3';
+  const fileSize = anyFile?.size || anyFile?.file?.size || 0;
+  const mimeType = anyFile?.type || anyFile?.file?.type || 'audio/mpeg';
+  const fileUri = anyFile?.uri || '';
+  const webBlob = anyFile?.file || (file instanceof Blob ? file : null);
+
   try {
-    // Stage 1: Presign
+    // Stage 1: Presign & retrieve exact content_type to prevent S3 signature mismatch
     const { data } = await api.post<{
       upload_id: string;
       storage_key: string;
       presigned_url: string;
+      content_type: string;
     }>('/v1/uploads/presign', {
-      file_name: file.name,
-      mime_type: file.type || 'audio/mpeg',
-      size_bytes: file.size,
+      file_name: fileName,
+      mime_type: mimeType,
+      size_bytes: fileSize,
     });
 
-    // Stage 2: Direct Binary Upload with real byte progress
-    await new Promise<void>((resolve, reject) => {
+    const presigned_url = data.presigned_url;
+    const content_type = data.content_type || 'audio/mpeg';
+
+    // Stage 2: Cross-platform Direct Binary Upload
+    if (Platform.OS === 'web') {
+      // Standard XHR with Blob for web progress tracking
       const xhr = new XMLHttpRequest();
-      xhr.open('PUT', data.presigned_url, true);
-      xhr.setRequestHeader('Content-Type', file.type || 'audio/mpeg');
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && event.total > 0) {
-          const percentage = Math.round((event.loaded / event.total) * 100);
-          useUploadStore.getState().setProgress(percentage);
+      xhr.open('PUT', presigned_url);
+      xhr.setRequestHeader('Content-Type', content_type);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          useUploadStore.getState().setProgress(Math.round((e.loaded / e.total) * 100));
         }
       };
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          useUploadStore.getState().setProgress(100);
-          resolve();
-        } else {
-          reject(new Error(`Binary storage upload failed with status ${xhr.status}`));
+      await new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            useUploadStore.getState().setProgress(100);
+            resolve(xhr.response);
+          } else {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Upload network error'));
+        xhr.onabort = () => reject(new Error('Upload aborted'));
+        xhr.send(webBlob || anyFile);
+      });
+    } else {
+      // Native Expo FileSystem upload
+      const uploadTask = FileSystem.createUploadTask(
+        presigned_url,
+        fileUri,
+        {
+          httpMethod: 'PUT',
+          headers: { 'Content-Type': content_type },
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        },
+        (progressData) => {
+          if (progressData.totalBytesExpectedToSend > 0) {
+            const percent = Math.round(
+              (progressData.totalBytesSent / progressData.totalBytesExpectedToSend) * 100
+            );
+            useUploadStore.getState().setProgress(percent);
+          }
         }
-      };
+      );
 
-      xhr.onerror = () => {
-        reject(new Error('Network error during binary upload to object storage'));
-      };
-
-      xhr.onabort = () => {
-        reject(new Error('Binary upload was aborted'));
-      };
-
-      xhr.send(file);
-    });
+      const result = await uploadTask.uploadAsync();
+      if (!result || result.status < 200 || result.status >= 300) {
+        throw new Error(`Native upload failed with status ${result?.status}`);
+      }
+      useUploadStore.getState().setProgress(100);
+    }
 
     // Stage 3: Complete Ingest
     const res = await api.post(`/v1/uploads/${data.upload_id}/complete`, {
