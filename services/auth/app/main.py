@@ -166,6 +166,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
         message = str(exc.detail) if exc.detail else "An error occurred"
 
+    if exc.status_code == 401:
+        code = CODE_UNAUTHORIZED
+        message = "Invalid or expired token"
+
     headers = getattr(exc, "headers", None) or {}
     headers["X-Request-ID"] = req_id
     return JSONResponse(
@@ -220,7 +224,7 @@ async def health_check():
     keycloak_status = "unknown"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/health/ready")
+            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
             keycloak_status = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
     except Exception as e:
         keycloak_status = f"unreachable ({str(e)})"

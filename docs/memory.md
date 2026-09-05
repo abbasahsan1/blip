@@ -109,9 +109,9 @@ All traffic enters on host port `8419`.
 |---|---|---|
 | `/` | `blipp-app:80` | Expo SPA (SPA fallback via nginx try_files) |
 | `/keycloak` | `keycloak:8080` | Keycloak admin + OIDC |
-| `/v1/auth` | `auth-service:8000` | Versioned FastAPI auth microservice |
-| `/api` | `auth-service:8000` | FastAPI auth microservice |
-| `/api/docs` | `auth-service:8000` | Swagger UI |
+| `/v1` | `auth-service:8000` | Versioned FastAPI microservice endpoints |
+| `/api` | `auth-service:8000` | FastAPI legacy/compat endpoints |
+| `/docs` | `auth-service:8000` | Swagger UI redirect |
 | `/health` | `auth-service:8000` | Liveness probe |
 
 ---
@@ -123,7 +123,7 @@ All traffic enters on host port `8419`.
 - FastAPI Swagger UI: http://100.122.207.32:8419/api/docs
 - Keycloak OIDC Discovery: http://100.122.207.32:8419/keycloak/realms/blipp/.well-known/openid-configuration
 - Keycloak Token Endpoint: http://100.122.207.32:8419/keycloak/realms/blipp/protocol/openid-connect/token
-- Versioned Auth Route: http://100.122.207.32:8419/v1/auth/login
+- Session Profile Route: http://100.122.207.32:8419/v1/auth/me
 
 ---
 
@@ -133,15 +133,14 @@ Base paths: `/v1/auth` and `/api/auth`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/v1/auth/login` (or `/api/auth/login`) | None | Email/password → access+refresh tokens |
-| POST | `/v1/auth/register` (or `/api/auth/register`) | None | Creates user in Keycloak realm |
-| POST | `/v1/auth/refresh` (or `/api/auth/refresh`) | None | Refresh token → new access token |
-| POST | `/v1/auth/logout` (or `/api/auth/logout`) | None | Revokes Keycloak session |
-| GET | `/v1/auth/me` (or `/api/auth/me`) | Bearer | Returns user profile from JWT |
-| GET | `/api/protected/data` | Bearer | Sample protected resource |
-| GET | `/api/health` / `/health` | None | Health + Keycloak connectivity probe |
+| GET | `/v1/auth/me` (or `/api/auth/me`) | Bearer | Validates JWT against cached Keycloak JWKS, extracts `sub` as UUID `user_id` |
+| GET | `/v1/auth/verify` (or `/api/auth/verify`) | Bearer | Lightweight session verification endpoint |
+| GET | `/v1/protected/data` (or `/api/protected/data`) | Bearer | Sample protected resource |
+| GET | `/v1/health` / `/api/health` / `/health` | None | Health + Keycloak connectivity probe |
 
-### Error Envelope Contract (All 4xx/5xx Responses)
+*Note: Custom proxy login/register routes (`/login`, `/register`, `/refresh`, `/logout`) have been removed. Clients authenticate directly with Keycloak OIDC endpoints, and services validate JWTs locally using cached JWKS (`get_current_user`).*
+
+### Strict Error Envelope Contract (All 4xx/5xx Responses)
 ```json
 {
   "error": {
@@ -153,8 +152,18 @@ Base paths: `/v1/auth` and `/api/auth`
 ```
 All HTTP responses include header: `X-Request-ID: <uuid>`.
 
+Any auth failure (missing token, invalid signature, expired token, malformed claims) strictly returns HTTP 401:
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid or expired token",
+    "request_id": "<uuid>"
+  }
+}
+```
 
-Token validation: RS256, JWKS from keycloak service internally, 10-min cache. Issuer must end with `/realms/blipp`.
+Token validation: RS256, JWKS cached from Keycloak service internally (`JWKS_CACHE_TTL_SECONDS = 600`). Issuer realm must match `/realms/blipp`. Subject claim `sub` is parsed as UUID `user_id`.
 
 ---
 

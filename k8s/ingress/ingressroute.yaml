@@ -31,8 +31,8 @@ spec:
         - name: keycloak
           port: 8080
 
-    # Versioned Authentication Microservice (/v1/auth)
-    - match: PathPrefix(`/v1/auth`)
+    # Versioned Microservice Route (/v1)
+    - match: PathPrefix(`/v1`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
