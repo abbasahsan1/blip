@@ -1,80 +1,124 @@
-import { ApiError, blippApi, type BlippUploadResponse } from '../api';
+import { api, ApiError } from '../api';
+import { useUploadStore } from '../store/uploadStore';
+
+export interface AudioDraft {
+  title: string;
+  description?: string | null;
+  durationSeconds: number;
+}
 
 export interface UploadAudioParams {
-  file: File | Blob;
-  fileName?: string;
-  title: string;
-  durationSeconds?: number;
-  token?: string;
+  file: File;
+  draft: AudioDraft;
 }
 
-export interface UploadAudioResult {
+export interface UploadResult {
   success: boolean;
-  blipp?: BlippUploadResponse;
+  data?: any;
   error?: string;
-  code?: string;
 }
 
 /**
- * Calculates audio duration from a File/Blob using the browser Audio API.
+ * Calculates audio duration from an audio File/Blob using the Web Audio API,
+ * strictly avoiding any URL.createObjectURL calls.
  */
 export async function getAudioDuration(file: File | Blob): Promise<number> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || typeof Audio === 'undefined') {
-      return resolve(0);
+  if (typeof window === 'undefined') return 0;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      const duration = Math.round(audioBuffer.duration) || 0;
+      await ctx.close();
+      return duration;
     }
-    try {
-      const objectUrl = URL.createObjectURL(file);
-      const audio = new Audio(objectUrl);
-      audio.addEventListener('loadedmetadata', () => {
-        const dur = Math.round(audio.duration) || 0;
-        URL.revokeObjectURL(objectUrl);
-        resolve(dur);
-      });
-      audio.addEventListener('error', () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve(0);
-      });
-    } catch {
-      resolve(0);
-    }
-  });
+  } catch {
+    // Non-blocking duration fallback
+  }
+  return 0;
 }
 
 /**
- * Uploads an audio clip to POST /v1/blipps/upload with multipart form data.
+ * Multi-stage real direct upload pipeline:
+ * 1. Presign: Request upload ticket and direct S3/B2 PUT URL.
+ * 2. Direct Binary Upload: Stream raw bytes via XMLHttpRequest, binding real upload progress.
+ * 3. Complete Ingest: Finalize ingest record and publish blipp in PostgreSQL.
  */
-export async function uploadAudioClip(params: UploadAudioParams): Promise<UploadAudioResult> {
-  const { file, fileName, title, durationSeconds = 0, token } = params;
+export async function uploadAudio(params: UploadAudioParams): Promise<any> {
+  const { file, draft } = params;
+  const uploadStore = useUploadStore.getState();
 
-  if (!file) {
-    return { success: false, error: 'Please select an audio file to upload.' };
-  }
-
-  if (!title.trim()) {
-    return { success: false, error: 'Please provide a title for your blipp.' };
-  }
-
-  const formData = new FormData();
-  const resolvedName = fileName || (file instanceof File ? file.name : 'audio.mp3');
-  formData.append('file', file, resolvedName);
-  formData.append('title', title.trim());
-  formData.append('duration_seconds', String(Math.max(0, Math.round(durationSeconds))));
+  uploadStore.reset();
+  uploadStore.setIsUploading(true);
+  uploadStore.setProgress(0);
 
   try {
-    const blipp = await blippApi.uploadBlipp(formData, token);
-    return { success: true, blipp };
-  } catch (err) {
-    if (err instanceof ApiError) {
-      return {
-        success: false,
-        error: err.message || 'Upload failed. Please try again.',
-        code: err.code,
+    // Stage 1: Presign
+    const { data } = await api.post<{
+      upload_id: string;
+      storage_key: string;
+      presigned_url: string;
+    }>('/v1/uploads/presign', {
+      file_name: file.name,
+      mime_type: file.type || 'audio/mpeg',
+      size_bytes: file.size,
+    });
+
+    // Stage 2: Direct Binary Upload with real byte progress
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', data.presigned_url, true);
+      xhr.setRequestHeader('Content-Type', file.type || 'audio/mpeg');
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          const percentage = Math.round((event.loaded / event.total) * 100);
+          useUploadStore.getState().setProgress(percentage);
+        }
       };
-    }
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : 'An unexpected error occurred during upload.',
-    };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          useUploadStore.getState().setProgress(100);
+          resolve();
+        } else {
+          reject(new Error(`Binary storage upload failed with status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during binary upload to object storage'));
+      };
+
+      xhr.onabort = () => {
+        reject(new Error('Binary upload was aborted'));
+      };
+
+      xhr.send(file);
+    });
+
+    // Stage 3: Complete Ingest
+    const res = await api.post(`/v1/uploads/${data.upload_id}/complete`, {
+      title: draft.title,
+      description: draft.description || null,
+      duration_seconds: Math.round(draft.durationSeconds),
+    });
+
+    uploadStore.setIsUploading(false);
+    return res.data;
+  } catch (err: unknown) {
+    uploadStore.setIsUploading(false);
+    const msg =
+      err instanceof ApiError
+        ? err.message
+        : err instanceof Error
+        ? err.message
+        : 'An unexpected error occurred during audio upload.';
+    uploadStore.setError(msg);
+    throw err;
   }
 }

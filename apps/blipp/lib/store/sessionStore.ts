@@ -15,6 +15,7 @@ interface SessionStore {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
+  tokens: { accessToken: string; refreshToken?: string } | null;
 
   // UI feedback
   isSubmitting: boolean;
@@ -28,6 +29,7 @@ interface SessionStore {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  clearSession: () => void;
   clearError: () => void;
   refreshSession: () => Promise<boolean>;
 }
@@ -39,6 +41,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   user: null,
   accessToken: null,
   refreshToken: null,
+  tokens: null,
   isSubmitting: false,
   error: null,
 
@@ -49,28 +52,34 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const refreshToken = refresh[1];
 
       if (!accessToken || !refreshToken) {
-        set({ status: 'unauthenticated' });
+        set({ status: 'unauthenticated', tokens: null });
         return;
       }
 
       // Validate stored token
       try {
         const user = await authApi.me(accessToken);
-        set({ status: 'authenticated', user, accessToken, refreshToken });
+        set({
+          status: 'authenticated',
+          user,
+          accessToken,
+          refreshToken,
+          tokens: { accessToken, refreshToken },
+        });
       } catch (err) {
         // Try refresh
         if (refreshToken) {
           const ok = await get().refreshSession();
           if (!ok) {
             await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
-            set({ status: 'unauthenticated', accessToken: null, refreshToken: null });
+            set({ status: 'unauthenticated', accessToken: null, refreshToken: null, tokens: null });
           }
         } else {
-          set({ status: 'unauthenticated' });
+          set({ status: 'unauthenticated', tokens: null });
         }
       }
     } catch {
-      set({ status: 'unauthenticated' });
+      set({ status: 'unauthenticated', tokens: null });
     }
   },
 
@@ -99,6 +108,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         user,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
         isSubmitting: false,
       });
     } catch (err) {
@@ -119,6 +129,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         user,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
         isSubmitting: false,
       });
     } catch (err) {
@@ -139,6 +150,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         user,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
         isSubmitting: false,
       });
     } catch (err) {
@@ -161,6 +173,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         user,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
         isSubmitting: false,
       });
     } catch (err) {
@@ -174,7 +187,19 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       await authApi.logout(accessToken);
     }
     await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
-    set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null });
+    set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null, tokens: null });
+  },
+
+  clearSession() {
+    void AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+    set({
+      status: 'unauthenticated',
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      tokens: null,
+      error: null,
+    });
   },
 
   clearError() {
@@ -196,6 +221,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         user,
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
       });
       return true;
     } catch {

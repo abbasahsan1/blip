@@ -51,3 +51,33 @@ class FeedItemResponse(BaseModel):
 class FeedResponse(BaseModel):
     items: List[FeedItemResponse] = Field(default_factory=list)
     next_cursor: Optional[str] = None
+
+
+class UploadPresignRequest(BaseModel):
+    file_name: str
+    mime_type: Optional[str] = "audio/mpeg"
+    size_bytes: int
+
+
+class UploadPresignResponse(BaseModel):
+    upload_id: str
+    storage_key: str
+    presigned_url: str
+
+
+class UploadCompleteRequest(BaseModel):
+    title: str
+    description: Optional[str] = None
+    duration_seconds: int = 0
+
+
+class TelemetryEvent(BaseModel):
+    event_type: str = "play_progress"
+    user_id: str
+    blipp_id: str
+    session_id: str
+    position_seconds: int
+    duration_seconds: int
+    device_signal: str
+    timestamp: str
+

@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
-import { telemetryApi } from '@/lib/api';
+import { recordPlayProgress } from '@/lib/audio/listenTracker';
 import { getDeviceSignal, subscribeDeviceSignal } from '@/lib/deviceSignal';
 import { PlayMark, PauseMark, HeartMark } from '@/components/common/Icons';
 import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
@@ -37,8 +37,8 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Stream source resolved from audio_variants.standard with fallback to canonical audio_url
-  const audioSource = item?.audio_variants?.standard || item?.audio_url || item?.audioUrl || '';
+  // Stream source resolved strictly from audio_variants.standard or canonical audio_url
+  const audioUri = item?.audio_variants?.standard || item?.audio_url;
 
   // Device signal state tracked via high-fidelity device signal engine
   const [, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));
@@ -60,8 +60,8 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   useEffect(() => {
     if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
 
-    if (audioSource) {
-      const audio = new Audio(audioSource);
+    if (audioUri) {
+      const audio = new Audio(audioUri);
       audioRef.current = audio;
 
       const handleTimeUpdate = () => {
@@ -72,6 +72,14 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       const handleEnded = () => {
         setIsPlaying(false);
         setProgress(0);
+        if (item?.id) {
+          recordPlayProgress({
+            blipp_id: item.id,
+            position_seconds: item.duration || 0,
+            duration_seconds: item.duration || 0,
+            event_type: 'play_complete',
+          });
+        }
       };
       const handlePause = () => {
         setIsPlaying(false);
@@ -95,15 +103,24 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         audioRef.current = null;
       };
     }
-  }, [audioSource]);
+  }, [audioUri, item?.id, item?.duration]);
 
   // Pause playback if reel becomes inactive
   useEffect(() => {
     if (!isActive && audioRef.current && isPlaying) {
-      audioRef.current.pause();
+      const audio = audioRef.current;
+      audio.pause();
       setIsPlaying(false);
+      if (item?.id && audio.duration && audio.currentTime < audio.duration * 0.9) {
+        recordPlayProgress({
+          blipp_id: item.id,
+          position_seconds: Math.floor(audio.currentTime),
+          duration_seconds: item.duration || Math.floor(audio.duration),
+          event_type: 'skip',
+        });
+      }
     }
-  }, [isActive, isPlaying]);
+  }, [isActive, isPlaying, item?.id, item?.duration]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -125,9 +142,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     }
   };
 
-  // Waveform animation strictly bound to active playback (functional motion)
-  // Progress is driven by audio.timeupdate event — this effect only handles
-  // waveform animation and telemetry emission.
+  // Waveform animation and real telemetry emission
   useEffect(() => {
     if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
@@ -150,19 +165,17 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
 
-      // Telemetry-only interval — progress is driven by audio.timeupdate
       let secondsElapsed = 0;
       const interval = setInterval(() => {
         secondsElapsed += 1;
         if (secondsElapsed % 3 === 0) {
-          const activeSignal = getDeviceSignal(true);
           const audio = audioRef.current;
           const positionSeconds = audio ? Math.floor(audio.currentTime) : secondsElapsed;
-          telemetryApi.recordPlayProgress({
+          recordPlayProgress({
             blipp_id: item.id,
             position_seconds: positionSeconds,
             duration_seconds: item.duration,
-            device_signal: activeSignal,
+            event_type: 'play_progress',
           });
         }
       }, 1000);

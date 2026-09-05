@@ -116,4 +116,5 @@ export interface SessionState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
+  tokens?: { accessToken: string; refreshToken?: string } | null;
 }

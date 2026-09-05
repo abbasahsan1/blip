@@ -1,68 +1,17 @@
+import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSessionStore } from './store/sessionStore';
 import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
 
-// All API calls are relative: the SPA and API share the same origin
-// via Traefik routing: / → blipp-app, /v1 or /api → backend services
-const BASE = '/v1';
+// ─── Platform Error Envelope ───────────────────────────────────────────────────
 
-// ─── Request Helper ───────────────────────────────────────────────────────────
-
-interface RequestOptions extends Omit<RequestInit, 'body'> {
-  body?: unknown;
-  token?: string | null;
-}
-
-async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const { body, token, ...rest } = opts;
-
-  const headers: Record<string, string> = {
-    ...(opts.headers as Record<string, string>),
+export interface ApiErrorResponse {
+  error: {
+    code: string;
+    message: string;
+    request_id: string;
   };
-
-  // Only set application/json if body is not FormData
-  if (!(body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  // Automatically attach stored Keycloak access token if not explicitly provided
-  let activeToken = token;
-  if (activeToken === undefined) {
-    try {
-      activeToken = await AsyncStorage.getItem('blipp:access_token');
-    } catch {
-      activeToken = null;
-    }
-  }
-
-  if (activeToken) {
-    headers['Authorization'] = `Bearer ${activeToken}`;
-  }
-
-  const endpointUrl = path.startsWith('/v1') || path.startsWith('/api') ? path : `${BASE}${path}`;
-
-  const response = await fetch(endpointUrl, {
-    ...rest,
-    headers,
-    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
-  });
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const errorEnvelope = (data as { error?: { message?: string; code?: string; request_id?: string } })?.error;
-    const message =
-      errorEnvelope?.message ??
-      (data as { detail?: string })?.detail ??
-      (data as { message?: string })?.message ??
-      `Request failed: ${response.status}`;
-    
-    throw new ApiError(message, response.status, data, errorEnvelope?.code, errorEnvelope?.request_id);
-  }
-
-  return data as T;
 }
-
-// ─── Error Type ───────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   constructor(
@@ -76,6 +25,133 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 }
+
+// ─── Base URL Configuration ───────────────────────────────────────────────────
+
+export const getApiBaseUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+  }
+  // In production browser environments where /v1 and /api are reverse-proxied via ingress
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+      return '';
+    }
+  }
+  return 'http://localhost:8000';
+};
+
+export interface ApiResponse<T = any> {
+  data: T;
+  status: number;
+  headers: Headers;
+}
+
+export interface RequestOptions extends Omit<RequestInit, 'body'> {
+  body?: unknown;
+  token?: string | null;
+}
+
+// ─── Centralized Request Execution & Interception ──────────────────────────────
+
+export async function requestRaw<T = any>(
+  path: string,
+  opts: RequestOptions = {},
+): Promise<ApiResponse<T>> {
+  const { body, token, ...rest } = opts;
+
+  const headers: Record<string, string> = {
+    ...(opts.headers as Record<string, string>),
+  };
+
+  // Only set application/json if body is not FormData
+  if (!(body instanceof FormData) && body !== undefined && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  // Intercept outgoing requests: inject Bearer token from useSessionStore
+  let activeToken = token;
+  if (activeToken === undefined) {
+    activeToken = useSessionStore.getState().tokens?.accessToken || useSessionStore.getState().accessToken;
+    if (!activeToken) {
+      try {
+        activeToken = await AsyncStorage.getItem('blipp:access_token');
+      } catch {
+        activeToken = null;
+      }
+    }
+  }
+
+  if (activeToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${activeToken}`;
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const endpointUrl = baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+
+  const response = await fetch(endpointUrl, {
+    ...rest,
+    headers,
+    body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  // Intercept 401 Unauthorized: clear session state and redirect to /auth/sign-in
+  if (response.status === 401) {
+    useSessionStore.getState().clearSession();
+    try {
+      router.replace('/auth/sign-in');
+    } catch {
+      // Router not mounted yet
+    }
+  }
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const errorEnvelope = (data as ApiErrorResponse)?.error;
+    const message =
+      errorEnvelope?.message ??
+      (data as { detail?: string })?.detail ??
+      (data as { message?: string })?.message ??
+      `Request failed with status ${response.status}`;
+
+    throw new ApiError(
+      message,
+      response.status,
+      data,
+      errorEnvelope?.code,
+      errorEnvelope?.request_id,
+    );
+  }
+
+  return {
+    data: data as T,
+    status: response.status,
+    headers: response.headers,
+  };
+}
+
+async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const res = await requestRaw<T>(path, opts);
+  return res.data;
+}
+
+// ─── Centralized API Client (Axios-like verbs returning { data, status, headers }) ──
+
+export const api = {
+  get: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
+    requestRaw<T>(path, { ...options, method: 'GET' }),
+
+  post: <T = any>(path: string, body?: unknown, options?: RequestOptions): Promise<ApiResponse<T>> =>
+    requestRaw<T>(path, { ...options, method: 'POST', body }),
+
+  put: <T = any>(path: string, body?: unknown, options?: RequestOptions): Promise<ApiResponse<T>> =>
+    requestRaw<T>(path, { ...options, method: 'PUT', body }),
+
+  delete: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
+    requestRaw<T>(path, { ...options, method: 'DELETE' }),
+};
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 
@@ -131,14 +207,14 @@ function toUser(r: MeResponse): User {
 
 export const authApi = {
   async requestOtp(email: string): Promise<{ message: string; success: boolean }> {
-    return request<{ message: string; success: boolean }>('/auth/otp/request', {
+    return request<{ message: string; success: boolean }>('/v1/auth/otp/request', {
       method: 'POST',
       body: { email },
     });
   },
 
   async verifyOtp(email: string, code: string): Promise<{ tokens: AuthTokens; user: User }> {
-    const r = await request<LoginResponse>('/auth/otp/verify', {
+    const r = await request<LoginResponse>('/v1/auth/otp/verify', {
       method: 'POST',
       body: { email, code },
     });
@@ -148,12 +224,12 @@ export const authApi = {
   },
 
   async getOAuthUrl(provider: 'google' | 'apple'): Promise<string> {
-    const res = await request<{ provider: string; authorization_url: string }>(`/auth/oauth/${provider}/url`);
+    const res = await request<{ provider: string; authorization_url: string }>(`/v1/auth/oauth/${provider}/url`);
     return res.authorization_url;
   },
 
   async signInWithOAuth(provider: 'google' | 'apple', idToken?: string, code?: string): Promise<{ tokens: AuthTokens; user: User }> {
-    const r = await request<LoginResponse>(`/auth/oauth/${provider}`, {
+    const r = await request<LoginResponse>(`/v1/auth/oauth/${provider}`, {
       method: 'POST',
       body: { provider, id_token: idToken, code },
     });
@@ -187,13 +263,12 @@ export const authApi = {
   },
 
   async register(req: RegisterRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    await request('/auth/register', { method: 'POST', body: req });
-    // Auto sign-in after registration
+    await request('/v1/auth/register', { method: 'POST', body: req });
     return authApi.login({ email: req.email, password: req.password });
   },
 
   async me(token: string): Promise<User> {
-    const r = await request<MeResponse>('/auth/me', { token });
+    const r = await request<MeResponse>('/v1/auth/me', { token });
     return toUser(r);
   },
 
@@ -219,27 +294,20 @@ export const authApi = {
   },
 
   async logout(token: string): Promise<void> {
-    await request('/auth/logout', { method: 'POST', token }).catch(() => {
-      // Ignore logout errors - we'll clear local state regardless
+    await request('/v1/auth/logout', { method: 'POST', token }).catch(() => {
+      // Ignore logout errors - local state will be wiped
     });
   },
 };
 
-// --- Telemetry API ------------------------------------------------------------
+// ─── Telemetry API ────────────────────────────────────────────────────────────
 
 export const telemetryApi = {
-  /**
-   * Emits playback progress telemetry along with active device signal state
-   * (screen_on, app_backgrounded, screen_off, bluetooth_connected).
-   */
   async recordPlayProgress(payload: PlaybackTelemetryPayload): Promise<void> {
     try {
-      await request('/telemetry/playback', {
-        method: 'POST',
-        body: payload,
-      });
+      await api.post('/v1/events', payload);
     } catch {
-      // Non-blocking telemetry: fail silently
+      // Non-blocking telemetry
     }
   },
 };
@@ -273,14 +341,16 @@ export interface FeedResponse {
 
 export const blippApi = {
   async getFeed(): Promise<FeedResponse> {
-    return request<FeedResponse>('/blipps/feed', { method: 'GET' });
+    const res = await api.get<FeedResponse>('/v1/feed');
+    return res.data;
   },
 
   async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
-    return request<BlippUploadResponse>('/blipps/upload', {
+    const res = await requestRaw<BlippUploadResponse>('/v1/blipps/upload', {
       method: 'POST',
       body: formData,
       token,
     });
+    return res.data;
   },
 };

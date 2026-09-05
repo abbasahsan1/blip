@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PALETTE } from '@/lib/palette';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { useFeedStore } from '@/lib/store/feedStore';
-import { uploadAudioClip, getAudioDuration } from '@/lib/upload/audioUpload';
+import { useUploadStore } from '@/lib/store/uploadStore';
+import { uploadAudio, getAudioDuration } from '@/lib/upload/audioUpload';
 import {
   AudioReelMark,
   StatusAlertMark,
@@ -23,13 +24,13 @@ import {
 export default function UploadScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { status, accessToken } = useSessionStore();
-  const { loadFeed } = useFeedStore();
+  const { status } = useSessionStore();
+  const { refreshFeed } = useFeedStore();
+  const { progress, isUploading, error: storeError, reset: resetUploadStore } = useUploadStore();
 
   const [title, setTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [duration, setDuration] = useState<number>(0);
-  const [isUploading, setIsUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -38,6 +39,7 @@ export default function UploadScreen() {
 
   const handleSelectFileClick = () => {
     setErrorMessage(null);
+    resetUploadStore();
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -50,6 +52,7 @@ export default function UploadScreen() {
     const file = files[0];
     setSelectedFile(file);
     setErrorMessage(null);
+    resetUploadStore();
 
     // Auto-fill title if empty
     if (!title) {
@@ -81,33 +84,38 @@ export default function UploadScreen() {
       return;
     }
 
-    setIsUploading(true);
     setErrorMessage(null);
 
-    const result = await uploadAudioClip({
-      file: selectedFile,
-      fileName: selectedFile.name,
-      title: title.trim(),
-      durationSeconds: duration,
-      token: accessToken || undefined,
-    });
+    try {
+      await uploadAudio({
+        file: selectedFile,
+        draft: {
+          title: title.trim(),
+          description: null,
+          durationSeconds: duration,
+        },
+      });
 
-    setIsUploading(false);
-
-    if (result.success) {
       setSuccessMessage('Broadcast uploaded successfully. Directing to feed...');
-      await loadFeed();
+      await refreshFeed();
       setTimeout(() => {
         setTitle('');
         setSelectedFile(null);
         setDuration(0);
         setSuccessMessage(null);
+        resetUploadStore();
         router.replace('/(tabs)');
       }, 900);
-    } else {
-      setErrorMessage(result.error || 'Failed to upload audio. Please check network connection.');
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Failed to upload audio. Please check your network connection.';
+      setErrorMessage(msg);
     }
   };
+
+  const displayError = errorMessage || storeError;
 
   return (
     <ScrollView
@@ -138,10 +146,10 @@ export default function UploadScreen() {
       </View>
 
       {/* Structured Feedback Banners with bespoke status marks */}
-      {errorMessage && (
+      {displayError && (
         <View style={styles.errorBanner} accessibilityRole="alert">
           <StatusAlertMark size={16} color={PALETTE.error} />
-          <Text style={styles.errorText}>{errorMessage}</Text>
+          <Text style={styles.errorText}>{displayError}</Text>
         </View>
       )}
 
@@ -205,6 +213,21 @@ export default function UploadScreen() {
           />
         </View>
 
+        {/* Real Byte Transfer Progress Bar */}
+        {isUploading && (
+          <View style={styles.progressSection}>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progress}%` }]} />
+            </View>
+            <View style={styles.progressInfo}>
+              <Text style={styles.progressText}>
+                {progress < 100 ? `Uploading binary stream (${progress}%)` : 'Finalizing ingest...'}
+              </Text>
+              <Text style={styles.progressPercentage}>{progress}%</Text>
+            </View>
+          </View>
+        )}
+
         {/* Action Button */}
         <Pressable
           style={({ pressed }) => [
@@ -220,7 +243,9 @@ export default function UploadScreen() {
           {isUploading ? (
             <View style={styles.buttonRow}>
               <ActivityIndicator size="small" color="#09090b" />
-              <Text style={styles.submitButtonText}>Encoding & Publishing...</Text>
+              <Text style={styles.submitButtonText}>
+                {progress < 100 ? `Uploading (${progress}%)...` : 'Publishing...'}
+              </Text>
             </View>
           ) : (
             <Text style={styles.submitButtonText}>Publish Broadcast</Text>
@@ -381,6 +406,38 @@ const styles = StyleSheet.create({
   },
   inputFocused: {
     borderColor: PALETTE.accent,
+  },
+  progressSection: {
+    gap: 8,
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: PALETTE.card,
+    borderRadius: 3,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: PALETTE.accent,
+    borderRadius: 2,
+  },
+  progressInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
+    color: PALETTE.textSecondary,
+  },
+  progressPercentage: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: PALETTE.accent,
+    fontVariant: ['tabular-nums'],
   },
   submitButton: {
     backgroundColor: '#ffffff',

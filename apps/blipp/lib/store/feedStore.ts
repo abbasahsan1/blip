@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { blippApi } from '../api';
+import { api } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
 const GRADIENTS: [string, string][] = [
@@ -11,89 +11,111 @@ const GRADIENTS: [string, string][] = [
   ['#1e1b4b', '#312e81'],
 ];
 
-interface FeedStore {
-  posts: Blipp[];
-  sort: FeedSort;
+export interface FeedState {
+  items: Blipp[];
+  cursor: string | null;
   isLoading: boolean;
-  isRefreshing: boolean;
   error: string | null;
+  fetchFeed: (cursor?: string | null) => Promise<void>;
+  refreshFeed: () => Promise<void>;
 
+  // Compatibility aliases for UI components
+  posts: Blipp[];
+  isRefreshing: boolean;
+  sort: FeedSort;
   setSort: (sort: FeedSort) => void;
   loadFeed: (viewerId?: string | null) => Promise<void>;
   refresh: (viewerId?: string | null) => Promise<void>;
   toggleLike: (postId: string) => void;
 }
 
-export const useFeedStore = create<FeedStore>((set, get) => ({
+export const useFeedStore = create<FeedState>((set, get) => ({
+  items: [],
   posts: [],
-  sort: 'newest',
+  cursor: null,
   isLoading: false,
   isRefreshing: false,
   error: null,
+  sort: 'newest',
 
-  setSort(sort) {
-    set({ sort });
-    get().loadFeed();
-  },
-
-  async loadFeed(_viewerId) {
-    const { sort } = get();
+  async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
-
     try {
-      const response = await blippApi.getFeed();
-      const serverItems = response?.items || [];
+      const queryCursor = cursor !== undefined && cursor !== null ? cursor : (get().cursor || '');
+      const res = await api.get<{
+        items: any[];
+        next_cursor: string | null;
+      }>(`/v1/feed?cursor=${encodeURIComponent(queryCursor)}&limit=10`);
 
-      const mapped: Blipp[] = serverItems.map((item, idx) => {
+      const serverItems = res.data?.items || [];
+      const nextCursor = res.data?.next_cursor ?? null;
+
+      const mapped: Blipp[] = serverItems.map((item: any, idx: number) => {
         const standardUrl = item.audio_variants?.standard || item.audio_url || '';
         return {
-          id: item.blipp_id,
+          id: item.blipp_id || item.id,
           title: item.title,
-          author: 'Creator',
-          authorId: item.creator_id,
-          duration: item.duration_seconds || 30,
-          audio_url: item.audio_url,
+          author: item.author || 'Creator',
+          authorId: item.creator_id || item.authorId || '',
+          duration: item.duration_seconds || item.duration || 30,
+          audio_url: item.audio_url || standardUrl,
           audio_variants: {
             standard: standardUrl,
             low: item.audio_variants?.low || standardUrl,
             high: item.audio_variants?.high || standardUrl,
           },
           audioUrl: standardUrl,
-          coverGradient: GRADIENTS[idx % GRADIENTS.length],
-          listenCount: 0,
-          likeCount: 0,
-          isLiked: false,
-          createdAt: new Date().toISOString(),
+          coverGradient: item.coverGradient || GRADIENTS[idx % GRADIENTS.length],
+          listenCount: item.listenCount || item.listen_count || 0,
+          likeCount: item.likeCount || item.like_count || 0,
+          isLiked: Boolean(item.isLiked || item.is_liked),
+          createdAt: item.createdAt || item.created_at || new Date().toISOString(),
         };
       });
 
-      const sorted = mapped.sort((a, b) => {
-        if (sort === 'newest') {
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        }
-        return b.listenCount - a.listenCount;
+      set((state) => {
+        const updated = cursor ? [...state.items, ...mapped] : mapped;
+        return {
+          items: updated,
+          posts: updated,
+          cursor: nextCursor,
+          isLoading: false,
+        };
       });
-
-      set({ posts: sorted, isLoading: false });
-    } catch (err) {
-      console.warn('Failed to load blipp feed from backend:', err);
-      set({ isLoading: false, error: 'Could not load feed from server.' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not load feed from server.';
+      set({ isLoading: false, error: msg });
     }
   },
 
-  async refresh(viewerId) {
+  async refreshFeed() {
     set({ isRefreshing: true });
-    await get().loadFeed(viewerId);
+    await get().fetchFeed(null);
     set({ isRefreshing: false });
   },
 
-  toggleLike(postId) {
-    set((state) => ({
-      posts: state.posts.map((p) =>
+  // Backwards-compatible aliases
+  setSort(sort: FeedSort) {
+    set({ sort });
+    get().refreshFeed();
+  },
+
+  async loadFeed(_viewerId?: string | null) {
+    await get().fetchFeed(null);
+  },
+
+  async refresh(_viewerId?: string | null) {
+    await get().refreshFeed();
+  },
+
+  toggleLike(postId: string) {
+    set((state) => {
+      const updated = state.items.map((p) =>
         p.id === postId
           ? { ...p, isLiked: !p.isLiked, likeCount: p.likeCount + (p.isLiked ? -1 : 1) }
           : p,
-      ),
-    }));
+      );
+      return { items: updated, posts: updated };
+    });
   },
 }));
