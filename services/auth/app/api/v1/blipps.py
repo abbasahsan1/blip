@@ -73,7 +73,7 @@ async def upload_blipp(
                 """
                 INSERT INTO blipps (
                     blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
                 RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
                 """,
                 new_blipp_id,

@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcode-worker
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: transcode-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: blipp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: transcode-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: transcode-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: blipp
+    spec:
+      containers:
+        - name: transcode-worker
+          image: blipp-transcode-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: blipp-secrets
+          env:
+            - name: POSTGRES_DB
+              value: blipp
+            - name: NATS_URL
+              value: nats://nats.blipp.svc.cluster.local:4222
+            - name: S3_ENDPOINT_URL
+              value: http://minio.blipp.svc.cluster.local:9000
+            - name: S3_BUCKET_RAW_UPLOADS
+              value: blipp-raw-uploads
+            - name: S3_BUCKET_AUDIO_VARIANTS
+              value: blipp-audio-variants
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi

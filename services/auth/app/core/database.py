@@ -9,19 +9,6 @@ logger = logging.getLogger("auth-service.database")
 _pool: Optional[asyncpg.Pool] = None
 
 CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS blipps (
-    blipp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    creator_id UUID NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    audio_url TEXT NOT NULL,
-    audio_variants JSONB NOT NULL DEFAULT '{}'::jsonb,
-    duration_seconds INTEGER NOT NULL DEFAULT 0,
-    status VARCHAR(50) NOT NULL DEFAULT 'published',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_blipps_status_created ON blipps (status, created_at DESC);
-
 CREATE TABLE IF NOT EXISTS users_profile (
     user_id UUID PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
@@ -46,6 +33,35 @@ CREATE TABLE IF NOT EXISTS uploads (
 
 CREATE INDEX IF NOT EXISTS idx_uploads_creator_id ON uploads (creator_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_processing_status ON uploads (processing_status);
+
+CREATE TABLE IF NOT EXISTS blipps (
+    blipp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    title VARCHAR(255),
+    description TEXT,
+    audio_url TEXT NOT NULL,
+    audio_variants JSONB NOT NULL DEFAULT '{}'::jsonb,
+    duration_seconds DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    language VARCHAR(10) NOT NULL DEFAULT 'en',
+    status VARCHAR(50) NOT NULL DEFAULT 'published',
+    scheduled_at TIMESTAMP WITH TIME ZONE,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'direct_upload',
+    parent_upload_id UUID REFERENCES uploads(upload_id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_blipps_status_created ON blipps (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blipps_creator_id ON blipps (creator_id);
+
+ALTER TABLE blipps ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE blipps ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
+ALTER TABLE blipps ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE blipps ADD COLUMN IF NOT EXISTS source_type VARCHAR(50) DEFAULT 'direct_upload';
+ALTER TABLE blipps ADD COLUMN IF NOT EXISTS parent_upload_id UUID REFERENCES uploads(upload_id) ON DELETE SET NULL;
+ALTER TABLE blipps ALTER COLUMN title DROP NOT NULL;
+ALTER TABLE blipps ALTER COLUMN duration_seconds TYPE DOUBLE PRECISION;
+
+CREATE INDEX IF NOT EXISTS idx_blipps_parent_upload_id ON blipps (parent_upload_id);
 """
 
 

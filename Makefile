@@ -14,6 +14,7 @@ NAMESPACE ?= blipp
 
 # Docker image tags
 IMAGE_AUTH ?= blipp-auth-service:latest
+IMAGE_WORKER ?= blipp-transcode-worker:latest
 IMAGE_APP ?= blipp-app:latest
 IMAGE_KEYCLOAK ?= quay.io/keycloak/keycloak:26.1.3
 IMAGE_POSTGRES ?= postgres:16-alpine
@@ -71,6 +72,8 @@ cluster-down: destroy
 build:
 	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) ./services/auth
+	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) ./services/transcode_worker
 	@echo "📦 Building Expo Frontend container [$(IMAGE_APP)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_APP) ./apps/blipp
 	@echo "📦 Pulling base images..."
@@ -82,6 +85,7 @@ build:
 import:
 	@echo "📥 Importing container images into k3d cluster '$(CLUSTER_NAME)'..."
 	k3d image import $(IMAGE_AUTH) -c $(CLUSTER_NAME)
+	k3d image import $(IMAGE_WORKER) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_APP) -c $(CLUSTER_NAME)
 	@echo "✅ Images imported."
 
@@ -104,6 +108,8 @@ deploy:
 	@kubectl apply -f k8s/keycloak/
 	@echo "⚡ Deploying FastAPI Auth Service via Helm chart..."
 	@PATH="$$HOME/.local/bin:$$PATH" helm upgrade --install blipp-auth charts/auth-service -n $(NAMESPACE)
+	@echo "⚙️ Deploying Transcode Worker..."
+	@kubectl apply -f k8s/transcode-worker/
 	@echo "📱 Deploying Blipp Expo Frontend..."
 	@kubectl apply -f k8s/blipp-app/
 	@echo "🌐 Deploying Traefik Ingress & IngressRoutes..."
@@ -122,9 +128,19 @@ wait:
 	@kubectl rollout status deployment/keycloak -n $(NAMESPACE) --timeout=180s
 	@echo "⏳ Waiting for FastAPI Auth Service readiness..."
 	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Transcode Worker readiness..."
+	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Blipp Expo App readiness..."
 	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
 	@echo "✅ All microservices are healthy and ready!"
+
+build-transcode-worker:
+	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) ./services/transcode_worker
+
+deploy-transcode-worker:
+	@kubectl apply -f k8s/transcode-worker/
+	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
 
 deploy-nats:
 	@kubectl apply -f k8s/nats/

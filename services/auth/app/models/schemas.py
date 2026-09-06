@@ -31,21 +31,27 @@ class HealthResponse(BaseModel):
 class BlippResponse(BaseModel):
     blipp_id: uuid.UUID
     creator_id: uuid.UUID
-    title: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     audio_url: str
     audio_variants: dict = Field(default_factory=dict)
-    duration_seconds: int = 0
+    duration_seconds: float = 0.0
+    language: str = "en"
     status: str = "published"
+    scheduled_at: Optional[str] = None
+    source_type: str = "direct_upload"
+    parent_upload_id: Optional[uuid.UUID] = None
     created_at: Optional[str] = None
 
 
 class FeedItemResponse(BaseModel):
     blipp_id: uuid.UUID
     creator_id: uuid.UUID
-    title: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     audio_url: str
     audio_variants: dict = Field(default_factory=dict)
-    duration_seconds: int = 0
+    duration_seconds: float = 0.0
     author: Optional[str] = None
     username: Optional[str] = None
     display_name: Optional[str] = None

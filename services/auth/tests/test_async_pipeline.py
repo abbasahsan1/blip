@@ -122,7 +122,7 @@ async def test_authenticated_upload_pipeline():
         assert status_resp.status_code == 200
         status_data = status_resp.json()
         assert status_data.get("upload_id") == upload_id
-        assert status_data.get("processing_status") == "queued"
+        assert status_data.get("processing_status") in ("queued", "transcoding", "done")
         assert status_data.get("raw_file_url") == raw_file_url
 
         # 7. Verify GET /v1/uploads/{upload_id} as different user -> 403 Forbidden

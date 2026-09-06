@@ -83,7 +83,7 @@ class EventBus:
         stream_definitions: List[Dict[str, Any]] = [
             {
                 "name": settings.NATS_STREAM_UPLOADS,
-                "subjects": [settings.NATS_SUBJECT_UPLOADS],
+                "subjects": [settings.NATS_SUBJECT_UPLOADS, "transcode.>"],
             },
             {
                 "name": settings.NATS_STREAM_ENGAGEMENT,
