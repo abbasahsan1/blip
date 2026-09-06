@@ -3,7 +3,7 @@ import uuid
 import logging
 import asyncio
 from pathlib import Path
-from typing import BinaryIO, Optional, Union
+from typing import BinaryIO, Optional, Union, Any
 import boto3
 from botocore.client import Config
 from app.core.config import settings
@@ -64,6 +64,59 @@ class StorageService:
         return await asyncio.to_thread(
             self._upload_file_sync, data, storage_key, bucket_name, content_type
         )
+
+    async def upload_stream(
+        self,
+        file: Any,
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        """
+        Streams file chunks asynchronously to S3/MinIO without reading entire file into memory.
+        Returns the canonical raw_file_url.
+        """
+        return await asyncio.to_thread(
+            self._upload_stream_sync, file, storage_key, bucket_name, content_type
+        )
+
+    def _upload_stream_sync(
+        self,
+        file: Any,
+        storage_key: str,
+        bucket_name: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        bucket = bucket_name or self.raw_bucket
+        mime = content_type or self.normalize_mime_type(storage_key)
+        file_obj = getattr(file, "file", file)
+
+        if self.use_s3 and self.s3_client:
+            try:
+                if hasattr(file_obj, "seek"):
+                    file_obj.seek(0)
+                self.s3_client.upload_fileobj(
+                    file_obj,
+                    bucket,
+                    storage_key,
+                    ExtraArgs={"ContentType": mime},
+                )
+                return self.get_s3_uri(storage_key, bucket_name=bucket)
+            except Exception as e:
+                logger.error(f"S3 upload_stream error: {e}. Falling back to local disk.")
+
+        # Local storage fallback
+        local_path = self.local_dir / storage_key.lstrip("/")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+        with open(local_path, "wb") as f:
+            while chunk := file_obj.read(1024 * 1024):
+                f.write(chunk)
+
+        base_url = settings.PUBLIC_BASE_URL.rstrip("/")
+        return f"{base_url}/v1/blipps/audio/{storage_key.lstrip('/')}"
+
 
     def _upload_file_sync(
         self,
@@ -297,6 +350,16 @@ class StorageService:
 
         base_url = settings.PUBLIC_BASE_URL.rstrip("/")
         return f"{base_url}/v1/blipps/audio/{safe_key}"
+
+    def get_s3_uri(self, storage_key: str, bucket_name: Optional[str] = None) -> str:
+        """
+        Generates full S3/MinIO URI for an object.
+        """
+        bucket = bucket_name or self.raw_bucket
+        safe_key = self.extract_storage_key(storage_key)
+        endpoint = settings.S3_ENDPOINT_URL.rstrip("/") if settings.S3_ENDPOINT_URL else "s3:/"
+        return f"{endpoint}/{bucket}/{safe_key.lstrip('/')}"
+
 
     def get_public_audio_url(self, storage_key: str) -> str:
         return self.get_playback_url(storage_key)

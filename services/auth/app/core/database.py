@@ -32,6 +32,20 @@ CREATE TABLE IF NOT EXISTS users_profile (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username);
+
+CREATE TABLE IF NOT EXISTS uploads (
+    upload_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    raw_file_url VARCHAR(1024) NOT NULL,
+    upload_type VARCHAR(50) NOT NULL DEFAULT 'audio',
+    processing_status VARCHAR(50) NOT NULL DEFAULT 'queued',
+    title VARCHAR(255),
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_uploads_creator_id ON uploads (creator_id);
+CREATE INDEX IF NOT EXISTS idx_uploads_processing_status ON uploads (processing_status);
 """
 
 

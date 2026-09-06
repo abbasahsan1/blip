@@ -87,7 +87,7 @@ async def test_nats_jetstream_pub_sub():
     assert received_data.get("event_id") == test_event_id
     assert received_data.get("type") == "audio.uploaded"
 
-    await sub.unsubscribe()
+    await sub.drain()
     await event_bus.close()
 
 

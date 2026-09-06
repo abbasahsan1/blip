@@ -74,7 +74,7 @@ def run_pod_integration_tests():
     print("\n--- 2. Running MinIO & NATS JetStream Pytest Suite Inside Pod ---")
     cmd = [
         "kubectl", "exec", "-n", "blipp", "deployment/auth-service", "--",
-        "python3", "-m", "pytest", "tests/test_infra.py", "-v", "-s"
+        "python3", "-m", "pytest", "tests/test_infra.py", "tests/test_async_pipeline.py", "-v", "-s"
     ]
     print(f"  Executing: {' '.join(cmd)}")
     res = subprocess.run(cmd)

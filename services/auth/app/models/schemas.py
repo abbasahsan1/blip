@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
 
@@ -88,4 +88,33 @@ class TelemetryEvent(BaseModel):
     duration_seconds: int
     device_signal: str
     timestamp: str
+
+
+class UploadResponse(BaseModel):
+    upload_id: uuid.UUID
+    status: str = "queued"
+    message: str = "Upload received and queued for processing"
+
+
+class UploadStatusResponse(BaseModel):
+    upload_id: uuid.UUID
+    creator_id: uuid.UUID
+    raw_file_url: str
+    upload_type: str = "audio"
+    processing_status: str = "queued"
+    title: Optional[str] = None
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class EngagementEvent(BaseModel):
+    event_type: Literal["play_progress", "play_complete", "skip", "like", "save", "follow", "share"]
+    user_id: uuid.UUID
+    blipp_id: uuid.UUID
+    session_id: uuid.UUID
+    position_seconds: float = Field(..., ge=0)
+    duration_seconds: float = Field(..., ge=0)
+    device_signal: Literal["screen_on", "screen_off", "bluetooth_connected", "app_backgrounded"]
+    timestamp: str
+
 
