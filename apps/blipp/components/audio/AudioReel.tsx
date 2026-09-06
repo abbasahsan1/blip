@@ -72,11 +72,13 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       const handleEnded = () => {
         setIsPlaying(false);
         setProgress(0);
-        if (item?.id) {
+        const blippId = item?.blipp_id || item?.id;
+        const totalDuration = item?.duration_seconds || item?.duration || 0;
+        if (blippId) {
           recordPlayProgress({
-            blipp_id: item.id,
-            position_seconds: item.duration || 0,
-            duration_seconds: item.duration || 0,
+            blipp_id: blippId,
+            position_seconds: totalDuration,
+            duration_seconds: totalDuration,
             event_type: 'play_complete',
           });
         }
@@ -103,7 +105,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         audioRef.current = null;
       };
     }
-  }, [audioUri, item?.id, item?.duration]);
+  }, [audioUri, item?.id, item?.blipp_id, item?.duration, item?.duration_seconds]);
 
   // Pause playback if reel becomes inactive
   useEffect(() => {
@@ -111,16 +113,18 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       const audio = audioRef.current;
       audio.pause();
       setIsPlaying(false);
-      if (item?.id && audio.duration && audio.currentTime < audio.duration * 0.9) {
+      const blippId = item?.blipp_id || item?.id;
+      const totalDuration = item?.duration_seconds || item?.duration || Math.floor(audio.duration);
+      if (blippId && audio.duration && audio.currentTime < audio.duration * 0.9) {
         recordPlayProgress({
-          blipp_id: item.id,
+          blipp_id: blippId,
           position_seconds: Math.floor(audio.currentTime),
-          duration_seconds: item.duration || Math.floor(audio.duration),
+          duration_seconds: totalDuration,
           event_type: 'skip',
         });
       }
     }
-  }, [isActive, isPlaying, item?.id, item?.duration]);
+  }, [isActive, isPlaying, item?.id, item?.blipp_id, item?.duration, item?.duration_seconds]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -165,16 +169,31 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
 
+      const blippId = item?.blipp_id || item?.id;
+      const totalDuration = item?.duration_seconds || item?.duration || 0;
+
+      // Emit initial play_progress event upon playback start per Section 6.5
+      if (blippId) {
+        const audio = audioRef.current;
+        recordPlayProgress({
+          blipp_id: blippId,
+          position_seconds: audio ? Math.floor(audio.currentTime) : 0,
+          duration_seconds: totalDuration,
+          event_type: 'play_progress',
+        });
+      }
+
       let secondsElapsed = 0;
       const interval = setInterval(() => {
         secondsElapsed += 1;
-        if (secondsElapsed % 3 === 0) {
+        // Emit play_progress events every 5 seconds per Section 6.5
+        if (secondsElapsed % 5 === 0 && blippId) {
           const audio = audioRef.current;
           const positionSeconds = audio ? Math.floor(audio.currentTime) : secondsElapsed;
           recordPlayProgress({
-            blipp_id: item.id,
+            blipp_id: blippId,
             position_seconds: positionSeconds,
-            duration_seconds: item.duration,
+            duration_seconds: totalDuration,
             event_type: 'play_progress',
           });
         }
@@ -190,7 +209,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         Animated.timing(b, { toValue: 0.2, duration: 180, useNativeDriver: false }).start();
       });
     }
-  }, [isPlaying, bars, item?.duration, item?.id]);
+  }, [isPlaying, bars, item?.duration, item?.duration_seconds, item?.id, item?.blipp_id]);
 
   const currentSeconds = Math.floor(progress * (item?.duration || 0));
 

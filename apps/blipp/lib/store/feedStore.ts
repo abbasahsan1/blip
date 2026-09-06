@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api } from '../api';
+import { blippApi } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
 const GRADIENTS: [string, string][] = [
@@ -41,23 +41,22 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
     try {
-      const queryCursor = cursor !== undefined && cursor !== null ? cursor : (get().cursor || '');
-      const res = await api.get<{
-        items: any[];
-        next_cursor: string | null;
-      }>(`/v1/feed?cursor=${encodeURIComponent(queryCursor)}&limit=10`);
+      const res = await blippApi.getBlipps();
+      const serverItems = res.items || [];
+      const nextCursor = res.next_cursor ?? null;
 
-      const serverItems = res.data?.items || [];
-      const nextCursor = res.data?.next_cursor ?? null;
-
-      const mapped: Blipp[] = serverItems.map((item: any, idx: number) => {
+      const mapped: Blipp[] = serverItems.map((item, idx: number) => {
         const standardUrl = item.audio_variants?.standard || item.audio_url || '';
         return {
-          id: item.blipp_id || item.id,
+          id: item.blipp_id,
+          blipp_id: item.blipp_id,
           title: item.title,
+          description: item.description,
           author: item.display_name || item.author || (item.username ? `@${item.username}` : 'Creator'),
-          authorId: item.creator_id || item.authorId || '',
-          duration: item.duration_seconds || item.duration || 30,
+          authorId: item.creator_id,
+          creator_id: item.creator_id,
+          duration: item.duration_seconds || 30,
+          duration_seconds: item.duration_seconds || 30,
           audio_url: item.audio_url || standardUrl,
           audio_variants: {
             standard: standardUrl,
@@ -65,11 +64,11 @@ export const useFeedStore = create<FeedState>((set, get) => ({
             high: item.audio_variants?.high || standardUrl,
           },
           audioUrl: standardUrl,
-          coverGradient: item.coverGradient || GRADIENTS[idx % GRADIENTS.length],
-          listenCount: item.listenCount || item.listen_count || 0,
-          likeCount: item.likeCount || item.like_count || 0,
-          isLiked: Boolean(item.isLiked || item.is_liked),
-          createdAt: item.createdAt || item.created_at || new Date().toISOString(),
+          coverGradient: GRADIENTS[idx % GRADIENTS.length],
+          listenCount: 0,
+          likeCount: 0,
+          isLiked: false,
+          createdAt: new Date().toISOString(),
         };
       });
 

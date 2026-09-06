@@ -26,14 +26,22 @@ export default function UploadScreen() {
   const insets = useSafeAreaInsets();
   const { status } = useSessionStore();
   const { refreshFeed } = useFeedStore();
-  const { progress, isUploading, error: storeError, reset: resetUploadStore } = useUploadStore();
+  const {
+    status: uploadStatus,
+    progress,
+    isUploading,
+    error: storeError,
+    reset: resetUploadStore,
+  } = useUploadStore();
 
   const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [duration, setDuration] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [isDescFocused, setIsDescFocused] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -80,7 +88,7 @@ export default function UploadScreen() {
     }
 
     if (!title.trim()) {
-      setErrorMessage('Please provide a title for your audio broadcast.');
+      setErrorMessage('Please provide a title for your audio blipp.');
       return;
     }
 
@@ -91,21 +99,22 @@ export default function UploadScreen() {
         file: selectedFile,
         draft: {
           title: title.trim(),
-          description: null,
+          description: description.trim() || null,
           durationSeconds: duration,
         },
       });
 
-      setSuccessMessage('Broadcast uploaded successfully. Directing to feed...');
+      setSuccessMessage('Published successfully!');
       await refreshFeed();
       setTimeout(() => {
         setTitle('');
+        setDescription('');
         setSelectedFile(null);
         setDuration(0);
         setSuccessMessage(null);
         resetUploadStore();
         router.replace('/(tabs)');
-      }, 900);
+      }, 1000);
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -139,9 +148,9 @@ export default function UploadScreen() {
         <View style={styles.headerIconChassis}>
           <AudioReelMark size={28} color={PALETTE.accent} />
         </View>
-        <Text style={styles.heading}>Broadcast Audio</Text>
+        <Text style={styles.heading}>Post Blipp</Text>
         <Text style={styles.subheading}>
-          Encode and publish uncompressed or compressed audio directly to the community stream.
+          Upload and auto-transcode high quality audio reels with multi-bitrate streaming variants.
         </Text>
       </View>
 
@@ -149,7 +158,17 @@ export default function UploadScreen() {
       {displayError && (
         <View style={styles.errorBanner} accessibilityRole="alert">
           <StatusAlertMark size={16} color={PALETTE.error} />
-          <Text style={styles.errorText}>{displayError}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.errorText}>{displayError}</Text>
+          </View>
+          <Pressable
+            style={styles.inlineRetryButton}
+            onPress={handleSubmit}
+            accessibilityRole="button"
+            accessibilityLabel="Retry Upload"
+          >
+            <Text style={styles.inlineRetryButtonText}>Retry</Text>
+          </Pressable>
         </View>
       )}
 
@@ -191,17 +210,17 @@ export default function UploadScreen() {
                 }`
               : 'MP3, WAV, M4A, or AAC formats supported'}
           </Text>
-          {selectedFile && (
+          {selectedFile && !isUploading && (
             <Text style={styles.changeFilePrompt}>Select a different file</Text>
           )}
         </Pressable>
 
         {/* Title Input Field */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Broadcast Title</Text>
+          <Text style={styles.label}>Blipp Title</Text>
           <TextInput
             style={[styles.input, isFocused && styles.inputFocused]}
-            placeholder="e.g. Field Recordings from the North Ridge"
+            placeholder="e.g. Morning Reflections Episode 4"
             placeholderTextColor={PALETTE.textMuted}
             value={title}
             onChangeText={setTitle}
@@ -209,11 +228,30 @@ export default function UploadScreen() {
             onBlur={() => setIsFocused(false)}
             editable={!isUploading}
             maxLength={100}
-            accessibilityLabel="Broadcast Title"
+            accessibilityLabel="Blipp Title"
           />
         </View>
 
-        {/* Real Byte Transfer Progress Bar */}
+        {/* Description Input Field */}
+        <View style={styles.inputGroup}>
+          <Text style={styles.label}>Description (Optional)</Text>
+          <TextInput
+            style={[styles.input, styles.textArea, isDescFocused && styles.inputFocused]}
+            placeholder="Tell your listeners about this blipp..."
+            placeholderTextColor={PALETTE.textMuted}
+            value={description}
+            onChangeText={setDescription}
+            onFocus={() => setIsDescFocused(true)}
+            onBlur={() => setIsDescFocused(false)}
+            editable={!isUploading}
+            multiline
+            numberOfLines={3}
+            maxLength={500}
+            accessibilityLabel="Blipp Description"
+          />
+        </View>
+
+        {/* Dynamic Multi-Stage Processing Indicator */}
         {isUploading && (
           <View style={styles.progressSection}>
             <View style={styles.progressTrack}>
@@ -221,7 +259,11 @@ export default function UploadScreen() {
             </View>
             <View style={styles.progressInfo}>
               <Text style={styles.progressText}>
-                {progress < 100 ? `Uploading binary stream (${progress}%)` : 'Finalizing ingest...'}
+                {uploadStatus === 'transcoding'
+                  ? 'Transcoding audio variants...'
+                  : uploadStatus === 'completed'
+                  ? 'Published successfully!'
+                  : `Uploading audio... (${progress}%)`}
               </Text>
               <Text style={styles.progressPercentage}>{progress}%</Text>
             </View>
@@ -238,17 +280,21 @@ export default function UploadScreen() {
           onPress={handleSubmit}
           disabled={isUploading}
           accessibilityRole="button"
-          accessibilityLabel="Publish Broadcast"
+          accessibilityLabel="Post Blipp"
         >
           {isUploading ? (
             <View style={styles.buttonRow}>
               <ActivityIndicator size="small" color="#09090b" />
               <Text style={styles.submitButtonText}>
-                {progress < 100 ? `Uploading (${progress}%)...` : 'Publishing...'}
+                {uploadStatus === 'transcoding'
+                  ? 'Transcoding audio variants...'
+                  : 'Uploading audio...'}
               </Text>
             </View>
+          ) : uploadStatus === 'failed' ? (
+            <Text style={styles.submitButtonText}>Retry Post</Text>
           ) : (
-            <Text style={styles.submitButtonText}>Publish Broadcast</Text>
+            <Text style={styles.submitButtonText}>Post Blipp</Text>
           )}
         </Pressable>
       </View>
@@ -316,6 +362,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'PlusJakartaSans_500Medium',
     flex: 1,
+  },
+  inlineRetryButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: `${PALETTE.error}60`,
+  },
+  inlineRetryButtonText: {
+    color: PALETTE.error,
+    fontSize: 12,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
   },
   successBanner: {
     width: '100%',
@@ -406,6 +465,11 @@ const styles = StyleSheet.create({
   },
   inputFocused: {
     borderColor: PALETTE.accent,
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+    paddingTop: 12,
   },
   progressSection: {
     gap: 8,

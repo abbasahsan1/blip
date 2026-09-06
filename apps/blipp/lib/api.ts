@@ -176,6 +176,7 @@ interface LoginResponse {
 
 interface MeResponse {
   id?: string;
+  user_id?: string;
   sub?: string;
   email: string;
   username?: string;
@@ -197,7 +198,7 @@ function toTokens(r: LoginResponse): AuthTokens {
 function toUser(r: MeResponse): User {
   const displayName = r.name || (r.first_name ? `${r.first_name} ${r.last_name || ''}`.trim() : undefined);
   return {
-    id: r.id || r.sub || '',
+    id: r.id || r.user_id || r.sub || '',
     email: r.email,
     username: r.username || r.preferred_username || '',
     displayName: displayName || r.username || r.preferred_username || '',
@@ -312,6 +313,42 @@ export const telemetryApi = {
   },
 };
 
+export interface UploadResponse {
+  upload_id: string;
+  status: string;
+  message: string;
+}
+
+export interface UploadStatusResponse {
+  upload_id: string;
+  creator_id: string;
+  raw_file_url: string;
+  upload_type: string;
+  processing_status: 'queued' | 'transcoding' | 'done' | 'failed';
+  title?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+}
+
+export const uploadApi = {
+  async upload(formData: FormData, token?: string): Promise<UploadResponse> {
+    const res = await requestRaw<UploadResponse>('/v1/uploads', {
+      method: 'POST',
+      body: formData,
+      token,
+    });
+    return res.data;
+  },
+
+  async getStatus(uploadId: string, token?: string): Promise<UploadStatusResponse> {
+    const res = await requestRaw<UploadStatusResponse>(`/v1/uploads/${uploadId}`, {
+      method: 'GET',
+      token,
+    });
+    return res.data;
+  },
+};
+
 // ─── Blipps Content API ───────────────────────────────────────────────────────
 
 export interface BlippUploadResponse {
@@ -329,6 +366,7 @@ export interface FeedResponseItem {
   blipp_id: string;
   creator_id: string;
   title: string;
+  description?: string | null;
   audio_url: string;
   audio_variants: { standard?: string; low?: string; high?: string };
   duration_seconds: number;
@@ -372,8 +410,13 @@ export const profileApi = {
 };
 
 export const blippApi = {
+  async getBlipps(): Promise<FeedResponse> {
+    const res = await api.get<FeedResponse>('/v1/blipps');
+    return res.data;
+  },
+
   async getFeed(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/feed');
+    const res = await api.get<FeedResponse>('/v1/blipps');
     return res.data;
   },
 

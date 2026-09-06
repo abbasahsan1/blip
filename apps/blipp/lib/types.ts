@@ -45,12 +45,18 @@ export interface AdMetadata {
   click_url?: string;
 }
 
+export type UploadStatus = 'idle' | 'uploading' | 'transcoding' | 'completed' | 'failed';
+
 export interface Blipp {
   id: string;
+  blipp_id?: string;
   title: string;
+  description?: string | null;
   author: string;
   authorId: string;
+  creator_id?: string;
   duration: number; // seconds
+  duration_seconds?: number;
   audio_url: string; // canonical URL
   audio_variants?: AudioVariants; // quality tier variants
   audioUrl?: string; // backwards compatibility alias
@@ -62,7 +68,7 @@ export interface Blipp {
   createdAt: string;
   // Source metadata
   sourceName?: string; // e.g. "The Tim Ferriss Show", "Lex Fridman Podcast"
-  sourceType?: 'podcast' | 'interview' | 'documentary' | 'other';
+  sourceType?: 'podcast' | 'interview' | 'documentary' | 'other' | string;
   // Server-hydrated sponsored ad slot (§6.4)
   is_sponsored?: boolean;
   sponsor?: SponsorInfo;

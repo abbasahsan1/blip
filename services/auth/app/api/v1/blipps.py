@@ -108,6 +108,8 @@ async def upload_blipp(
     )
 
 
+@router.get("", response_model=FeedResponse)
+@router.get("/", response_model=FeedResponse)
 @router.get("/feed", response_model=FeedResponse)
 async def get_feed():
     """
@@ -126,6 +128,7 @@ async def get_feed():
                     b.blipp_id, 
                     b.creator_id, 
                     b.title, 
+                    b.description,
                     b.audio_url, 
                     b.audio_variants, 
                     b.duration_seconds,
@@ -150,14 +153,16 @@ async def get_feed():
         playback_url = storage_service.get_playback_url(r["audio_url"])
         if not parsed_variants and playback_url:
             parsed_variants = {"standard": playback_url}
-        elif "standard" in parsed_variants:
-            parsed_variants["standard"] = storage_service.get_playback_url(parsed_variants["standard"])
+        else:
+            for k, v in list(parsed_variants.items()):
+                parsed_variants[k] = storage_service.get_playback_url(v)
 
         items.append(
             FeedItemResponse(
                 blipp_id=r["blipp_id"],
                 creator_id=r["creator_id"],
                 title=r["title"],
+                description=r["description"],
                 audio_url=playback_url,
                 audio_variants=parsed_variants,
                 duration_seconds=r["duration_seconds"],
