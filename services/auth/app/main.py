@@ -21,7 +21,6 @@ from app.core.exceptions import (
     CODE_SERVICE_UNAVAILABLE,
 )
 from app.api.v1.auth import router as auth_router
-from app.api.v1.protected import router as protected_router
 from app.api.v1.blipps import router as blipps_router
 from app.api.v1.uploads import router as uploads_router
 from app.api.v1.events import router as events_router
@@ -241,14 +240,12 @@ async def docs_redirect():
 
 # Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
 app.include_router(auth_router, prefix="/api")
-app.include_router(protected_router, prefix="/api")
 app.include_router(blipps_router, prefix="/api")
 app.include_router(uploads_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
-app.include_router(protected_router, prefix="/v1")
 app.include_router(blipps_router, prefix="/v1")
 app.include_router(uploads_router, prefix="/v1")
 app.include_router(events_router, prefix="/v1")

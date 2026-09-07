@@ -1,118 +1,32 @@
 import uuid
-import asyncio
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, date
 import asyncpg
 
+from blipp_common.database import (
+    get_db_pool as _common_get_db_pool,
+    init_db_pool as _common_init_db_pool,
+    close_db_pool as _common_close_db_pool,
+)
 from app.config import settings
 
 logger = logging.getLogger("analytics-worker.database")
 
-_pool: Optional[asyncpg.Pool] = None
-
-CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS users_profile (
-    user_id UUID PRIMARY KEY,
-    username VARCHAR(255) UNIQUE NOT NULL,
-    display_name VARCHAR(255) NOT NULL,
-    bio TEXT,
-    avatar_url TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS blipps (
-    blipp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
-    title VARCHAR(255),
-    description TEXT,
-    audio_url TEXT NOT NULL,
-    audio_variants JSONB NOT NULL DEFAULT '{}'::jsonb,
-    duration_seconds DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    language VARCHAR(10) NOT NULL DEFAULT 'en',
-    status VARCHAR(50) NOT NULL DEFAULT 'published',
-    scheduled_at TIMESTAMP WITH TIME ZONE,
-    source_type VARCHAR(50) NOT NULL DEFAULT 'direct_upload',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS listening_session_agg (
-    session_id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
-    blipp_id UUID NOT NULL REFERENCES blipps(blipp_id) ON DELETE CASCADE,
-    total_seconds_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    completed BOOLEAN NOT NULL DEFAULT FALSE,
-    drop_off_position_seconds DOUBLE PRECISION,
-    session_date DATE NOT NULL DEFAULT CURRENT_DATE
-);
-
-CREATE INDEX IF NOT EXISTS idx_listening_session_user ON listening_session_agg (user_id, session_date DESC);
-CREATE INDEX IF NOT EXISTS idx_listening_session_blipp ON listening_session_agg (blipp_id);
-
-CREATE TABLE IF NOT EXISTS creator_minutes_agg (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
-    blipp_id UUID NOT NULL REFERENCES blipps(blipp_id) ON DELETE CASCADE,
-    total_minutes_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    date DATE NOT NULL DEFAULT CURRENT_DATE,
-    CONSTRAINT uq_creator_blipp_date UNIQUE (creator_id, blipp_id, date)
-);
-
-CREATE INDEX IF NOT EXISTS idx_creator_minutes_creator_date ON creator_minutes_agg (creator_id, date DESC);
-CREATE INDEX IF NOT EXISTS idx_creator_minutes_blipp ON creator_minutes_agg (blipp_id);
-"""
-
 
 async def get_db_pool() -> asyncpg.Pool:
-    global _pool
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
-
-    if _pool is not None:
-        pool_loop = getattr(_pool, "_loop", None)
-        if pool_loop and (pool_loop.is_closed() or (current_loop and pool_loop != current_loop)):
-            _pool = None
-
-    if _pool is None:
-        await init_db()
-    return _pool
+    """Returns the shared asyncpg connection pool initialized with analytics worker settings."""
+    return await _common_get_db_pool(settings)
 
 
 async def init_db() -> None:
-    global _pool
-    if _pool is not None:
-        return
+    """Initializes the database connection pool and applies unified table DDL."""
+    await _common_init_db_pool(settings)
 
-    candidate_databases = [settings.POSTGRES_DB, "blipp", "keycloak", "postgres"]
-    connected = False
 
-    for db_name in candidate_databases:
-        try:
-            logger.info(f"Connecting to PostgreSQL at {settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{db_name}")
-            _pool = await asyncpg.create_pool(
-                host=settings.POSTGRES_HOST,
-                port=settings.POSTGRES_PORT,
-                user=settings.POSTGRES_USER,
-                password=settings.POSTGRES_PASSWORD,
-                database=db_name,
-                min_size=1,
-                max_size=5,
-                timeout=10.0,
-            )
-            connected = True
-            logger.info(f"PostgreSQL connection pool initialized on database '{db_name}'")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to connect to PostgreSQL database '{db_name}': {e}")
-
-    if not connected or _pool is None:
-        raise RuntimeError("Could not establish PostgreSQL connection pool")
-
-    async with _pool.acquire() as conn:
-        await conn.execute(CREATE_TABLES_SQL)
-        logger.info("Verified/created analytics tables in database")
+async def close_db() -> None:
+    """Closes the asyncpg connection pool."""
+    await _common_close_db_pool()
 
 
 async def record_playback_engagement(
@@ -258,9 +172,9 @@ async def record_playback_engagement(
             }
 
 
-async def close_db() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
-        logger.info("PostgreSQL connection pool closed")
+__all__ = [
+    "get_db_pool",
+    "init_db",
+    "close_db",
+    "record_playback_engagement",
+]

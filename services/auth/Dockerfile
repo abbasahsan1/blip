@@ -7,9 +7,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN python -m venv /opt/venv
-COPY requirements.txt .
-RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+
+# Install shared core library first
+COPY libs/common /libs/common
+RUN /opt/venv/bin/pip install --no-cache-dir /libs/common
+
+# Install service dependencies
+COPY services/auth/requirements.txt .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # In python:3.11-slim, /opt/venv/bin/python points to /usr/local/bin/python
 # In gcr.io/distroless/python3-debian12, the python3 binary is located at /usr/bin/python3
@@ -32,8 +38,8 @@ ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
 COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code and tests
-COPY app/ ./app/
-COPY tests/ ./tests/
+COPY services/auth/app/ ./app/
+COPY services/auth/tests/ ./tests/
 
 EXPOSE 8000
 

@@ -15,11 +15,17 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip
 
-COPY app/ ./app/
-COPY tests/ ./tests/
+# Install shared core library first
+COPY libs/common /libs/common
+RUN pip install --no-cache-dir /libs/common
+
+# Install service dependencies
+COPY services/transcode_worker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY services/transcode_worker/app/ ./app/
+COPY services/transcode_worker/tests/ ./tests/
 
 ENTRYPOINT ["python", "-m", "app.main"]

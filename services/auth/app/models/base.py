@@ -1,3 +1,3 @@
-from sqlalchemy.orm import declarative_base
+from blipp_common.database import Base
 
-Base = declarative_base()
+__all__ = ["Base"]

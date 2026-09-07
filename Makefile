@@ -72,11 +72,11 @@ cluster-down: destroy
 # Build all service containers using Docker layer caching
 build:
 	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) ./services/auth
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) -f services/auth/Dockerfile .
 	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) ./services/transcode_worker
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) -f services/transcode_worker/Dockerfile .
 	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) ./services/analytics_worker
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) -f services/analytics_worker/Dockerfile .
 	@echo "📦 Building Expo Frontend container [$(IMAGE_APP)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_APP) ./apps/blipp
 	@echo "📦 Pulling base images..."
@@ -152,7 +152,7 @@ wait:
 
 build-analytics-worker:
 	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) ./services/analytics_worker
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) -f services/analytics_worker/Dockerfile .
 
 deploy-analytics-worker:
 	@kubectl apply -f k8s/analytics-worker/
@@ -160,7 +160,7 @@ deploy-analytics-worker:
 
 build-transcode-worker:
 	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) ./services/transcode_worker
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) -f services/transcode_worker/Dockerfile .
 
 deploy-transcode-worker:
 	@kubectl apply -f k8s/transcode-worker/
@@ -183,7 +183,7 @@ deploy-gorse:
 	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
 
 verify-infra:
-	@python3 services/auth/tests/verify_infra.py
+	@pytest services/auth/tests/test_infra.py -v
 
 # Show cluster and pod status
 status:
