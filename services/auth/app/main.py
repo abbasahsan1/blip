@@ -26,6 +26,7 @@ from app.api.v1.blipps import router as blipps_router
 from app.api.v1.uploads import router as uploads_router
 from app.api.v1.events import router as events_router
 from app.api.v1.profiles import router as profiles_router
+from app.api.v1.analytics import router as analytics_router
 from app.core.database import init_db, close_db, get_db_pool
 from app.core.storage import storage_service
 from app.core.events import event_bus
@@ -88,10 +89,11 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestIDMiddleware)
 
-# CORS configuration
+# CORS configuration: permit LAN requests during development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -239,12 +241,14 @@ app.include_router(blipps_router, prefix="/api")
 app.include_router(uploads_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(profiles_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
 app.include_router(protected_router, prefix="/v1")
 app.include_router(blipps_router, prefix="/v1")
 app.include_router(uploads_router, prefix="/v1")
 app.include_router(events_router, prefix="/v1")
 app.include_router(profiles_router, prefix="/v1")
+app.include_router(analytics_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

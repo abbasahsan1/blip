@@ -124,3 +124,40 @@ class EngagementEvent(BaseModel):
     timestamp: str
 
 
+class ListeningHistoryItem(BaseModel):
+    session_id: uuid.UUID
+    blipp_id: uuid.UUID
+    title: Optional[str] = None
+    description: Optional[str] = None
+    audio_url: str
+    duration_seconds: float
+    total_seconds_listened: float
+    completed: bool
+    drop_off_position_seconds: Optional[float] = None
+    session_date: str
+    creator_id: uuid.UUID
+    creator_name: Optional[str] = None
+    creator_username: Optional[str] = None
+
+
+class ListeningHistoryResponse(BaseModel):
+    items: List[ListeningHistoryItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class CreatorTopBlipp(BaseModel):
+    blipp_id: uuid.UUID
+    title: Optional[str] = None
+    total_minutes_listened: float = 0.0
+    play_count: int = 0
+    completed_count: int = 0
+
+
+class CreatorAnalyticsResponse(BaseModel):
+    creator_id: uuid.UUID
+    total_listen_minutes: float = 0.0
+    completed_play_count: int = 0
+    total_plays: int = 0
+    top_blipps: List[CreatorTopBlipp] = Field(default_factory=list)
+
+

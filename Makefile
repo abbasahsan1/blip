@@ -15,11 +15,12 @@ NAMESPACE ?= blipp
 # Docker image tags
 IMAGE_AUTH ?= blipp-auth-service:latest
 IMAGE_WORKER ?= blipp-transcode-worker:latest
+IMAGE_ANALYTICS ?= blipp-analytics-worker:latest
 IMAGE_APP ?= blipp-app:latest
 IMAGE_KEYCLOAK ?= quay.io/keycloak/keycloak:26.1.3
 IMAGE_POSTGRES ?= postgres:16-alpine
 
-.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean
+.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile
 
 # Default Target: Fully build and deploy the entire production baseline
 all: check-prereqs init-env cluster-up build import deploy wait status
@@ -74,6 +75,8 @@ build:
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) ./services/auth
 	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) ./services/transcode_worker
+	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) ./services/analytics_worker
 	@echo "📦 Building Expo Frontend container [$(IMAGE_APP)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_APP) ./apps/blipp
 	@echo "📦 Pulling base images..."
@@ -86,6 +89,7 @@ import:
 	@echo "📥 Importing container images into k3d cluster '$(CLUSTER_NAME)'..."
 	k3d image import $(IMAGE_AUTH) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_WORKER) -c $(CLUSTER_NAME)
+	k3d image import $(IMAGE_ANALYTICS) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_APP) -c $(CLUSTER_NAME)
 	@echo "✅ Images imported."
 
@@ -110,6 +114,8 @@ deploy:
 	@PATH="$$HOME/.local/bin:$$PATH" helm upgrade --install blipp-auth charts/auth-service -n $(NAMESPACE)
 	@echo "⚙️ Deploying Transcode Worker..."
 	@kubectl apply -f k8s/transcode-worker/
+	@echo "📊 Deploying Analytics Worker..."
+	@kubectl apply -f k8s/analytics-worker/
 	@echo "📱 Deploying Blipp Expo Frontend..."
 	@kubectl apply -f k8s/blipp-app/
 	@echo "🌐 Deploying Traefik Ingress & IngressRoutes..."
@@ -130,9 +136,19 @@ wait:
 	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Transcode Worker readiness..."
 	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Analytics Worker readiness..."
+	@kubectl rollout status deployment/analytics-worker -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Blipp Expo App readiness..."
 	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
 	@echo "✅ All microservices are healthy and ready!"
+
+build-analytics-worker:
+	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) ./services/analytics_worker
+
+deploy-analytics-worker:
+	@kubectl apply -f k8s/analytics-worker/
+	@kubectl rollout status deployment/analytics-worker -n $(NAMESPACE) --timeout=120s
 
 build-transcode-worker:
 	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
@@ -165,3 +181,8 @@ logs:
 # Clean up dangling images
 clean:
 	@docker image prune -f
+
+# Start mobile dev environment for physical devices via Expo Go on LAN
+dev-mobile:
+	@chmod +x ./scripts/dev-mobile.sh
+	@./scripts/dev-mobile.sh

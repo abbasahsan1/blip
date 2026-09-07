@@ -38,7 +38,20 @@ export const getApiBaseUrl = (): string => {
       return '';
     }
   }
-  return 'http://localhost:8000';
+  return 'http://localhost:8000/v1';
+};
+
+export const getKeycloakUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_KEYCLOAK_URL) {
+    return process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
+  }
+  // In production browser environments where /keycloak is reverse-proxied via ingress
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+      return '/keycloak';
+    }
+  }
+  return 'http://localhost:8080/keycloak';
 };
 
 export interface ApiResponse<T = any> {
@@ -87,7 +100,10 @@ export async function requestRaw<T = any>(
   }
 
   const baseUrl = getApiBaseUrl();
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
+    normalizedPath = normalizedPath.slice(3);
+  }
   const endpointUrl = baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
 
   const response = await fetch(endpointUrl, {
@@ -244,7 +260,7 @@ export const authApi = {
     const password = req.password;
     const body = `client_id=blipp-app&grant_type=password&username=${encodeURIComponent(username)}&password=${password}`;
 
-    const res = await fetch('/keycloak/realms/blipp/protocol/openid-connect/token', {
+    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -279,7 +295,7 @@ export const authApi = {
     params.append('grant_type', 'refresh_token');
     params.append('refresh_token', refreshToken);
 
-    const res = await fetch('/keycloak/realms/blipp/protocol/openid-connect/token', {
+    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',

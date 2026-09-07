@@ -62,6 +62,31 @@ ALTER TABLE blipps ALTER COLUMN title DROP NOT NULL;
 ALTER TABLE blipps ALTER COLUMN duration_seconds TYPE DOUBLE PRECISION;
 
 CREATE INDEX IF NOT EXISTS idx_blipps_parent_upload_id ON blipps (parent_upload_id);
+
+CREATE TABLE IF NOT EXISTS listening_session_agg (
+    session_id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    blipp_id UUID NOT NULL REFERENCES blipps(blipp_id) ON DELETE CASCADE,
+    total_seconds_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    drop_off_position_seconds DOUBLE PRECISION,
+    session_date DATE NOT NULL DEFAULT CURRENT_DATE
+);
+
+CREATE INDEX IF NOT EXISTS idx_listening_session_user ON listening_session_agg (user_id, session_date DESC);
+CREATE INDEX IF NOT EXISTS idx_listening_session_blipp ON listening_session_agg (blipp_id);
+
+CREATE TABLE IF NOT EXISTS creator_minutes_agg (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    blipp_id UUID NOT NULL REFERENCES blipps(blipp_id) ON DELETE CASCADE,
+    total_minutes_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    CONSTRAINT uq_creator_blipp_date UNIQUE (creator_id, blipp_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_creator_minutes_creator_date ON creator_minutes_agg (creator_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_creator_minutes_blipp ON creator_minutes_agg (blipp_id);
 """
 
 

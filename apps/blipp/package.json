@@ -4,6 +4,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
+    "start:lan": "expo start --host lan",
+    "start:tunnel": "expo start --tunnel",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
     "typescript": "tsc --noEmit"
