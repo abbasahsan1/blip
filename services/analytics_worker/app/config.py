@@ -37,5 +37,12 @@ class Settings(BaseSettings):
     NATS_SUBJECT_ENGAGEMENT: str = "engagement.>"
     NATS_CONSUMER_GROUP: str = "analytics-workers"
 
+    # Redis Cache
+    REDIS_URL: str = "redis://redis.blipp.svc.cluster.local:6379/0"
+
+    # Gorse Recommender System
+    GORSE_API_URL: str = "http://gorse.blipp.svc.cluster.local:8088"
+    GORSE_API_KEY: str = ""
+
 
 settings = Settings()

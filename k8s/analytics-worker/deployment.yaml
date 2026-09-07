@@ -31,6 +31,10 @@ spec:
               value: blipp
             - name: NATS_URL
               value: nats://nats.blipp.svc.cluster.local:4222
+            - name: REDIS_URL
+              value: redis://redis.blipp.svc.cluster.local:6379/0
+            - name: GORSE_API_URL
+              value: http://gorse.blipp.svc.cluster.local:8088
           resources:
             requests:
               cpu: 100m

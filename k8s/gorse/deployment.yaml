@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gorse
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: gorse
+    app.kubernetes.io/component: recommender
+    app.kubernetes.io/part-of: blipp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gorse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gorse
+        app.kubernetes.io/component: recommender
+        app.kubernetes.io/part-of: blipp
+    spec:
+      containers:
+        - name: gorse
+          image: zhenghaoz/gorse-in-one:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - /etc/gorse/config.toml
+          ports:
+            - name: http
+              containerPort: 8088
+            - name: grpc
+              containerPort: 8086
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+          volumeMounts:
+            - name: gorse-config
+              mountPath: /etc/gorse/config.toml
+              subPath: config.toml
+            - name: gorse-data
+              mountPath: /var/lib/gorse
+          readinessProbe:
+            tcpSocket:
+              port: 8088
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 8088
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+      volumes:
+        - name: gorse-config
+          configMap:
+            name: gorse-config
+        - name: gorse-data
+          persistentVolumeClaim:
+            claimName: gorse-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gorse-pvc
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: gorse
+    app.kubernetes.io/component: recommender
+    app.kubernetes.io/part-of: blipp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

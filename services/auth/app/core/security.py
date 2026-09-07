@@ -190,3 +190,19 @@ async def get_current_user(
         last_name=payload.get("family_name"),
         roles=roles
     )
+
+
+async def get_optional_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)
+) -> Optional[AuthenticatedUser]:
+    """
+    Returns AuthenticatedUser if valid Bearer token is provided; otherwise returns None.
+    Does not raise 401 on missing credentials, allowing guest access to public feeds.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        return await get_current_user(credentials)
+    except Exception:
+        return None
+

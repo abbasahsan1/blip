@@ -4,7 +4,9 @@ import signal
 import asyncio
 import logging
 from typing import Optional
+from datetime import datetime, timezone
 
+import httpx
 import nats
 from nats.aio.client import Client as NATSClient
 from nats.js.client import JetStreamContext
@@ -24,12 +26,53 @@ logging.basicConfig(
 logger = logging.getLogger("analytics-worker")
 
 _running = True
+_http_client: Optional[httpx.AsyncClient] = None
 
 
 def handle_shutdown(sig, frame):
     global _running
     logger.info(f"Received signal {sig}, initiating graceful shutdown...")
     _running = False
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=3.0)
+    return _http_client
+
+
+async def push_gorse_feedback(
+    user_id: str, blipp_id: str, timestamp_str: Optional[str] = None
+) -> None:
+    """
+    Sends positive engagement feedback to the Gorse REST API (POST /api/feedback).
+    Schema: [{"FeedbackType": "listen", "UserId": user_id, "ItemId": blipp_id, "Timestamp": ISO8601}]
+    Executed in an async task to prevent HTTP network latency from blocking NATS acks.
+    """
+    try:
+        client = await get_http_client()
+        url = f"{settings.GORSE_API_URL.rstrip('/')}/api/feedback"
+        ts = timestamp_str or datetime.now(timezone.utc).isoformat()
+        payload = [
+            {
+                "FeedbackType": "listen",
+                "UserId": user_id,
+                "ItemId": blipp_id,
+                "Timestamp": ts,
+            }
+        ]
+        headers = {"Content-Type": "application/json"}
+        if settings.GORSE_API_KEY:
+            headers["X-API-Key"] = settings.GORSE_API_KEY
+
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code < 300:
+            logger.debug(f"Pushed Gorse feedback: user={user_id} blipp={blipp_id}")
+        else:
+            logger.warning(f"Gorse feedback rejected ({resp.status_code}): {resp.text}")
+    except Exception as e:
+        logger.warning(f"Failed to push Gorse feedback for user={user_id} blipp={blipp_id}: {e}")
 
 
 async def ensure_streams(js: JetStreamContext) -> None:
@@ -106,6 +149,25 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 f"delta_mins={res['delta_minutes']:.3f}, "
                 f"completed={res['completed']}"
             )
+
+            # Section 6.5: Positive engagement threshold for Gorse recommender
+            # (Completed listening session, listened >= 30s continuous, or >= 90% of duration)
+            is_positive = (
+                bool(res.get("completed", False)) or
+                float(res.get("total_seconds_listened", 0.0)) >= 30.0 or
+                (duration_seconds > 0 and float(res.get("total_seconds_listened", 0.0)) >= 0.9 * duration_seconds)
+            )
+
+            if is_positive:
+                # Dispatch feedback asynchronously to not block the JetStream ack loop
+                asyncio.create_task(
+                    push_gorse_feedback(
+                        user_id=str(user_id),
+                        blipp_id=str(blipp_id),
+                        timestamp_str=timestamp,
+                    )
+                )
+
         await msg.ack()
 
     except Exception as e:
@@ -165,6 +227,14 @@ async def run_worker() -> None:
     except Exception as e:
         logger.warning(f"Error during NATS close: {e}")
     await close_db()
+
+    global _http_client
+    if _http_client and not _http_client.is_closed:
+        try:
+            await _http_client.aclose()
+        except Exception as e:
+            logger.warning(f"Error closing HTTP client: {e}")
+
     logger.info("Analytics Worker shutdown complete.")
 
 

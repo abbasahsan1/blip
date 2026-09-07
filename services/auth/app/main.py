@@ -30,6 +30,7 @@ from app.api.v1.analytics import router as analytics_router
 from app.core.database import init_db, close_db, get_db_pool
 from app.core.storage import storage_service
 from app.core.events import event_bus
+from app.core.redis import close_redis
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
@@ -60,6 +61,10 @@ async def lifespan(app: FastAPI):
         await close_db()
     except Exception as e:
         logger.error(f"Database shutdown note: {e}")
+    try:
+        await close_redis()
+    except Exception as e:
+        logger.error(f"Redis shutdown note: {e}")
     logger.info(f"Shutting down {settings.APP_NAME}")
 
 

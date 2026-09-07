@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gorse-config
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: gorse
+    app.kubernetes.io/component: recommender
+    app.kubernetes.io/part-of: blipp
+data:
+  config.toml: |
+    [database]
+    data_store = "sqlite:///var/lib/gorse/data.db"
+    cache_store = "redis://redis.blipp.svc.cluster.local:6379/0"
+
+    [master]
+    port = 8086
+    host = "0.0.0.0"
+    http_port = 8088
+    http_host = "0.0.0.0"
+
+    [server]
+    default_n = 20
+    api_key = ""
+    auto_insert_user = true
+    auto_insert_item = true
+
+    [recommend]
+    cache_size = 100
+    data_source = ["listen"]
+
+    [recommend.collaborative]
+    enable_index = false
+
+    [recommend.replacement]
+    enable_replacement = false

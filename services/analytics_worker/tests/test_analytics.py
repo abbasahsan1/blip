@@ -279,3 +279,46 @@ async def test_live_nats_worker_flow():
 
     await test_sub.unsubscribe()
     await nc.close()
+
+
+@pytest.mark.asyncio
+async def test_gorse_feedback_dispatch(monkeypatch):
+    """
+    Validates Section 6.5 Gorse Ingestion:
+    - Positive engagement triggers push_gorse_feedback with valid schema.
+    - Payload contains FeedbackType='listen', UserId, ItemId, Timestamp.
+    """
+    from app.main import push_gorse_feedback
+    import httpx
+
+    captured_requests = []
+
+    async def mock_post(url, json=None, headers=None, timeout=None):
+        captured_requests.append({"url": url, "json": json, "headers": headers})
+        return httpx.Response(200, json={"RowAffected": 1})
+
+    client = httpx.AsyncClient()
+    monkeypatch.setattr(client, "post", mock_post)
+
+    async def mock_get_client():
+        return client
+
+    from app import main
+    monkeypatch.setattr(main, "get_http_client", mock_get_client)
+
+    test_uid = str(uuid.uuid4())
+    test_bid = str(uuid.uuid4())
+    await push_gorse_feedback(user_id=test_uid, blipp_id=test_bid)
+
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    assert req["url"].endswith("/api/feedback")
+    assert isinstance(req["json"], list)
+    feedback_item = req["json"][0]
+    assert feedback_item["FeedbackType"] == "listen"
+    assert feedback_item["UserId"] == test_uid
+    assert feedback_item["ItemId"] == test_bid
+    assert "Timestamp" in feedback_item
+
+    await client.aclose()
+

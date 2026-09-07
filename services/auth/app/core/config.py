@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     STORAGE_LOCAL_DIR: str = "/app/data/uploads"
     PUBLIC_BASE_URL: str = "http://100.122.207.32:8419"
 
+    # Redis Cache
+    REDIS_URL: str = "redis://redis.blipp.svc.cluster.local:6379/0"
+
+    # Gorse Recommender System
+    GORSE_API_URL: str = "http://gorse.blipp.svc.cluster.local:8088"
+    GORSE_API_KEY: str = ""
+
     def get_jwks_url(self) -> str:
         if self.JWKS_URL:
             return self.JWKS_URL

@@ -104,6 +104,10 @@ deploy:
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "💾 Deploying PostgreSQL..."
 	@kubectl apply -f k8s/postgres/
+	@echo "🔴 Deploying Redis..."
+	@kubectl apply -f k8s/redis/
+	@echo "🧠 Deploying Gorse..."
+	@kubectl apply -f k8s/gorse/
 	@echo "📡 Deploying NATS JetStream..."
 	@kubectl apply -f k8s/nats/
 	@echo "🪣 Deploying MinIO Object Storage..."
@@ -126,6 +130,10 @@ deploy:
 wait:
 	@echo "⏳ Waiting for PostgreSQL readiness..."
 	@kubectl rollout status deployment/postgres -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Redis readiness..."
+	@kubectl rollout status deployment/redis -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Gorse readiness..."
+	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for NATS JetStream readiness..."
 	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for MinIO readiness..."
@@ -165,6 +173,14 @@ deploy-nats:
 deploy-minio:
 	@kubectl apply -f k8s/minio/
 	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=120s
+
+deploy-redis:
+	@kubectl apply -f k8s/redis/
+	@kubectl rollout status deployment/redis -n $(NAMESPACE) --timeout=120s
+
+deploy-gorse:
+	@kubectl apply -f k8s/gorse/
+	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
 
 verify-infra:
 	@python3 services/auth/tests/verify_infra.py
