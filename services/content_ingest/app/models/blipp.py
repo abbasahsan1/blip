@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
-from app.models.base import Base
+from blipp_common.database import Base
 
 
 class Blipp(Base):
@@ -44,3 +44,6 @@ class Blipp(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+__all__ = ["Blipp"]

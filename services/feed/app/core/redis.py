@@ -1,9 +1,9 @@
 import logging
 from typing import Optional
 import redis.asyncio as aioredis
-from app.core.config import settings
+from blipp_common.config import settings
 
-logger = logging.getLogger("auth-service.redis")
+logger = logging.getLogger("feed-service.redis")
 
 _redis_pool: Optional[aioredis.ConnectionPool] = None
 _redis_client: Optional[aioredis.Redis] = None
@@ -43,3 +43,6 @@ async def close_redis() -> None:
             logger.warning(f"Error disconnecting Redis pool: {e}")
         _redis_pool = None
     logger.info("Redis connection pool closed")
+
+
+__all__ = ["get_redis_client", "close_redis"]

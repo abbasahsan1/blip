@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.models.base import Base
+from blipp_common.database import Base
 
 
 class Upload(Base):
@@ -34,3 +34,6 @@ class Upload(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+__all__ = ["Upload"]

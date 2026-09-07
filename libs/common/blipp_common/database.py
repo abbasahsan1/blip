@@ -244,3 +244,22 @@ CREATE TABLE IF NOT EXISTS creator_minutes_agg (
 CREATE INDEX IF NOT EXISTS idx_creator_minutes_creator_date ON creator_minutes_agg (creator_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_creator_minutes_blipp ON creator_minutes_agg (blipp_id);
 """
+
+# Aliases for backward compatibility
+init_db = init_db_pool
+close_db = close_db_pool
+
+__all__ = [
+    "Base",
+    "get_async_engine",
+    "get_session_factory",
+    "get_db_session",
+    "get_db",
+    "get_db_pool",
+    "init_db_pool",
+    "close_db_pool",
+    "init_db",
+    "close_db",
+    "CREATE_TABLES_SQL",
+]
+

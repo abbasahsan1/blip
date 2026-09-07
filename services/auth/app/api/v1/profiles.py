@@ -1,11 +1,11 @@
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, status
-from app.core.security import get_current_user
-from app.models.schemas import AuthenticatedUser
+from blipp_common.security import get_current_user, AuthenticatedUser
+from blipp_common.database import get_db_pool
+from blipp_common.exceptions import AppException
 from app.models.profile import UserProfileResponse, UserProfileUpdate
-from app.core.database import get_db_pool
-from app.core.exceptions import AppException
+
 
 logger = logging.getLogger("auth-service.api.profiles")
 

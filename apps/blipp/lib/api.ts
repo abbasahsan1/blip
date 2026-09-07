@@ -427,14 +427,15 @@ export const profileApi = {
 
 export const blippApi = {
   async getBlipps(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/blipps');
+    const res = await api.get<FeedResponse>('/v1/feed');
     return res.data;
   },
 
   async getFeed(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/blipps');
+    const res = await api.get<FeedResponse>('/v1/feed');
     return res.data;
   },
+
 
   async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
     const res = await requestRaw<BlippUploadResponse>('/v1/blipps/upload', {

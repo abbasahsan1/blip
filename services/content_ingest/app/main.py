@@ -1,6 +1,5 @@
 import logging
 import uuid
-import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -21,35 +20,43 @@ from blipp_common.exceptions import (
     CODE_SERVICE_UNAVAILABLE,
 )
 from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
-from app.api.v1.auth import router as auth_router
-from app.api.v1.profiles import router as profiles_router
+from blipp_common.storage import storage_service
+from blipp_common.events import event_bus
+from app.api.v1.uploads import router as uploads_router
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("auth-service.main")
+logger = logging.getLogger("content-ingest.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Connected Keycloak Realm: {settings.KEYCLOAK_REALM} at {settings.KEYCLOAK_INTERNAL_URL}")
+    logger.info(f"Starting Content Ingest Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
     except Exception as e:
-        logger.error(f"Database startup initialization note: {e}")
+        logger.error(f"Database pool startup error: {e}")
+    try:
+        await event_bus.connect()
+    except Exception as e:
+        logger.error(f"Event bus startup connection error: {e}")
     yield
+    try:
+        await event_bus.close()
+    except Exception as e:
+        logger.error(f"Event bus shutdown error: {e}")
     try:
         await close_db_pool()
     except Exception as e:
-        logger.error(f"Database shutdown note: {e}")
-    logger.info(f"Shutting down {settings.APP_NAME}")
+        logger.error(f"Database pool shutdown error: {e}")
+    logger.info("Shutting down Content Ingest Service")
 
 
 app = FastAPI(
-    title="Blipp Auth Service",
+    title="Blipp Content Ingest Service",
     version=settings.APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -74,7 +81,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestIDMiddleware)
 
-# CORS configuration: permit LAN requests during development
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -219,44 +226,31 @@ async def docs_redirect():
     return RedirectResponse(url="/api/docs")
 
 
-# Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
-app.include_router(auth_router, prefix="/api")
-app.include_router(profiles_router, prefix="/api")
-app.include_router(auth_router, prefix="/v1")
-app.include_router(profiles_router, prefix="/v1")
+# Mount routes under /v1/uploads and /uploads
+app.include_router(uploads_router, prefix="/v1/uploads")
+app.include_router(uploads_router, prefix="/uploads")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/api/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/healthz", response_model=HealthResponse, tags=["Health"])
+@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Liveness probe and readiness indicator."""
-    keycloak_status = "unknown"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            keycloak_status = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
-    except Exception as e:
-        keycloak_status = f"unreachable ({str(e)})"
-
+    """Liveness probe."""
     return HealthResponse(
         status="healthy",
         version=settings.APP_VERSION,
-        keycloak_status=keycloak_status
     )
 
 
 @app.get("/readyz", tags=["Health"])
-@app.get("/api/readyz", tags=["Health"])
 @app.get("/v1/readyz", tags=["Health"])
 async def readiness_check():
     """
-    Readiness probe verifying PostgreSQL and Keycloak connectivity.
-    Returns HTTP 200 if healthy, otherwise HTTP 503.
+    Readiness probe verifying PostgreSQL, MinIO S3 object storage, and NATS JetStream connectivity.
     """
     db_healthy = False
-    keycloak_healthy = False
+    storage_healthy = False
+    event_bus_healthy = False
 
     # 1. Check Database
     try:
@@ -269,16 +263,19 @@ async def readiness_check():
     except Exception as e:
         logger.warning(f"Readiness check DB error: {e}")
 
-    # 2. Check Keycloak
+    # 2. Check MinIO / S3 Storage
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            if resp.status_code == 200:
-                keycloak_healthy = True
+        storage_healthy = await storage_service.check_health()
     except Exception as e:
-        logger.warning(f"Readiness check Keycloak error: {e}")
+        logger.warning(f"Readiness check storage error: {e}")
 
-    all_ready = db_healthy and keycloak_healthy
+    # 3. Check NATS JetStream Event Bus
+    try:
+        event_bus_healthy = await event_bus.check_health()
+    except Exception as e:
+        logger.warning(f"Readiness check event bus error: {e}")
+
+    all_ready = db_healthy and storage_healthy and event_bus_healthy
     status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(
@@ -288,7 +285,8 @@ async def readiness_check():
             "version": settings.APP_VERSION,
             "components": {
                 "database": "healthy" if db_healthy else "unhealthy",
-                "keycloak": "healthy" if keycloak_healthy else "unhealthy",
+                "storage": "healthy" if storage_healthy else "unhealthy",
+                "event_bus": "healthy" if event_bus_healthy else "unhealthy",
             }
         }
     )

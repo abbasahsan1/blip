@@ -73,3 +73,27 @@ class BaseCommonSettings(BaseSettings):
     REDIS_URL: str = "redis://redis.blipp.svc.cluster.local:6379/0"
     GORSE_API_URL: str = "http://gorse.blipp.svc.cluster.local:8088"
     GORSE_API_KEY: str = ""
+
+    # ─── App Settings ─────────────────────────────────────────────────────────
+    APP_NAME: str = "Blipp Service"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
+
+    # ─── Keycloak OIDC Authentication ─────────────────────────────────────────
+    KEYCLOAK_URL: str = "http://localhost:8419/keycloak"
+    KEYCLOAK_INTERNAL_URL: str = "http://keycloak.blipp.svc.cluster.local:8080/keycloak"
+    KEYCLOAK_REALM: str = "blipp"
+    KEYCLOAK_CLIENT_ID: str = "blipp-app"
+    KEYCLOAK_CLIENT_SECRET: str = "blipp-secret-client-token"
+    KEYCLOAK_ADMIN: str = "admin"
+    KEYCLOAK_ADMIN_PASSWORD: str = "admin_master_password"
+    JWKS_URL: str = ""
+
+    def get_jwks_url(self) -> str:
+        if self.JWKS_URL:
+            return self.JWKS_URL
+        return f"{self.KEYCLOAK_INTERNAL_URL}/realms/{self.KEYCLOAK_REALM}/protocol/openid-connect/certs"
+
+
+settings = BaseCommonSettings()
+

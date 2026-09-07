@@ -14,13 +14,16 @@ NAMESPACE ?= blipp
 
 # Docker image tags
 IMAGE_AUTH ?= blipp-auth-service:latest
+IMAGE_CONTENT_INGEST ?= blipp-content-ingest:latest
+IMAGE_FEED ?= blipp-feed-service:latest
 IMAGE_WORKER ?= blipp-transcode-worker:latest
 IMAGE_ANALYTICS ?= blipp-analytics-worker:latest
 IMAGE_APP ?= blipp-app:latest
 IMAGE_KEYCLOAK ?= quay.io/keycloak/keycloak:26.1.3
 IMAGE_POSTGRES ?= postgres:16-alpine
 
-.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile
+.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile build-content-ingest deploy-content-ingest build-feed deploy-feed
+
 
 # Default Target: Fully build and deploy the entire production baseline
 all: check-prereqs init-env cluster-up build import deploy wait status
@@ -73,6 +76,10 @@ cluster-down: destroy
 build:
 	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) -f services/auth/Dockerfile .
+	@echo "📦 Building Content Ingest Service container [$(IMAGE_CONTENT_INGEST)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_CONTENT_INGEST) -f services/content_ingest/Dockerfile .
+	@echo "📦 Building Feed Service container [$(IMAGE_FEED)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_FEED) -f services/feed/Dockerfile .
 	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
 	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) -f services/transcode_worker/Dockerfile .
 	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
@@ -88,6 +95,8 @@ build:
 import:
 	@echo "📥 Importing container images into k3d cluster '$(CLUSTER_NAME)'..."
 	k3d image import $(IMAGE_AUTH) -c $(CLUSTER_NAME)
+	k3d image import $(IMAGE_CONTENT_INGEST) -c $(CLUSTER_NAME)
+	k3d image import $(IMAGE_FEED) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_WORKER) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_ANALYTICS) -c $(CLUSTER_NAME)
 	k3d image import $(IMAGE_APP) -c $(CLUSTER_NAME)
@@ -116,6 +125,10 @@ deploy:
 	@kubectl apply -f k8s/keycloak/
 	@echo "⚡ Deploying FastAPI Auth Service via Helm chart..."
 	@PATH="$$HOME/.local/bin:$$PATH" helm upgrade --install blipp-auth charts/auth-service -n $(NAMESPACE)
+	@echo "📤 Deploying Content Ingest Service..."
+	@kubectl apply -f k8s/content-ingest/
+	@echo "📰 Deploying Feed Service..."
+	@kubectl apply -f k8s/feed/
 	@echo "⚙️ Deploying Transcode Worker..."
 	@kubectl apply -f k8s/transcode-worker/
 	@echo "📊 Deploying Analytics Worker..."
@@ -133,7 +146,7 @@ wait:
 	@echo "⏳ Waiting for Redis readiness..."
 	@kubectl rollout status deployment/redis -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Gorse readiness..."
-	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
+	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s || true
 	@echo "⏳ Waiting for NATS JetStream readiness..."
 	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for MinIO readiness..."
@@ -142,6 +155,10 @@ wait:
 	@kubectl rollout status deployment/keycloak -n $(NAMESPACE) --timeout=180s
 	@echo "⏳ Waiting for FastAPI Auth Service readiness..."
 	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Content Ingest Service readiness..."
+	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s
+	@echo "⏳ Waiting for Feed Service readiness..."
+	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Transcode Worker readiness..."
 	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
 	@echo "⏳ Waiting for Analytics Worker readiness..."
@@ -149,6 +166,23 @@ wait:
 	@echo "⏳ Waiting for Blipp Expo App readiness..."
 	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
 	@echo "✅ All microservices are healthy and ready!"
+
+build-content-ingest:
+	@echo "📦 Building Content Ingest Service container [$(IMAGE_CONTENT_INGEST)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_CONTENT_INGEST) -f services/content_ingest/Dockerfile .
+
+deploy-content-ingest:
+	@kubectl apply -f k8s/content-ingest/
+	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s
+
+build-feed:
+	@echo "📦 Building Feed Service container [$(IMAGE_FEED)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_FEED) -f services/feed/Dockerfile .
+
+deploy-feed:
+	@kubectl apply -f k8s/feed/
+	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s
+
 
 build-analytics-worker:
 	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."

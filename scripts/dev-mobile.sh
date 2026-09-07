@@ -73,8 +73,14 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# Port-forward auth-service, keycloak, and minio
+# Port-forward auth-service, content-ingest-service, feed-service, keycloak, and minio
 kubectl port-forward --address 0.0.0.0 svc/auth-service 8000:8000 -n "${NAMESPACE}" >/dev/null 2>&1 &
+PIDS+=($!)
+
+kubectl port-forward --address 0.0.0.0 svc/content-ingest-service 8001:8001 -n "${NAMESPACE}" >/dev/null 2>&1 &
+PIDS+=($!)
+
+kubectl port-forward --address 0.0.0.0 svc/feed-service 8002:8002 -n "${NAMESPACE}" >/dev/null 2>&1 &
 PIDS+=($!)
 
 kubectl port-forward --address 0.0.0.0 svc/keycloak 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
@@ -92,9 +98,12 @@ for pid in "${PIDS[@]}"; do
 done
 
 echo "✅ Port-forwarding active:"
-echo "   - Auth Service: http://${DETECTED_IP}:8000"
-echo "   - Keycloak:     http://${DETECTED_IP}:8080/keycloak"
-echo "   - MinIO S3:     http://${DETECTED_IP}:9000"
+echo "   - Auth Service:   http://${DETECTED_IP}:8000"
+echo "   - Content Ingest: http://${DETECTED_IP}:8001"
+echo "   - Feed Service:   http://${DETECTED_IP}:8002"
+echo "   - Keycloak:       http://${DETECTED_IP}:8080/keycloak"
+echo "   - MinIO S3:       http://${DETECTED_IP}:9000"
+
 echo ""
 echo "📱 Launching Expo development server..."
 echo "   Scan the QR code in the Expo Go app on your physical mobile device."

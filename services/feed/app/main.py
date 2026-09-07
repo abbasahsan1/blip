@@ -1,6 +1,5 @@
 import logging
 import uuid
-import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -21,35 +20,42 @@ from blipp_common.exceptions import (
     CODE_SERVICE_UNAVAILABLE,
 )
 from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
-from app.api.v1.auth import router as auth_router
-from app.api.v1.profiles import router as profiles_router
+from app.core.redis import get_redis_client, close_redis
+from app.api.v1.feed import router as feed_router
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("auth-service.main")
+logger = logging.getLogger("feed-service.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Connected Keycloak Realm: {settings.KEYCLOAK_REALM} at {settings.KEYCLOAK_INTERNAL_URL}")
+    logger.info(f"Starting Feed Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
     except Exception as e:
-        logger.error(f"Database startup initialization note: {e}")
+        logger.error(f"Database pool startup error: {e}")
+    try:
+        await get_redis_client()
+    except Exception as e:
+        logger.error(f"Redis startup error: {e}")
     yield
+    try:
+        await close_redis()
+    except Exception as e:
+        logger.error(f"Redis shutdown error: {e}")
     try:
         await close_db_pool()
     except Exception as e:
-        logger.error(f"Database shutdown note: {e}")
-    logger.info(f"Shutting down {settings.APP_NAME}")
+        logger.error(f"Database pool shutdown error: {e}")
+    logger.info("Shutting down Feed Service")
 
 
 app = FastAPI(
-    title="Blipp Auth Service",
+    title="Blipp Feed Service",
     version=settings.APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -74,7 +80,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestIDMiddleware)
 
-# CORS configuration: permit LAN requests during development
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -219,44 +225,30 @@ async def docs_redirect():
     return RedirectResponse(url="/api/docs")
 
 
-# Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
-app.include_router(auth_router, prefix="/api")
-app.include_router(profiles_router, prefix="/api")
-app.include_router(auth_router, prefix="/v1")
-app.include_router(profiles_router, prefix="/v1")
+# Mount routes under /v1/feed and /feed
+app.include_router(feed_router, prefix="/v1/feed")
+app.include_router(feed_router, prefix="/feed")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/api/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/healthz", response_model=HealthResponse, tags=["Health"])
+@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Liveness probe and readiness indicator."""
-    keycloak_status = "unknown"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            keycloak_status = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
-    except Exception as e:
-        keycloak_status = f"unreachable ({str(e)})"
-
+    """Liveness probe."""
     return HealthResponse(
         status="healthy",
         version=settings.APP_VERSION,
-        keycloak_status=keycloak_status
     )
 
 
 @app.get("/readyz", tags=["Health"])
-@app.get("/api/readyz", tags=["Health"])
 @app.get("/v1/readyz", tags=["Health"])
 async def readiness_check():
     """
-    Readiness probe verifying PostgreSQL and Keycloak connectivity.
-    Returns HTTP 200 if healthy, otherwise HTTP 503.
+    Readiness probe verifying PostgreSQL and Redis connectivity.
     """
     db_healthy = False
-    keycloak_healthy = False
+    redis_healthy = False
 
     # 1. Check Database
     try:
@@ -269,16 +261,16 @@ async def readiness_check():
     except Exception as e:
         logger.warning(f"Readiness check DB error: {e}")
 
-    # 2. Check Keycloak
+    # 2. Check Redis
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            if resp.status_code == 200:
-                keycloak_healthy = True
+        client = await get_redis_client()
+        pong = await client.ping()
+        if pong:
+            redis_healthy = True
     except Exception as e:
-        logger.warning(f"Readiness check Keycloak error: {e}")
+        logger.warning(f"Readiness check Redis error: {e}")
 
-    all_ready = db_healthy and keycloak_healthy
+    all_ready = db_healthy and redis_healthy
     status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(
@@ -288,7 +280,7 @@ async def readiness_check():
             "version": settings.APP_VERSION,
             "components": {
                 "database": "healthy" if db_healthy else "unhealthy",
-                "keycloak": "healthy" if keycloak_healthy else "unhealthy",
+                "redis": "healthy" if redis_healthy else "unhealthy",
             }
         }
     )

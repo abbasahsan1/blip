@@ -1,8 +1,8 @@
 import logging
 from fastapi import APIRouter, Depends
 
-from app.core.security import get_current_user
-from app.models.schemas import AuthenticatedUser
+from blipp_common.security import get_current_user, AuthenticatedUser
+
 
 logger = logging.getLogger("auth-service.api.auth")
 router = APIRouter(prefix="/auth", tags=["Authentication"])

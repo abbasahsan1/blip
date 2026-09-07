@@ -40,35 +40,44 @@ spec:
         - name: auth-service
           port: 8000
 
+    # User Profiles Route (/v1/profiles)
+    - match: PathPrefix(`/v1/profiles`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: auth-service
+          port: 8000
+
     # Direct Uploads Route (/v1/uploads)
     - match: PathPrefix(`/v1/uploads`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: content-ingest-service
+          port: 8001
 
-    # Blipps Content Route (/v1/blipps)
+    # Feed Route (/v1/feed)
+    - match: PathPrefix(`/v1/feed`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: feed-service
+          port: 8002
+
+    # Blipps Content Route (/v1/blipps -> feed-service)
     - match: PathPrefix(`/v1/blipps`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: feed-service
+          port: 8002
 
     # Telemetry Events Route (/v1/events)
     - match: PathPrefix(`/v1/events`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Feed Route (/v1/feed)
-    - match: PathPrefix(`/v1/feed`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
@@ -84,6 +93,7 @@ spec:
       services:
         - name: auth-service
           port: 8000
+
 
     # Legacy /api Microservice Route
     - match: PathPrefix(`/api`)

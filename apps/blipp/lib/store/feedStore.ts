@@ -41,8 +41,9 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
     try {
-      const res = await blippApi.getBlipps();
+      const res = await blippApi.getFeed();
       const serverItems = res.items || [];
+
       const nextCursor = res.next_cursor ?? null;
 
       const mapped: Blipp[] = serverItems.map((item, idx: number) => {
