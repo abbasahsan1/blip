@@ -37,9 +37,8 @@ ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
 # Copy installed virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy application code and tests
+# Copy application code
 COPY services/auth/app/ ./app/
-COPY services/auth/tests/ ./tests/
 
 EXPOSE 8000
 

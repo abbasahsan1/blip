@@ -22,7 +22,7 @@ IMAGE_APP ?= blipp-app:latest
 IMAGE_KEYCLOAK ?= quay.io/keycloak/keycloak:26.1.3
 IMAGE_POSTGRES ?= postgres:16-alpine
 
-.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile build-content-ingest deploy-content-ingest build-feed deploy-feed
+.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile build-content-ingest deploy-content-ingest build-feed deploy-feed test-e2e test-e2e-ui
 
 
 # Default Target: Fully build and deploy the entire production baseline
@@ -215,9 +215,13 @@ deploy-redis:
 deploy-gorse:
 	@kubectl apply -f k8s/gorse/
 	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
+test-e2e:
+	@echo "🎭 Running Playwright E2E Test Suite..."
+	@npx playwright test
 
-verify-infra:
-	@pytest services/auth/tests/test_infra.py -v
+test-e2e-ui:
+	@echo "🎭 Launching Playwright E2E Interactive UI..."
+	@npx playwright test --ui
 
 # Show cluster and pod status
 status:

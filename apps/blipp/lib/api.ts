@@ -53,6 +53,27 @@ export const getKeycloakUrl = (): string => {
   }
   return 'http://localhost:8080/keycloak';
 };
+export const getContentIngestUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_CONTENT_INGEST_URL) {
+    return process.env.EXPO_PUBLIC_CONTENT_INGEST_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8001');
+  }
+  return base;
+};
+
+export const getFeedServiceUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_FEED_URL) {
+    return process.env.EXPO_PUBLIC_FEED_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8002');
+  }
+  return base;
+};
 
 export interface ApiResponse<T = any> {
   data: T;
@@ -99,8 +120,27 @@ export async function requestRaw<T = any>(
     headers['Authorization'] = `Bearer ${activeToken}`;
   }
 
-  const baseUrl = getApiBaseUrl();
+  let baseUrl = getApiBaseUrl();
   let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  if (
+    normalizedPath === '/v1/uploads' ||
+    normalizedPath.startsWith('/v1/uploads/') ||
+    normalizedPath === '/uploads' ||
+    normalizedPath.startsWith('/uploads/')
+  ) {
+    baseUrl = getContentIngestUrl();
+  } else if (
+    normalizedPath === '/v1/feed' ||
+    normalizedPath.startsWith('/v1/feed/') ||
+    normalizedPath === '/feed' ||
+    normalizedPath.startsWith('/feed/') ||
+    normalizedPath === '/v1/blipps' ||
+    normalizedPath.startsWith('/v1/blipps/')
+  ) {
+    baseUrl = getFeedServiceUrl();
+  }
+
   if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
     normalizedPath = normalizedPath.slice(3);
   }

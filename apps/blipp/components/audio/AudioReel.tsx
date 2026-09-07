@@ -214,7 +214,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   const currentSeconds = Math.floor(progress * (item?.duration || 0));
 
   return (
-    <View style={[styles.root, { height }]}>
+    <View style={[styles.root, { height }]} testID="audio-reel-card">
       {/* Studio console backdrop: solid, deadened acoustics */}
       <View style={styles.consoleBackdrop} />
 
@@ -238,7 +238,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         </View>
 
         {/* Blipp Title: Sora Display Typography */}
-        <Text style={styles.title} numberOfLines={3}>
+        <Text style={styles.title} numberOfLines={3} testID="blipp-title">
           {item?.title}
         </Text>
 
@@ -284,7 +284,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
         </View>
 
         {/* Tactile Controls Cluster */}
-        <View style={styles.controls}>
+        <View style={styles.controls} testID="audio-player-container">
           <Pressable
             style={({ pressed }) => [
               styles.playBtn,
@@ -293,6 +293,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
             onPress={togglePlay}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? 'Pause audio' : 'Play audio'}
+            testID="audio-play-button"
           >
             {isPlaying ? (
               <PauseMark size={20} color="#ffffff" />

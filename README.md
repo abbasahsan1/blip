@@ -76,6 +76,31 @@ make destroy
 
 ---
 
+## End-to-End (E2E) Testing with Playwright
+
+End-to-end tests are executed using **Playwright (TypeScript)** against the Expo Web application and microservices backend.
+
+### Running Tests
+Execute tests headlessly in Chromium:
+```bash
+make test-e2e
+# or directly:
+npx playwright test
+```
+
+Launch the interactive Playwright UI mode for live debugging:
+```bash
+make test-e2e-ui
+# or directly:
+npx playwright test --ui
+```
+
+### Test Suite Coverage (`e2e/tests/`):
+- **Authentication (`auth.spec.ts`)**: User login, credential validation, session initialization, and operator profile parameters.
+- **Upload Pipeline & Playback (`upload-and-playback.spec.ts`)**: Authenticated multipart audio upload, progressive upload progress (0% -> 100%), live transcoding polling transitions, and feed item display with audio player initialization.
+
+---
+
 ## Service Overview
 
 ### 1. `apps/blipp` (Expo Frontend)

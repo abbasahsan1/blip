@@ -26,6 +26,5 @@ COPY services/transcode_worker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/transcode_worker/app/ ./app/
-COPY services/transcode_worker/tests/ ./tests/
 
 ENTRYPOINT ["python", "-m", "app.main"]

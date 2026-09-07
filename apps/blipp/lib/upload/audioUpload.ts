@@ -122,18 +122,33 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
   try {
     const formData = new FormData();
 
-    if (Platform.OS === 'web' && (webBlob || file instanceof File)) {
-      formData.append('file', webBlob || (file as File), fileName);
-    } else {
-      if (webBlob) {
-        formData.append('file', webBlob, fileName);
-      } else {
-        formData.append('file', {
-          uri: fileUri,
-          name: fileName,
-          type: mimeType,
-        } as any);
+    if (Platform.OS === 'web') {
+      let blobToSend: Blob | null = null;
+      if (file instanceof Blob || file instanceof File) {
+        blobToSend = file;
+      } else if (webBlob instanceof Blob) {
+        blobToSend = webBlob;
+      } else if (fileUri) {
+        try {
+          const resp = await fetch(fileUri);
+          blobToSend = await resp.blob();
+        } catch (fetchErr) {
+          console.warn('Failed to fetch file URI into Blob on Web:', fetchErr);
+        }
       }
+
+      if (blobToSend) {
+        formData.append('file', blobToSend, fileName);
+      } else {
+        throw new Error('Could not convert audio file to a binary Blob for web upload.');
+      }
+    } else {
+      // Mobile (iOS/Android): Retain { uri, name, type } notation
+      formData.append('file', {
+        uri: fileUri,
+        name: fileName,
+        type: mimeType,
+      } as any);
     }
 
     formData.append('upload_type', 'audio');
@@ -160,13 +175,14 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
 
     return completed;
   } catch (err: unknown) {
-    const msg =
-      err instanceof ApiError
-        ? err.message
-        : err instanceof Error
-        ? err.message
-        : 'An unexpected error occurred during audio upload.';
+    let msg = 'An unexpected error occurred during audio upload.';
+    if (err instanceof ApiError) {
+      msg = `Upload failed (${err.status}): ${err.message}`;
+    } else if (err instanceof Error) {
+      msg = err.message;
+    }
     uploadStore.setError(msg);
-    throw err;
+    throw new Error(msg);
   }
+
 }
