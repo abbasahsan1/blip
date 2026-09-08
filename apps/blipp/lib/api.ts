@@ -90,7 +90,6 @@ export const resolvePublicAudioUrl = (url?: string | null): string => {
   if (!url) return '';
   const internalPatterns = [
     'minio.blipp.svc.cluster.local:9000',
-    'minio.default.svc.cluster.local:9000',
     'minio:9000',
   ];
   for (const pattern of internalPatterns) {

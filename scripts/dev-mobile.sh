@@ -62,6 +62,27 @@ if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Check if only port forwarding was requested
+if [ "${1:-}" = "--ports-only" ]; then
+  pkill -f "kubectl port-forward.*(8000|8001|8002|8080|9000)" 2>/dev/null || true
+  sleep 1
+
+  trap - EXIT INT TERM
+  kubectl port-forward --address 0.0.0.0 svc/auth-service 8000:8000 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  kubectl port-forward --address 0.0.0.0 svc/content-ingest-service 8001:8001 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  kubectl port-forward --address 0.0.0.0 svc/feed-service 8002:8002 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  kubectl port-forward --address 0.0.0.0 svc/keycloak 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  kubectl port-forward --address 0.0.0.0 svc/minio 9000:9000 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  sleep 2
+  echo "✅ Port-forwarding active in background (-n ${NAMESPACE}):"
+  echo "   - Auth Service:   http://${DETECTED_IP}:8000 (and localhost:8000)"
+  echo "   - Content Ingest: http://${DETECTED_IP}:8001 (and localhost:8001)"
+  echo "   - Feed Service:   http://${DETECTED_IP}:8002 (and localhost:8002)"
+  echo "   - Keycloak:       http://${DETECTED_IP}:8080/keycloak"
+  echo "   - MinIO S3:       http://${DETECTED_IP}:9000"
+  exit 0
+fi
+
 # 4. Background Port Forwarding with Cleanup Trap
 echo "🔗 Starting Kubernetes port-forwarding on 0.0.0.0 for LAN access..."
 

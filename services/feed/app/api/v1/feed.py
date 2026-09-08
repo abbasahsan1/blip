@@ -13,7 +13,7 @@ from blipp_common.security import get_optional_current_user, AuthenticatedUser
 from blipp_common.database import get_db_pool
 from blipp_common.storage import storage_service
 from blipp_common.exceptions import AppException
-from app.core.redis import get_redis_client
+from blipp_common.redis import get_redis_client
 from app.models.schemas import FeedResponse, FeedItemResponse
 
 logger = logging.getLogger("feed-service.api.feed")

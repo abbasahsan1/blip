@@ -26,7 +26,7 @@ spec:
             - -c
             - |
               echo "Waiting for MinIO service to respond on port 9000..."
-              until nc -z minio 9000; do
+              until nc -z minio.blipp.svc.cluster.local 9000; do
                 sleep 2
               done
               echo "MinIO port is open."
@@ -54,7 +54,7 @@ spec:
               USER=${MINIO_ROOT_USER:-minioadmin}
               PASS=${MINIO_ROOT_PASSWORD:-minioadmin}
               echo "Configuring MinIO client alias..."
-              mc alias set localminio http://minio:9000 "$USER" "$PASS"
+              mc alias set localminio http://minio.blipp.svc.cluster.local:9000 "$USER" "$PASS"
               echo "Creating default buckets..."
               mc mb --ignore-existing localminio/blipp-raw-uploads
               mc mb --ignore-existing localminio/blipp-audio-variants

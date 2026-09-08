@@ -13,7 +13,7 @@ from nats.js.client import JetStreamContext
 from nats.js.api import StreamConfig, StorageType, RetentionPolicy
 
 from app.config import settings
-from app.storage import storage_manager
+from blipp_common.storage import storage_manager
 from app.transcoder import transcode_variants
 from app.database import (
     init_db,

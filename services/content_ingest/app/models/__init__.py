@@ -1,4 +1,4 @@
-from .base import Base
+from blipp_common.database import Base
 from .upload import Upload
 from .blipp import Blipp
 from .schemas import (

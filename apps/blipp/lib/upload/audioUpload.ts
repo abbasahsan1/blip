@@ -56,14 +56,11 @@ export async function pollUploadStatus(
   intervalMs = 2000,
   maxAttempts = 30,
 ): Promise<UploadStatusResponse> {
-  const sessionToken =
-    useSessionStore.getState().tokens?.accessToken || useSessionStore.getState().accessToken || undefined;
-
   let attempts = 0;
   while (attempts < maxAttempts) {
     attempts += 1;
     try {
-      const statusRes = await uploadApi.getStatus(uploadId, sessionToken);
+      const statusRes = await uploadApi.getStatus(uploadId);
       const currentStatus = statusRes.processing_status;
 
       // Note: We deliberately only inspect processing_status and avoid any GET fetch on raw_file_url
@@ -160,8 +157,8 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
 
     uploadStore.setProgress(40);
 
-    // 1. Authenticated multipart POST /v1/uploads
-    const uploadRes = await uploadApi.upload(formData, sessionToken);
+    // 1. Authenticated multipart POST /v1/uploads via central api client
+    const uploadRes = await uploadApi.upload(formData);
     const uploadId = uploadRes.upload_id;
     uploadStore.setUploadId(uploadId);
     uploadStore.setProgress(60);

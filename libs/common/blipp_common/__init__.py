@@ -24,6 +24,7 @@ from .storage import (
     storage_manager,
     get_playback_url,
 )
+from .redis import get_redis_client, close_redis
 from .exceptions import (
     AppException,
     CODE_INVALID_CREDENTIALS,
@@ -70,6 +71,8 @@ __all__ = [
     "storage_service",
     "storage_manager",
     "get_playback_url",
+    "get_redis_client",
+    "close_redis",
     "AppException",
     "CODE_INVALID_CREDENTIALS",
     "CODE_UNAUTHORIZED",

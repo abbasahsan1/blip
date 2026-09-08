@@ -3,32 +3,39 @@ from typing import Optional
 import redis.asyncio as aioredis
 from blipp_common.config import settings
 
-logger = logging.getLogger("feed-service.redis")
+logger = logging.getLogger("blipp_common.redis")
 
 _redis_pool: Optional[aioredis.ConnectionPool] = None
 _redis_client: Optional[aioredis.Redis] = None
 
 
-async def get_redis_client() -> aioredis.Redis:
+async def get_redis_client(redis_url: Optional[str] = None) -> aioredis.Redis:
+    """
+    Returns the singleton asynchronous Redis client with pooled connections.
+    """
     global _redis_pool, _redis_client
     if _redis_client is None:
+        url = redis_url or settings.REDIS_URL
         try:
             _redis_pool = aioredis.ConnectionPool.from_url(
-                settings.REDIS_URL,
+                url,
                 max_connections=20,
                 decode_responses=True,
                 socket_timeout=2.0,
                 socket_connect_timeout=2.0,
             )
             _redis_client = aioredis.Redis(connection_pool=_redis_pool)
-            logger.info(f"Initialized Redis connection pool for {settings.REDIS_URL}")
+            logger.info(f"Initialized Redis connection pool for {url}")
         except Exception as e:
-            logger.error(f"Failed to initialize Redis client: {e}")
+            logger.error(f"Failed to initialize Redis client for {url}: {e}")
             raise
     return _redis_client
 
 
 async def close_redis() -> None:
+    """
+    Closes the singleton Redis client and disconnects the underlying connection pool.
+    """
     global _redis_client, _redis_pool
     if _redis_client is not None:
         try:

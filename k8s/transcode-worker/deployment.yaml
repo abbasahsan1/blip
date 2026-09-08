@@ -39,8 +39,8 @@ spec:
               value: blipp-audio-variants
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 250m
+              memory: 256Mi
             limits:
-              cpu: 1000m
-              memory: 512Mi
+              cpu: 2000m
+              memory: 1024Mi

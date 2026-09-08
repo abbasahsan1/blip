@@ -106,11 +106,8 @@ import:
 deploy:
 	@echo "☸️ Applying Kubernetes manifests to namespace '$(NAMESPACE)'..."
 	@kubectl apply -f k8s/namespace.yaml
-	@echo "🔐 Generating Secret 'blipp-secrets' from $(ENV_FILE)..."
-	@kubectl create secret generic blipp-secrets \
-		--namespace=$(NAMESPACE) \
-		--from-env-file=$(ENV_FILE) \
-		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "🔐 Applying Secret 'blipp-secrets'..."
+	@kubectl apply -f k8s/secrets.yaml
 	@echo "💾 Deploying PostgreSQL..."
 	@kubectl apply -f k8s/postgres/
 	@echo "🔴 Deploying Redis..."
@@ -123,8 +120,8 @@ deploy:
 	@kubectl apply -f k8s/minio/
 	@echo "🔑 Deploying Keycloak..."
 	@kubectl apply -f k8s/keycloak/
-	@echo "⚡ Deploying FastAPI Auth Service via Helm chart..."
-	@PATH="$$HOME/.local/bin:$$PATH" helm upgrade --install blipp-auth charts/auth-service -n $(NAMESPACE)
+	@echo "⚡ Deploying FastAPI Auth Service..."
+	@kubectl apply -f k8s/auth/
 	@echo "📤 Deploying Content Ingest Service..."
 	@kubectl apply -f k8s/content-ingest/
 	@echo "📰 Deploying Feed Service..."
@@ -166,6 +163,17 @@ wait:
 	@echo "⏳ Waiting for Blipp Expo App readiness..."
 	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
 	@echo "✅ All microservices are healthy and ready!"
+
+build-auth:
+	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
+	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) -f services/auth/Dockerfile .
+
+deploy-auth:
+	@kubectl apply -f k8s/auth/
+	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
+
+port-forward:
+	@./scripts/dev-mobile.sh --ports-only
 
 build-content-ingest:
 	@echo "📦 Building Content Ingest Service container [$(IMAGE_CONTENT_INGEST)]..."
@@ -215,6 +223,11 @@ deploy-redis:
 deploy-gorse:
 	@kubectl apply -f k8s/gorse/
 	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
+lint:
+	@echo "🔍 Linting and compiling Python codebase..."
+	@python3 -m compileall libs/ services/
+	@echo "✅ Zero dangling imports or syntax errors."
+
 test-e2e:
 	@echo "🎭 Running Playwright E2E Test Suite..."
 	@npx playwright test

@@ -20,7 +20,7 @@ from blipp_common.exceptions import (
     CODE_SERVICE_UNAVAILABLE,
 )
 from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
-from app.core.redis import get_redis_client, close_redis
+from blipp_common.redis import get_redis_client, close_redis
 from app.api.v1.feed import router as feed_router
 from app.models.schemas import HealthResponse
 

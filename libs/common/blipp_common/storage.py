@@ -460,7 +460,6 @@ class StorageService:
             return url.replace(internal, public)
         for pattern in (
             "http://minio.blipp.svc.cluster.local:9000",
-            "http://minio.default.svc.cluster.local:9000",
             "http://minio:9000",
         ):
             if pattern in url:
