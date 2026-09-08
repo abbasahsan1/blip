@@ -20,8 +20,9 @@ FROM nginx:1.27-alpine
 # Security: run as non-root
 RUN addgroup -S blipp && adduser -S blipp -G blipp
 
-# Copy compiled static assets from builder
+# Copy compiled static assets and nginx config from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 RUN chown -R blipp:blipp /usr/share/nginx/html
 

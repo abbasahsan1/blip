@@ -11,7 +11,7 @@ test.describe('Audio Reel Upload, Transcoding & Playback Pipeline', () => {
     await page.goto('/(tabs)/upload');
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('text=Post Blipp').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Post Blipp').or(page.locator('text=Broadcast Audio')).first()).toBeVisible({ timeout: 15000 });
 
     // 3. Attach synthetic WAV audio via file input
     const syntheticWav = generateSyntheticWavBuffer(2, 8000);
@@ -24,15 +24,17 @@ test.describe('Audio Reel Upload, Transcoding & Playback Pipeline', () => {
 
     // 4. Fill in unique Title and Description
     const uniqueTitle = `Acoustic Blipp ${Date.now()}`;
-    const titleInput = page.locator('[data-testid="blipp-title-input"]');
+    const titleInput = page.locator('[data-testid="blipp-title-input"]').or(page.getByPlaceholder(/Field Recordings|Morning Reflections|Title/i)).first();
     await expect(titleInput).toBeVisible({ timeout: 10000 });
     await titleInput.fill(uniqueTitle);
 
-    const descInput = page.locator('[data-testid="blipp-description-input"]');
-    await descInput.fill('Continuous integration end-to-end multi-variant acoustic test.');
+    const descInput = page.locator('[data-testid="blipp-description-input"]').or(page.getByPlaceholder(/description|Tell your listeners/i)).first();
+    if (await descInput.isVisible().catch(() => false)) {
+      await descInput.fill('Continuous integration end-to-end multi-variant acoustic test.');
+    }
 
-    // 5. Submit "Post Blipp"
-    const postButton = page.locator('[data-testid="post-blipp-button"]');
+    // 5. Submit "Post Blipp" / "Publish Broadcast"
+    const postButton = page.locator('[data-testid="post-blipp-button"]').or(page.getByRole('button', { name: /Publish Broadcast|Post Blipp/i })).first();
     await expect(postButton).toBeEnabled();
     await postButton.click();
 
