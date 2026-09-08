@@ -39,8 +39,31 @@ spec:
               value: blipp-audio-variants
           resources:
             requests:
-              cpu: 250m
-              memory: 256Mi
+              cpu: 500m
+              memory: 512Mi
             limits:
               cpu: 2000m
-              memory: 1024Mi
+              memory: 2Gi
+          # Exec-based probes: transcode-worker has no HTTP server.
+          # readinessProbe delays traffic/dependencies until the process is up.
+          # livenessProbe restarts the pod if the main process dies unexpectedly.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3

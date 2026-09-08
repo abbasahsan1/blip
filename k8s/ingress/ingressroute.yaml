@@ -46,8 +46,17 @@ spec:
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: social-graph-service
+          port: 8003
+
+    # Social Graph & Relationships Route (/v1/social)
+    - match: PathPrefix(`/v1/social`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: social-graph-service
+          port: 8003
 
     # Direct Uploads Route (/v1/uploads)
     - match: PathPrefix(`/v1/uploads`)

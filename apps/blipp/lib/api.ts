@@ -75,6 +75,17 @@ export const getFeedServiceUrl = (): string => {
   return base;
 };
 
+export const getSocialGraphUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL) {
+    return process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8003');
+  }
+  return base;
+};
+
 export const getMinioPublicUrl = (): string => {
   if (process.env.EXPO_PUBLIC_MINIO_URL) {
     return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
@@ -165,6 +176,17 @@ export async function requestRaw<T = any>(
     normalizedPath.startsWith('/v1/blipps/')
   ) {
     baseUrl = getFeedServiceUrl();
+  } else if (
+    normalizedPath === '/v1/profiles' ||
+    normalizedPath.startsWith('/v1/profiles/') ||
+    normalizedPath === '/profiles' ||
+    normalizedPath.startsWith('/profiles/') ||
+    normalizedPath === '/v1/social' ||
+    normalizedPath.startsWith('/v1/social/') ||
+    normalizedPath === '/social' ||
+    normalizedPath.startsWith('/social/')
+  ) {
+    baseUrl = getSocialGraphUrl();
   }
 
   if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
@@ -466,15 +488,52 @@ export interface FeedResponse {
 export interface UserProfile {
   user_id: string;
   username: string;
-  display_name: string;
+  display_name?: string | null;
   bio?: string | null;
   avatar_url?: string | null;
+  is_creator?: boolean;
+  verification_status?: string;
   created_at?: string | null;
+  followers_count?: number;
+  following_count?: number;
+  is_following?: boolean;
+}
+
+export interface FollowActionResponse {
+  success: boolean;
+  follower_id: string;
+  followee_id: string;
+  is_following: boolean;
+}
+
+export interface FollowListResponse {
+  items: UserProfile[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export const profileApi = {
+  async claimUsername(data: {
+    username: string;
+    display_name?: string;
+    bio?: string;
+    avatar_url?: string;
+  }): Promise<UserProfile> {
+    const res = await requestRaw<UserProfile>('/v1/profiles', {
+      method: 'POST',
+      body: data,
+    });
+    return res.data;
+  },
+
   async getMyProfile(): Promise<UserProfile> {
     const res = await api.get<UserProfile>('/v1/profiles/me');
+    return res.data;
+  },
+
+  async getProfile(username: string): Promise<UserProfile> {
+    const res = await api.get<UserProfile>(`/v1/profiles/${encodeURIComponent(username)}`);
     return res.data;
   },
 
@@ -487,6 +546,44 @@ export const profileApi = {
       method: 'PATCH',
       body: update,
     });
+    return res.data;
+  },
+};
+
+export const socialApi = {
+  async follow(userId: string): Promise<FollowActionResponse> {
+    const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
+      method: 'POST',
+    });
+    return res.data;
+  },
+
+  async unfollow(userId: string): Promise<FollowActionResponse> {
+    const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
+      method: 'DELETE',
+    });
+    return res.data;
+  },
+
+  async getFollowers(
+    userId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<FollowListResponse> {
+    const res = await api.get<FollowListResponse>(
+      `/v1/social/${userId}/followers?limit=${limit}&offset=${offset}`,
+    );
+    return res.data;
+  },
+
+  async getFollowing(
+    userId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<FollowListResponse> {
+    const res = await api.get<FollowListResponse>(
+      `/v1/social/${userId}/following?limit=${limit}&offset=${offset}`,
+    );
     return res.data;
   },
 };

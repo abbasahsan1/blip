@@ -44,6 +44,7 @@ cat <<EOF > "${ENV_FILE}"
 EXPO_PUBLIC_API_URL=http://${DETECTED_IP}:8000/v1
 EXPO_PUBLIC_CONTENT_INGEST_URL=http://${DETECTED_IP}:8001/v1
 EXPO_PUBLIC_FEED_URL=http://${DETECTED_IP}:8002/v1
+EXPO_PUBLIC_SOCIAL_GRAPH_URL=http://${DETECTED_IP}:8003/v1
 EXPO_PUBLIC_KEYCLOAK_URL=http://${DETECTED_IP}:8080/keycloak
 EXPO_PUBLIC_MINIO_URL=http://${DETECTED_IP}:9000
 S3_PUBLIC_ENDPOINT_URL=http://${DETECTED_IP}:9000
@@ -52,6 +53,7 @@ EOF
 echo "   EXPO_PUBLIC_API_URL=http://${DETECTED_IP}:8000/v1"
 echo "   EXPO_PUBLIC_CONTENT_INGEST_URL=http://${DETECTED_IP}:8001/v1"
 echo "   EXPO_PUBLIC_FEED_URL=http://${DETECTED_IP}:8002/v1"
+echo "   EXPO_PUBLIC_SOCIAL_GRAPH_URL=http://${DETECTED_IP}:8003/v1"
 echo "   EXPO_PUBLIC_KEYCLOAK_URL=http://${DETECTED_IP}:8080/keycloak"
 echo "   EXPO_PUBLIC_MINIO_URL=http://${DETECTED_IP}:9000"
 
@@ -64,13 +66,14 @@ fi
 
 # Check if only port forwarding was requested
 if [ "${1:-}" = "--ports-only" ]; then
-  pkill -f "kubectl port-forward.*(8000|8001|8002|8080|9000)" 2>/dev/null || true
+  pkill -f "kubectl port-forward.*(8000|8001|8002|8003|8080|9000)" 2>/dev/null || true
   sleep 1
 
   trap - EXIT INT TERM
   kubectl port-forward --address 0.0.0.0 svc/auth-service 8000:8000 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/content-ingest-service 8001:8001 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/feed-service 8002:8002 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  kubectl port-forward --address 0.0.0.0 svc/social-graph-service 8003:8003 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/keycloak 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/minio 9000:9000 -n "${NAMESPACE}" >/dev/null 2>&1 &
   disown -a 2>/dev/null || true
@@ -79,6 +82,7 @@ if [ "${1:-}" = "--ports-only" ]; then
   echo "   - Auth Service:   http://${DETECTED_IP}:8000 (and localhost:8000)"
   echo "   - Content Ingest: http://${DETECTED_IP}:8001 (and localhost:8001)"
   echo "   - Feed Service:   http://${DETECTED_IP}:8002 (and localhost:8002)"
+  echo "   - Social Graph:   http://${DETECTED_IP}:8003 (and localhost:8003)"
   echo "   - Keycloak:       http://${DETECTED_IP}:8080/keycloak"
   echo "   - MinIO S3:       http://${DETECTED_IP}:9000"
   exit 0
@@ -102,7 +106,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# Port-forward auth-service, content-ingest-service, feed-service, keycloak, and minio
+# Port-forward auth-service, content-ingest-service, feed-service, social-graph-service, keycloak, and minio
 kubectl port-forward --address 0.0.0.0 svc/auth-service 8000:8000 -n "${NAMESPACE}" >/dev/null 2>&1 &
 PIDS+=($!)
 
@@ -110,6 +114,9 @@ kubectl port-forward --address 0.0.0.0 svc/content-ingest-service 8001:8001 -n "
 PIDS+=($!)
 
 kubectl port-forward --address 0.0.0.0 svc/feed-service 8002:8002 -n "${NAMESPACE}" >/dev/null 2>&1 &
+PIDS+=($!)
+
+kubectl port-forward --address 0.0.0.0 svc/social-graph-service 8003:8003 -n "${NAMESPACE}" >/dev/null 2>&1 &
 PIDS+=($!)
 
 kubectl port-forward --address 0.0.0.0 svc/keycloak 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
@@ -130,6 +137,7 @@ echo "✅ Port-forwarding active:"
 echo "   - Auth Service:   http://${DETECTED_IP}:8000"
 echo "   - Content Ingest: http://${DETECTED_IP}:8001"
 echo "   - Feed Service:   http://${DETECTED_IP}:8002"
+echo "   - Social Graph:   http://${DETECTED_IP}:8003"
 echo "   - Keycloak:       http://${DETECTED_IP}:8080/keycloak"
 echo "   - MinIO S3:       http://${DETECTED_IP}:9000"
 

@@ -65,19 +65,3 @@ spec:
         - name: gorse-data
           persistentVolumeClaim:
             claimName: gorse-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: gorse-pvc
-  namespace: blipp
-  labels:
-    app.kubernetes.io/name: gorse
-    app.kubernetes.io/component: recommender
-    app.kubernetes.io/part-of: blipp
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi

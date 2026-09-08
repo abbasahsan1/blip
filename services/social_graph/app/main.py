@@ -1,59 +1,73 @@
 import logging
 import uuid
-import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from blipp_common.config import settings
+from blipp_common.database import close_db_pool, get_db_pool, init_db_pool
+from blipp_common.events import event_bus
 from blipp_common.exceptions import (
     AppException,
-    CODE_VALIDATION_ERROR,
-    CODE_INTERNAL_SERVER_ERROR,
-    CODE_UNAUTHORIZED,
     CODE_FORBIDDEN,
+    CODE_INTERNAL_SERVER_ERROR,
     CODE_NOT_FOUND,
-    CODE_SERVICE_UNAVAILABLE,
+    CODE_UNAUTHORIZED,
+    CODE_VALIDATION_ERROR,
 )
-from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
-from app.api.v1.auth import router as auth_router
-from app.models.schemas import HealthResponse
+from app.api.v1.profiles import router as profiles_router
+from app.api.v1.relationships import router as relationships_router
+from app.models.profile import HealthResponse
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("auth-service.main")
+logger = logging.getLogger("social-graph.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Connected Keycloak Realm: {settings.KEYCLOAK_REALM} at {settings.KEYCLOAK_INTERNAL_URL}")
+    logger.info(f"Starting Blipp Social Graph Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
+        logger.info("Database connection pool initialized")
     except Exception as e:
-        logger.error(f"Database startup initialization note: {e}")
+        logger.error(f"Database pool startup error: {e}")
+
+    try:
+        await event_bus.connect(client_name="social-graph-service")
+        logger.info("Connected to NATS JetStream Event Bus")
+    except Exception as e:
+        logger.error(f"NATS startup connection error: {e}")
+
     yield
+
+    try:
+        await event_bus.close()
+    except Exception as e:
+        logger.error(f"Event bus shutdown error: {e}")
+
     try:
         await close_db_pool()
     except Exception as e:
-        logger.error(f"Database shutdown note: {e}")
-    logger.info(f"Shutting down {settings.APP_NAME}")
+        logger.error(f"Database pool shutdown error: {e}")
+
+    logger.info("Shutting down Blipp Social Graph Service")
 
 
 app = FastAPI(
-    title="Blipp Auth Service",
+    title="Blipp Social Graph Service",
     version=settings.APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -64,7 +78,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID")
         if not request_id:
             request_id = str(uuid.uuid4())
-        
+
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
@@ -73,7 +87,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestIDMiddleware)
 
-# CORS configuration: permit LAN and web requests during development
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -102,82 +116,48 @@ async def app_exception_handler(request: Request, exc: AppException):
             "error": {
                 "code": exc.code,
                 "message": exc.message,
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
     req_id = get_request_id(request)
-    error_messages = []
-    for err in exc.errors():
-        loc = " -> ".join(str(item) for item in err.get("loc", []))
-        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
-    
-    message = "; ".join(error_messages) if error_messages else "Request validation failed"
+    first_err = exc.errors()[0] if exc.errors() else {}
+    msg = first_err.get("msg", "Invalid request parameters")
+    loc = ".".join(str(l) for l in first_err.get("loc", []))
+    detail_msg = f"{loc}: {msg}" if loc else msg
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         headers={"X-Request-ID": req_id},
         content={
             "error": {
                 "code": CODE_VALIDATION_ERROR,
-                "message": message,
-                "request_id": req_id
+                "message": detail_msg,
+                "request_id": req_id,
             }
-        }
-    )
-
-
-@app.exception_handler(ValidationError)
-async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
-    req_id = get_request_id(request)
-    error_messages = []
-    for err in exc.errors():
-        loc = " -> ".join(str(item) for item in err.get("loc", []))
-        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
-    
-    message = "; ".join(error_messages) if error_messages else "Model validation failed"
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        headers={"X-Request-ID": req_id},
-        content={
-            "error": {
-                "code": CODE_VALIDATION_ERROR,
-                "message": message,
-                "request_id": req_id
-            }
-        }
+        },
     )
 
 
 @app.exception_handler(StarletteHTTPException)
-@app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     req_id = get_request_id(request)
-    
-    if isinstance(exc.detail, dict):
-        code = exc.detail.get("code", f"HTTP_{exc.status_code}")
-        message = exc.detail.get("message", str(exc.detail))
-    else:
-        status_to_code = {
-            400: "BAD_REQUEST",
-            401: CODE_UNAUTHORIZED,
-            403: CODE_FORBIDDEN,
-            404: CODE_NOT_FOUND,
-            405: "METHOD_NOT_ALLOWED",
-            409: "CONFLICT",
-            422: CODE_VALIDATION_ERROR,
-            500: CODE_INTERNAL_SERVER_ERROR,
-            503: CODE_SERVICE_UNAVAILABLE,
-        }
-        code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
-        message = str(exc.detail) if exc.detail else "An error occurred"
+    code = "HTTP_ERROR"
+    message = str(exc.detail)
 
-    if exc.status_code == 401:
+    if exc.status_code == status.HTTP_404_NOT_FOUND:
+        code = CODE_NOT_FOUND
+        message = "Resource not found" if exc.detail == "Not Found" else str(exc.detail)
+    elif exc.status_code == status.HTTP_401_UNAUTHORIZED:
         code = CODE_UNAUTHORIZED
         message = str(exc.detail) if exc.detail else "Invalid or expired access token"
+    elif exc.status_code == status.HTTP_403_FORBIDDEN:
+        code = CODE_FORBIDDEN
+        message = str(exc.detail) if exc.detail else "Access forbidden"
 
     headers = getattr(exc, "headers", None) or {}
     headers["X-Request-ID"] = req_id
@@ -188,9 +168,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "error": {
                 "code": code,
                 "message": message,
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
@@ -205,9 +185,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
             "error": {
                 "code": CODE_INTERNAL_SERVER_ERROR,
                 "message": "An internal server error occurred",
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
@@ -218,29 +198,24 @@ async def docs_redirect():
     return RedirectResponse(url="/api/docs")
 
 
-# Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
-app.include_router(auth_router, prefix="/api")
-app.include_router(auth_router, prefix="/v1")
+# Mount routes under /v1 (standard) and /api (compatibility)
+app.include_router(profiles_router, prefix="/v1")
+app.include_router(relationships_router, prefix="/v1")
+app.include_router(profiles_router, prefix="/api")
+app.include_router(relationships_router, prefix="/api")
 
+
+# ─── Health & Readiness Probes ───────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/api/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/healthz", response_model=HealthResponse, tags=["Health"])
+@app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Liveness probe and readiness indicator."""
-    keycloak_status = "unknown"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            keycloak_status = "healthy" if resp.status_code == 200 else f"unhealthy ({resp.status_code})"
-    except Exception as e:
-        keycloak_status = f"unreachable ({str(e)})"
-
+    """Liveness probe returning service operational status."""
     return HealthResponse(
         status="healthy",
         version=settings.APP_VERSION,
-        keycloak_status=keycloak_status
+        components={"service": "healthy"},
     )
 
 
@@ -249,13 +224,13 @@ async def health_check():
 @app.get("/v1/readyz", tags=["Health"])
 async def readiness_check():
     """
-    Readiness probe verifying PostgreSQL and Keycloak connectivity.
+    Readiness probe verifying PostgreSQL database and NATS JetStream connectivity.
     Returns HTTP 200 if healthy, otherwise HTTP 503.
     """
     db_healthy = False
-    keycloak_healthy = False
+    nats_healthy = False
 
-    # 1. Check Database
+    # 1. Database check
     try:
         pool = await get_db_pool()
         if pool:
@@ -266,16 +241,13 @@ async def readiness_check():
     except Exception as e:
         logger.warning(f"Readiness check DB error: {e}")
 
-    # 2. Check Keycloak
+    # 2. NATS JetStream check
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
-            if resp.status_code == 200:
-                keycloak_healthy = True
+        nats_healthy = await event_bus.check_health()
     except Exception as e:
-        logger.warning(f"Readiness check Keycloak error: {e}")
+        logger.warning(f"Readiness check NATS error: {e}")
 
-    all_ready = db_healthy and keycloak_healthy
+    all_ready = db_healthy and nats_healthy
     status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(
@@ -285,7 +257,7 @@ async def readiness_check():
             "version": settings.APP_VERSION,
             "components": {
                 "database": "healthy" if db_healthy else "unhealthy",
-                "keycloak": "healthy" if keycloak_healthy else "unhealthy",
-            }
-        }
+                "nats": "healthy" if nats_healthy else "unhealthy",
+            },
+        },
     )

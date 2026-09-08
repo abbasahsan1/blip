@@ -5,23 +5,20 @@ import signal
 import asyncio
 import logging
 import tempfile
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import nats
 from nats.aio.client import Client as NATSClient
 from nats.js.client import JetStreamContext
 from nats.js.api import StreamConfig, StorageType, RetentionPolicy
 
-from app.config import settings
+from blipp_common.config import settings
+from blipp_common.database import get_db_pool, init_db, close_db
 from blipp_common.storage import storage_manager
 from app.transcoder import transcode_variants
-from app.database import (
-    init_db,
-    close_db,
-    update_upload_status,
-    get_upload,
-    create_blipp,
-)
+
+# Worker-specific NATS consumer group (overrides blipp_common default "blipp-workers")
+NATS_CONSUMER_GROUP = "transcode-workers"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +33,87 @@ def handle_shutdown(sig, frame):
     global _running
     logger.info(f"Received signal {sig}, initiating graceful shutdown...")
     _running = False
+
+
+# ─── Business SQL helpers ─────────────────────────────────────────────────────
+
+
+async def update_upload_status(upload_id: uuid.UUID, status: str) -> None:
+    pool = await get_db_pool(settings)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE uploads
+            SET processing_status = $2
+            WHERE upload_id = $1
+            """,
+            upload_id,
+            status,
+        )
+
+
+async def get_upload(upload_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+    pool = await get_db_pool(settings)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT upload_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at
+            FROM uploads
+            WHERE upload_id = $1
+            """,
+            upload_id,
+        )
+        return dict(row) if row else None
+
+
+async def create_blipp(
+    blipp_id: uuid.UUID,
+    creator_id: uuid.UUID,
+    title: Optional[str],
+    description: Optional[str],
+    audio_url: str,
+    audio_variants: Dict[str, str],
+    duration_seconds: float,
+    source_type: str,
+    parent_upload_id: uuid.UUID,
+    status: str = "published",
+    language: str = "en",
+) -> Dict[str, Any]:
+    pool = await get_db_pool(settings)
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO blipps (
+                blipp_id, creator_id, title, description, audio_url, audio_variants,
+                duration_seconds, language, status, source_type, parent_upload_id, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT (blipp_id) DO UPDATE
+                SET audio_url = EXCLUDED.audio_url,
+                    audio_variants = EXCLUDED.audio_variants,
+                    duration_seconds = EXCLUDED.duration_seconds,
+                    status = EXCLUDED.status
+            RETURNING blipp_id, creator_id, title, description, audio_url, audio_variants,
+                      duration_seconds, language, status, source_type, parent_upload_id, created_at
+            """,
+            blipp_id,
+            creator_id,
+            title,
+            description,
+            audio_url,
+            json.dumps(audio_variants),
+            float(duration_seconds),
+            language,
+            status,
+            source_type,
+            parent_upload_id,
+            now_utc,
+        )
+        return dict(row) if row else {}
+
+
+# ─── Stream / message handling ────────────────────────────────────────────────
 
 
 async def ensure_streams(js: JetStreamContext) -> None:
@@ -198,7 +276,7 @@ async def run_worker() -> None:
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     logger.info("Initializing database pool...")
-    await init_db()
+    await init_db(settings)
 
     logger.info(f"Connecting to NATS at {settings.NATS_URL}...")
     nc: NATSClient = await nats.connect(
@@ -211,10 +289,10 @@ async def run_worker() -> None:
 
     await ensure_streams(js)
 
-    logger.info(f"Binding durable consumer '{settings.NATS_CONSUMER_GROUP}' on subject 'upload.received'...")
+    logger.info(f"Binding durable consumer '{NATS_CONSUMER_GROUP}' on subject 'upload.received'...")
     psub = await js.pull_subscribe(
         subject="upload.received",
-        durable=settings.NATS_CONSUMER_GROUP,
+        durable=NATS_CONSUMER_GROUP,
         stream=settings.NATS_STREAM_UPLOADS,
     )
 

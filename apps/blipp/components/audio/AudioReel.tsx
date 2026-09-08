@@ -1,4 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+/**
+ * AudioReel
+ *
+ * Vertically-scrollable audio card for the Blipp feed. Responsible strictly for:
+ *   - Vertical swipe / scroll gesture surface (managed by parent FlatList)
+ *   - Play/Pause tap toggle (delegated to useAudioPlayer)
+ *   - Animated waveform visualization (reacts to isPlaying)
+ *   - Progress track (driven by progress from useAudioPlayer)
+ *   - Metadata rendering: title, creator, tags, sponsored CTA
+ *   - Like interaction (delegated via onLike prop)
+ *
+ * All Audio.Sound imperative calls, setInterval telemetry timers, and direct
+ * telemetry dispatches have been extracted into:
+ *   - useAudioPlayer      — audio lifecycle, play/pause, skip/complete events
+ *   - useEngagementTelemetry — periodic 5-second play_progress telemetry
+ *   - useAudioPrefetch    — §6.4 speculative prefetch of upcoming audio
+ */
+
+import { useEffect, useRef } from 'react';
 import {
   Animated,
   Linking,
@@ -8,11 +26,13 @@ import {
   View,
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
-import { recordPlayProgress } from '@/lib/audio/listenTracker';
-import { getDeviceSignal, subscribeDeviceSignal } from '@/lib/deviceSignal';
 import { PlayMark, PauseMark, HeartMark } from '@/components/common/Icons';
-import { resolvePublicAudioUrl } from '@/lib/api';
-import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
+import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
+import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
+import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
+import type { AudioPost, Blipp } from '@/lib/types';
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
 function formatDuration(secs: number): string {
   const m = Math.floor(secs / 60);
@@ -25,132 +45,79 @@ function formatListens(n: number): string {
   return String(n);
 }
 
+// ─── Props ────────────────────────────────────────────────────────────────────
+
 interface Props {
   post?: AudioPost;
   item?: Blipp;
   isActive: boolean;
   height: number;
   onLike: () => void;
+  /**
+   * Full feed item array — passed to useAudioPrefetch so it can speculatively
+   * download upcoming audio before the user swipes to it (§6.4).
+   * Gracefully degrades (no prefetching) if omitted.
+   */
+  feedItems?: Blipp[];
+  /**
+   * Index of this card within feedItems — used to determine which items to
+   * prefetch ahead. Omit if feedItems is not provided.
+   */
+  activeIndex?: number;
 }
 
-export function AudioReel({ post, item: propItem, isActive, height, onLike }: Props) {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function AudioReel({
+  post,
+  item: propItem,
+  isActive,
+  height,
+  onLike,
+  feedItems = [],
+  activeIndex = 0,
+}: Props) {
   const item = (post || propItem) as Blipp;
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
 
-  // Stream source resolved strictly from audio_variants.standard or canonical audio_url,
-  // sanitized to ensure externally reachable public endpoint
-  const audioUri = resolvePublicAudioUrl(item?.audio_variants?.standard || item?.audio_url);
+  // ── §6.4 Speculative prefetch ──────────────────────────────────────────────
+  // Pre-download the next 2–3 upcoming audio tracks so playback starts instantly.
+  const { getCachedUri } = useAudioPrefetch({
+    items: feedItems,
+    activeIndex,
+    enabled: isActive,
+  });
+  const blippId = item?.blipp_id || item?.id;
+  const localUri = blippId ? getCachedUri(blippId) : null;
 
-  // Device signal state tracked via high-fidelity device signal engine
-  const [, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));
+  // ── Audio player ───────────────────────────────────────────────────────────
+  // Manages Web Audio lifecycle, active position, playback controls.
+  const {
+    isPlaying,
+    positionSeconds,
+    durationSeconds,
+    progress,
+    togglePlayPause,
+  } = useAudioPlayer({ item, isActive, localUri });
 
-  useEffect(() => {
-    const unsubscribe = subscribeDeviceSignal((nextSignal) => {
-      setDeviceSignal(nextSignal);
-    });
-    return unsubscribe;
-  }, []);
+  // ── Engagement telemetry ───────────────────────────────────────────────────
+  // Emits periodic 5s play_progress, terminal play_complete (>=90%), and skip on navigate.
+  useEngagementTelemetry({
+    item,
+    isPlaying,
+    positionSeconds,
+    durationSeconds,
+    isActive,
+  });
 
-  // Animated waveform bars: responds strictly to playback state
-  const bars = useRef(Array.from({ length: 36 }, () => new Animated.Value(0.2))).current;
+  // ── Animated waveform ──────────────────────────────────────────────────────
+  // 36 bars animated in a staggered loop while isPlaying; decay to rest when paused.
+  const bars = useRef(
+    Array.from({ length: 36 }, () => new Animated.Value(0.2)),
+  ).current;
   const playAnim = useRef<Animated.CompositeAnimation | null>(null);
 
-  // HTML5 Audio ref for real web stream playback
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
-
-    if (audioUri) {
-      const audio = new Audio(audioUri);
-      audioRef.current = audio;
-
-      const handleTimeUpdate = () => {
-        if (audio.duration && audio.duration > 0) {
-          setProgress(audio.currentTime / audio.duration);
-        }
-      };
-      const handleEnded = () => {
-        setIsPlaying(false);
-        setProgress(0);
-        const blippId = item?.blipp_id || item?.id;
-        const totalDuration = item?.duration_seconds || item?.duration || 0;
-        if (blippId) {
-          recordPlayProgress({
-            blipp_id: blippId,
-            position_seconds: totalDuration,
-            duration_seconds: totalDuration,
-            event_type: 'play_complete',
-          });
-        }
-      };
-      const handlePause = () => {
-        setIsPlaying(false);
-      };
-      const handlePlay = () => {
-        setIsPlaying(true);
-      };
-
-      audio.addEventListener('timeupdate', handleTimeUpdate);
-      audio.addEventListener('ended', handleEnded);
-      audio.addEventListener('pause', handlePause);
-      audio.addEventListener('play', handlePlay);
-
-      return () => {
-        audio.pause();
-        audio.removeEventListener('timeupdate', handleTimeUpdate);
-        audio.removeEventListener('ended', handleEnded);
-        audio.removeEventListener('pause', handlePause);
-        audio.removeEventListener('play', handlePlay);
-        audio.src = '';
-        audioRef.current = null;
-      };
-    }
-  }, [audioUri, item?.id, item?.blipp_id, item?.duration, item?.duration_seconds]);
-
-  // Pause playback if reel becomes inactive
-  useEffect(() => {
-    if (!isActive && audioRef.current && isPlaying) {
-      const audio = audioRef.current;
-      audio.pause();
-      setIsPlaying(false);
-      const blippId = item?.blipp_id || item?.id;
-      const totalDuration = item?.duration_seconds || item?.duration || Math.floor(audio.duration);
-      if (blippId && audio.duration && audio.currentTime < audio.duration * 0.9) {
-        recordPlayProgress({
-          blipp_id: blippId,
-          position_seconds: Math.floor(audio.currentTime),
-          duration_seconds: totalDuration,
-          event_type: 'skip',
-        });
-      }
-    }
-  }, [isActive, isPlaying, item?.id, item?.blipp_id, item?.duration, item?.duration_seconds]);
-
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) {
-      setIsPlaying((p) => !p);
-      return;
-    }
-
     if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      audio.play().then(() => {
-        setIsPlaying(true);
-      }).catch((e) => {
-        console.warn('Audio playback error:', e);
-        setIsPlaying(true);
-      });
-    }
-  };
-
-  // Waveform animation and real telemetry emission
-  useEffect(() => {
-    if (isPlaying && item) {
       const anims = bars.map((bar, i) =>
         Animated.loop(
           Animated.sequence([
@@ -170,50 +137,25 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
       );
       playAnim.current = Animated.parallel(anims);
       playAnim.current.start();
-
-      const blippId = item?.blipp_id || item?.id;
-      const totalDuration = item?.duration_seconds || item?.duration || 0;
-
-      // Emit initial play_progress event upon playback start per Section 6.5
-      if (blippId) {
-        const audio = audioRef.current;
-        recordPlayProgress({
-          blipp_id: blippId,
-          position_seconds: audio ? Math.floor(audio.currentTime) : 0,
-          duration_seconds: totalDuration,
-          event_type: 'play_progress',
-        });
-      }
-
-      let secondsElapsed = 0;
-      const interval = setInterval(() => {
-        secondsElapsed += 1;
-        // Emit play_progress events every 5 seconds per Section 6.5
-        if (secondsElapsed % 5 === 0 && blippId) {
-          const audio = audioRef.current;
-          const positionSeconds = audio ? Math.floor(audio.currentTime) : secondsElapsed;
-          recordPlayProgress({
-            blipp_id: blippId,
-            position_seconds: positionSeconds,
-            duration_seconds: totalDuration,
-            event_type: 'play_progress',
-          });
-        }
-      }, 1000);
-
-      return () => {
-        clearInterval(interval);
-        playAnim.current?.stop();
-      };
     } else {
       playAnim.current?.stop();
-      bars.forEach((b) => {
-        Animated.timing(b, { toValue: 0.2, duration: 180, useNativeDriver: false }).start();
-      });
+      bars.forEach((b) =>
+        Animated.timing(b, {
+          toValue: 0.2,
+          duration: 180,
+          useNativeDriver: false,
+        }).start(),
+      );
     }
-  }, [isPlaying, bars, item?.duration, item?.duration_seconds, item?.id, item?.blipp_id]);
 
-  const currentSeconds = Math.floor(progress * (item?.duration || 0));
+    return () => {
+      playAnim.current?.stop();
+    };
+  }, [isPlaying, bars]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const displayDuration = durationSeconds || item?.duration || 0;
 
   return (
     <View style={[styles.root, { height }]} testID="audio-reel-card">
@@ -292,7 +234,7 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
               styles.playBtn,
               pressed && styles.playBtnPressed,
             ]}
-            onPress={togglePlay}
+            onPress={togglePlayPause}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? 'Pause audio' : 'Play audio'}
             testID="audio-play-button"
@@ -306,11 +248,11 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
 
           <View style={styles.meta}>
             <Text style={styles.timecodeActive}>
-              {formatDuration(currentSeconds)}
+              {formatDuration(positionSeconds)}
             </Text>
             <Text style={styles.metaDivider}>/</Text>
             <Text style={styles.timecodeTotal}>
-              {formatDuration(item?.duration || 0)}
+              {formatDuration(displayDuration)}
             </Text>
             <Text style={styles.metaDot}>•</Text>
             <Text style={styles.metaPlays}>
@@ -350,11 +292,15 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
               styles.ctaButton,
               pressed && styles.ctaButtonPressed,
             ]}
-            onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
+            onPress={() =>
+              item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)
+            }
             accessibilityRole="button"
             accessibilityLabel={item.sponsor.cta_text || 'Learn more'}
           >
-            <Text style={styles.ctaText}>{item.sponsor.cta_text || 'Learn More'}</Text>
+            <Text style={styles.ctaText}>
+              {item.sponsor.cta_text || 'Learn More'}
+            </Text>
           </Pressable>
         )}
 
@@ -372,6 +318,8 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
     </View>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: {

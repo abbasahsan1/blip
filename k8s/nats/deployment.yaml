@@ -29,7 +29,7 @@ spec:
             - nats-server
             - -js
             - -sd
-            - /data
+            - /data/jetstream
             - -m
             - "8222"
           ports:
@@ -46,7 +46,7 @@ spec:
               memory: 512Mi
           volumeMounts:
             - name: nats-data
-              mountPath: /data
+              mountPath: /data/jetstream
           readinessProbe:
             httpGet:
               path: /healthz
@@ -65,19 +65,3 @@ spec:
         - name: nats-data
           persistentVolumeClaim:
             claimName: nats-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: nats-pvc
-  namespace: blipp
-  labels:
-    app.kubernetes.io/name: nats
-    app.kubernetes.io/component: event-bus
-    app.kubernetes.io/part-of: blipp
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi

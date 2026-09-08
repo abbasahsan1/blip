@@ -177,13 +177,28 @@ CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users_profile (
     user_id UUID PRIMARY KEY,
     username VARCHAR(255) UNIQUE NOT NULL,
-    display_name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255),
     bio TEXT,
     avatar_url TEXT,
+    is_creator BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_status VARCHAR(50) NOT NULL DEFAULT 'unverified',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS is_creator BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS verification_status VARCHAR(50) NOT NULL DEFAULT 'unverified';
+
 CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username);
+
+CREATE TABLE IF NOT EXISTS follows (
+    follower_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    followee_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_follower_followee UNIQUE (follower_id, followee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_follows_follower_id ON follows (follower_id);
+CREATE INDEX IF NOT EXISTS idx_follows_followee_id ON follows (followee_id);
 
 CREATE TABLE IF NOT EXISTS uploads (
     upload_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
