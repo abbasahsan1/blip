@@ -200,12 +200,12 @@ async def get_feed(
     for r in final_rows:
         raw_variants = r["audio_variants"]
         parsed_variants = json.loads(raw_variants) if isinstance(raw_variants, str) else (raw_variants or {})
-        playback_url = storage_service.get_playback_url(r["audio_url"])
+        playback_url = storage_service.sanitize_public_url(storage_service.get_playback_url(r["audio_url"]))
         if not parsed_variants and playback_url:
             parsed_variants = {"standard": playback_url}
         else:
             for k, v in list(parsed_variants.items()):
-                parsed_variants[k] = storage_service.get_playback_url(v)
+                parsed_variants[k] = storage_service.sanitize_public_url(storage_service.get_playback_url(v))
 
         items.append(
             FeedItemResponse(

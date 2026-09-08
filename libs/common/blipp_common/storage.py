@@ -29,19 +29,33 @@ class StorageService:
         self.raw_bucket = self.settings.S3_BUCKET_RAW_UPLOADS or "blipp-raw-uploads"
         self.variants_bucket = self.settings.S3_BUCKET_AUDIO_VARIANTS or "blipp-audio-variants"
         self.use_s3 = False
-        self.s3_client = None
+        self.internal_s3_client = None
+        self.public_s3_client = None
+        self.s3_client = None  # Backwards-compatible alias for internal operations
 
         if self.settings.S3_ACCESS_KEY_ID and self.settings.S3_SECRET_ACCESS_KEY:
+            # 1. Internal S3 client for server-side cluster RPCs
             try:
-                client_kwargs = self._get_client_kwargs()
-                self.s3_client = boto3.client("s3", **client_kwargs)
+                internal_kwargs = self._get_client_kwargs(endpoint_url=self.settings.s3_endpoint_url)
+                self.internal_s3_client = boto3.client("s3", **internal_kwargs)
+                self.s3_client = self.internal_s3_client
                 self.use_s3 = True
                 logger.info(
-                    f"S3/MinIO storage adapter initialized with default bucket '{self.bucket_name}' "
-                    f"at {self.settings.S3_ENDPOINT_URL}"
+                    f"S3/MinIO internal storage adapter initialized with default bucket '{self.bucket_name}' "
+                    f"at {self.settings.s3_endpoint_url}"
                 )
             except Exception as e:
-                logger.warning(f"Failed to initialize S3 client: {e}. Falling back to local storage.")
+                logger.warning(f"Failed to initialize internal S3 client: {e}. Falling back to local storage.")
+
+            # 2. Public S3 client for client presigned URLs and public host SigV4 signatures
+            try:
+                public_kwargs = self._get_client_kwargs(endpoint_url=self.settings.s3_public_endpoint_url)
+                self.public_s3_client = boto3.client("s3", **public_kwargs)
+                logger.info(
+                    f"S3/MinIO public URL generator initialized at {self.settings.s3_public_endpoint_url}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize public S3 client: {e}")
 
         # Ensure local upload directory exists as a fallback
         self.local_dir = Path(self.settings.STORAGE_LOCAL_DIR)
@@ -52,14 +66,18 @@ class StorageService:
             self.local_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Local storage fallback initialized at '{self.local_dir}'")
 
-    def _get_client_kwargs(self) -> dict:
+    def _get_client_kwargs(self, endpoint_url: Optional[str] = None) -> dict:
         kwargs = {
             "aws_access_key_id": self.settings.S3_ACCESS_KEY_ID,
             "aws_secret_access_key": self.settings.S3_SECRET_ACCESS_KEY,
-            "config": Config(signature_version="s3v4"),
+            "config": Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+            ),
         }
-        if self.settings.S3_ENDPOINT_URL:
-            kwargs["endpoint_url"] = self.settings.S3_ENDPOINT_URL
+        endpoint = endpoint_url or self.settings.s3_endpoint_url
+        if endpoint:
+            kwargs["endpoint_url"] = endpoint
         if self.settings.S3_REGION_NAME:
             kwargs["region_name"] = self.settings.S3_REGION_NAME
         if hasattr(self.settings, "S3_USE_SSL"):
@@ -267,10 +285,11 @@ class StorageService:
         return await asyncio.to_thread(self._check_health_sync)
 
     def _check_health_sync(self) -> bool:
-        if not self.use_s3 or not self.s3_client:
+        client = self.internal_s3_client or self.s3_client
+        if not self.use_s3 or not client:
             return self.local_dir.exists()
         try:
-            resp = self.s3_client.list_buckets()
+            resp = client.list_buckets()
             bucket_names = [b["Name"] for b in resp.get("Buckets", [])]
             logger.debug(f"S3/MinIO health check detected buckets: {bucket_names}")
             return True
@@ -286,12 +305,13 @@ class StorageService:
         expires_in: int = 3600,
     ) -> str:
         """
-        Generate a presigned PUT URL for direct client upload.
+        Generate a presigned PUT URL for direct client upload using the public endpoint.
         """
         bucket = bucket_name or self.bucket_name
         safe_key = self.extract_storage_key(storage_key)
-        if self.use_s3 and self.s3_client:
-            return self.s3_client.generate_presigned_url(
+        client = self.public_s3_client or self.internal_s3_client or self.s3_client
+        if self.use_s3 and client:
+            return client.generate_presigned_url(
                 "put_object",
                 Params={
                     "Bucket": bucket,
@@ -300,8 +320,8 @@ class StorageService:
                 },
                 ExpiresIn=expires_in,
             )
-        base_url = self.settings.PUBLIC_BASE_URL.rstrip("/")
-        return f"{base_url}/v1/uploads/direct/{safe_key}"
+        base_url = self.settings.s3_public_endpoint_url.rstrip("/")
+        return f"{base_url}/{bucket}/{safe_key}"
 
     def save_file(
         self,
@@ -378,15 +398,16 @@ class StorageService:
         """Extract relative storage key from a full URL, S3 URI, or storage path."""
         if not key_or_url:
             return ""
-        if "/v1/blipps/audio/" in key_or_url:
-            return key_or_url.split("/v1/blipps/audio/", 1)[1]
-        if key_or_url.startswith("http://") or key_or_url.startswith("https://") or key_or_url.startswith("s3://"):
-            path = urlparse(key_or_url).path.lstrip("/")
+        clean_url = key_or_url.split("?")[0]
+        if "/v1/blipps/audio/" in clean_url:
+            return clean_url.split("/v1/blipps/audio/", 1)[1]
+        if clean_url.startswith("http://") or clean_url.startswith("https://") or clean_url.startswith("s3://"):
+            path = urlparse(clean_url).path.lstrip("/")
             for b in (self.bucket_name, self.raw_bucket, self.variants_bucket):
                 if b and path.startswith(f"{b}/"):
                     return path[len(b) + 1:]
             return path
-        return key_or_url.lstrip("/")
+        return clean_url.lstrip("/")
 
     def get_playback_url(
         self,
@@ -395,20 +416,21 @@ class StorageService:
         expires_in: int = 86400,
     ) -> str:
         """
-        Generates presigned download URLs or public CDN URLs.
+        Generates presigned download URLs or public CDN URLs targeting the public S3 endpoint.
         """
         safe_key = self.extract_storage_key(storage_key)
         if not safe_key:
             return storage_key
 
-        bucket = bucket_name or self.bucket_name
+        bucket = bucket_name or self.variants_bucket or self.bucket_name
         cdn_base = self.settings.PUBLIC_STORAGE_BASE_URL or self.settings.S3_PUBLIC_URL
         if cdn_base:
             return f"{cdn_base.rstrip('/')}/{safe_key}"
 
-        if self.use_s3 and self.s3_client:
+        client = self.public_s3_client or self.internal_s3_client or self.s3_client
+        if self.use_s3 and client:
             try:
-                return self.s3_client.generate_presigned_url(
+                return client.generate_presigned_url(
                     ClientMethod="get_object",
                     Params={"Bucket": bucket, "Key": safe_key},
                     ExpiresIn=expires_in,
@@ -416,17 +438,34 @@ class StorageService:
             except Exception as e:
                 logger.warning(f"Failed to generate presigned playback URL: {e}")
 
-        base_url = self.settings.PUBLIC_BASE_URL.rstrip("/")
-        return f"{base_url}/v1/blipps/audio/{safe_key}"
+        base_url = self.settings.s3_public_endpoint_url.rstrip("/")
+        return f"{base_url}/{bucket}/{safe_key}"
 
     def get_s3_uri(self, storage_key: str, bucket_name: Optional[str] = None) -> str:
         """
-        Generates full S3/MinIO URI for an object.
+        Generates canonical S3/MinIO URI for an object using the externally reachable public endpoint.
         """
         bucket = bucket_name or self.raw_bucket
         safe_key = self.extract_storage_key(storage_key)
-        endpoint = self.settings.S3_ENDPOINT_URL.rstrip("/") if self.settings.S3_ENDPOINT_URL else "s3:/"
+        endpoint = (self.settings.s3_public_endpoint_url or self.settings.s3_endpoint_url).rstrip("/")
         return f"{endpoint}/{bucket}/{safe_key.lstrip('/')}"
+
+    def sanitize_public_url(self, url: str) -> str:
+        """Ensures any URL with internal cluster hostnames is rewritten to the public endpoint."""
+        if not url:
+            return ""
+        internal = self.settings.s3_endpoint_url.rstrip("/")
+        public = self.settings.s3_public_endpoint_url.rstrip("/")
+        if internal and internal in url:
+            return url.replace(internal, public)
+        for pattern in (
+            "http://minio.blipp.svc.cluster.local:9000",
+            "http://minio.default.svc.cluster.local:9000",
+            "http://minio:9000",
+        ):
+            if pattern in url:
+                return url.replace(pattern, public)
+        return url
 
     def get_public_audio_url(self, storage_key: str) -> str:
         return self.get_playback_url(storage_key)

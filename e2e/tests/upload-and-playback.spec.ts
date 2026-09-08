@@ -41,21 +41,21 @@ test.describe('Audio Reel Upload, Transcoding & Playback Pipeline', () => {
     await expect(progressSection).toBeVisible({ timeout: 15000 });
 
     // 7. Verify status transitions ("Transcoding audio variants..." to "Published successfully!")
-    const statusText = page.locator('[data-testid="upload-status-text"], text=Transcoding, text=Published');
+    const statusText = page.locator('[data-testid="upload-status-text"]').or(page.getByText(/transcoding|published/i));
     await expect(statusText.first()).toBeVisible({ timeout: 20000 });
 
-    const successBanner = page.locator('[data-testid="upload-success-banner"], text=Published successfully!');
-    await expect(successBanner).toBeVisible({ timeout: 45000 });
+    const successBanner = page.locator('[data-testid="upload-success-banner"]').or(page.getByText('Published successfully!'));
+    await expect(successBanner.first()).toBeVisible({ timeout: 45000 });
 
     // 8. Navigation to Feed tab
     await page.waitForURL((url) => !url.pathname.includes('/upload'), { timeout: 15000 });
 
     // 9. Assert the newly created Blipp appears in the feed DOM
-    const blippTitleInFeed = page.locator(`[data-testid="blipp-title"]:has-text("${uniqueTitle}"), text="${uniqueTitle}"`);
+    const blippTitleInFeed = page.locator('[data-testid="blipp-title"]').filter({ hasText: uniqueTitle }).or(page.getByText(uniqueTitle));
     await expect(blippTitleInFeed.first()).toBeVisible({ timeout: 20000 });
 
     // 10. Assert audio player container initialization
-    const audioContainer = page.locator('[data-testid="audio-player-container"], [data-testid="audio-play-button"], [aria-label="Play audio"]');
+    const audioContainer = page.locator('[data-testid="audio-reel-card"], [data-testid="audio-play-button"]').or(page.getByLabel(/play audio/i));
     await expect(audioContainer.first()).toBeVisible({ timeout: 10000 });
   });
 });

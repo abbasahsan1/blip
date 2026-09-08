@@ -75,6 +75,33 @@ export const getFeedServiceUrl = (): string => {
   return base;
 };
 
+export const getMinioPublicUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_MINIO_URL) {
+    return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    const host = window.location.hostname;
+    return `http://${host}:9000`;
+  }
+  return 'http://localhost:9000';
+};
+
+export const resolvePublicAudioUrl = (url?: string | null): string => {
+  if (!url) return '';
+  const internalPatterns = [
+    'minio.blipp.svc.cluster.local:9000',
+    'minio.default.svc.cluster.local:9000',
+    'minio:9000',
+  ];
+  for (const pattern of internalPatterns) {
+    if (url.includes(pattern)) {
+      const publicBase = getMinioPublicUrl();
+      return url.replace(/^https?:\/\/[^/]+(:9000)?/, publicBase);
+    }
+  }
+  return url;
+};
+
 export interface ApiResponse<T = any> {
   data: T;
   status: number;

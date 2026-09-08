@@ -6,18 +6,18 @@ test.describe('Authentication & Session Initialization', () => {
     await page.goto('/auth/sign-in');
     await page.waitForLoadState('domcontentloaded');
 
-    const emailInput = page.locator('#sign-in-email');
-    await expect(emailInput).toBeVisible({ timeout: 15000 });
-    await emailInput.fill(TEST_USER.username);
+    const emailInput = page.locator('#sign-in-email, input[type="email"], input[placeholder*="operator"]');
+    await expect(emailInput.first()).toBeVisible({ timeout: 15000 });
+    await emailInput.first().fill(TEST_USER.username);
 
-    const passwordInput = page.locator('#sign-in-password');
-    await passwordInput.fill('WrongPassword999!');
+    const passwordInput = page.locator('#sign-in-password, input[type="password"]');
+    await passwordInput.first().fill('WrongPassword999!');
 
-    const submitButton = page.locator('#sign-in-submit');
-    await submitButton.click();
+    const submitButton = page.locator('#sign-in-submit, [aria-label="Sign In"]');
+    await submitButton.first().click();
 
     // Verify error banner is rendered
-    const errorBanner = page.locator('[role="alert"], text=Invalid, text=failed, text=Unauthorized');
+    const errorBanner = page.locator('[role="alert"]').or(page.getByText(/invalid|failed|unauthorized/i));
     await expect(errorBanner.first()).toBeVisible({ timeout: 10000 });
   });
 
@@ -28,11 +28,11 @@ test.describe('Authentication & Session Initialization', () => {
     await expect(page).toHaveURL(/\/(tabs)?/);
 
     // Navigate to Profile tab
-    const profileTab = page.locator('div[role="tab"]:has-text("Profile"), [aria-label*="Profile"], text=Profile').first();
-    await profileTab.click();
+    const profileTab = page.locator('div[role="tab"], a[role="tab"]').filter({ hasText: /profile/i }).or(page.getByLabel(/profile/i));
+    await profileTab.first().click();
 
     // Verify operator handle / display name appears
-    const profileHandle = page.locator('[data-testid="profile-username"], text=@testuser, text=testuser');
+    const profileHandle = page.locator('[data-testid="profile-username"]').or(page.getByText('@testuser')).or(page.getByText('testuser'));
     await expect(profileHandle.first()).toBeVisible({ timeout: 10000 });
   });
 });

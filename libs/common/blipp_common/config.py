@@ -55,6 +55,7 @@ class BaseCommonSettings(BaseSettings):
 
     # ─── MinIO / S3 Object Storage ────────────────────────────────────────────
     S3_ENDPOINT_URL: str = "http://minio.blipp.svc.cluster.local:9000"
+    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000"
     S3_BUCKET_NAME: str = "blipp-raw-uploads"
     S3_BUCKET_RAW_UPLOADS: str = "blipp-raw-uploads"
     S3_BUCKET_AUDIO_VARIANTS: str = "blipp-audio-variants"
@@ -64,6 +65,16 @@ class BaseCommonSettings(BaseSettings):
     S3_USE_SSL: bool = False
     S3_PUBLIC_URL: str = ""
     PUBLIC_STORAGE_BASE_URL: str = ""
+
+    @property
+    def s3_endpoint_url(self) -> str:
+        """Internal Kubernetes cluster URL for server-side S3 operations."""
+        return self.S3_ENDPOINT_URL
+
+    @property
+    def s3_public_endpoint_url(self) -> str:
+        """Externally reachable S3 URL for client presigned URLs and public media playback."""
+        return self.S3_PUBLIC_ENDPOINT_URL or "http://localhost:9000"
 
     # Local storage fallback directory & public URL
     STORAGE_LOCAL_DIR: str = "/app/data/uploads"

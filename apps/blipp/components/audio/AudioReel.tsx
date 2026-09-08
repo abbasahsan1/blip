@@ -11,6 +11,7 @@ import { PALETTE } from '@/lib/palette';
 import { recordPlayProgress } from '@/lib/audio/listenTracker';
 import { getDeviceSignal, subscribeDeviceSignal } from '@/lib/deviceSignal';
 import { PlayMark, PauseMark, HeartMark } from '@/components/common/Icons';
+import { resolvePublicAudioUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DeviceSignal } from '@/lib/types';
 
 function formatDuration(secs: number): string {
@@ -37,8 +38,9 @@ export function AudioReel({ post, item: propItem, isActive, height, onLike }: Pr
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Stream source resolved strictly from audio_variants.standard or canonical audio_url
-  const audioUri = item?.audio_variants?.standard || item?.audio_url;
+  // Stream source resolved strictly from audio_variants.standard or canonical audio_url,
+  // sanitized to ensure externally reachable public endpoint
+  const audioUri = resolvePublicAudioUrl(item?.audio_variants?.standard || item?.audio_url);
 
   // Device signal state tracked via high-fidelity device signal engine
   const [, setDeviceSignal] = useState<DeviceSignal>(getDeviceSignal(false));

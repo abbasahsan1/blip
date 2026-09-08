@@ -1,0 +1,8 @@
+apps/
+node_modules/
+.git/
+e2e/
+docs/
+charts/
+.expo/
+*.log

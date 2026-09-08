@@ -277,7 +277,7 @@ async def complete_upload(
     default_key = f"{current_user.user_id}/{upload_id}.mp3"
     storage_key = upload_info.get("storage_key") if upload_info else default_key
 
-    audio_url = storage_service.get_playback_url(storage_key)
+    audio_url = storage_service.sanitize_public_url(storage_service.get_playback_url(storage_key))
     audio_variants = {"standard": audio_url}
     new_blipp_id = uuid.uuid4()
     pool = await get_db_pool()

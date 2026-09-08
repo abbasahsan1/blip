@@ -6,16 +6,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN python -m venv /opt/venv
-RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+# Ensure /usr/bin/python3 exists in builder so /opt/venv/bin/python resolves
+RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
 
-# Install shared core library first
+# Copy pre-installed virtual environment from auth service
+COPY --from=blipp-auth-service:latest /opt/venv /opt/venv
+
+# Install shared core library
 COPY libs/common /libs/common
-RUN /opt/venv/bin/pip install --no-cache-dir /libs/common
-
-# Install service dependencies
-COPY services/content_ingest/requirements.txt .
-RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --no-build-isolation --no-deps /libs/common
 
 # In python:3.11-slim, /opt/venv/bin/python points to /usr/local/bin/python
 # In gcr.io/distroless/python3-debian12, python3 binary is located at /usr/bin/python3

@@ -66,6 +66,7 @@ export async function pollUploadStatus(
       const statusRes = await uploadApi.getStatus(uploadId, sessionToken);
       const currentStatus = statusRes.processing_status;
 
+      // Note: We deliberately only inspect processing_status and avoid any GET fetch on raw_file_url
       if (currentStatus === 'done') {
         return statusRes;
       }
