@@ -12,3 +12,4 @@ boto3==1.36.26
 nats-py==2.9.0
 SQLAlchemy>=2.0.0
 redis>=5.0.0
+async-timeout>=4.0.3

@@ -73,6 +73,7 @@ if [ "${1:-}" = "--ports-only" ]; then
   kubectl port-forward --address 0.0.0.0 svc/feed-service 8002:8002 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/keycloak 8080:8080 -n "${NAMESPACE}" >/dev/null 2>&1 &
   kubectl port-forward --address 0.0.0.0 svc/minio 9000:9000 -n "${NAMESPACE}" >/dev/null 2>&1 &
+  disown -a 2>/dev/null || true
   sleep 2
   echo "✅ Port-forwarding active in background (-n ${NAMESPACE}):"
   echo "   - Auth Service:   http://${DETECTED_IP}:8000 (and localhost:8000)"

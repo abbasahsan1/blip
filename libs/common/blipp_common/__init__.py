@@ -24,7 +24,13 @@ from .storage import (
     storage_manager,
     get_playback_url,
 )
-from .redis import get_redis_client, close_redis
+async def get_redis_client(*args, **kwargs):
+    from .redis import get_redis_client as _get
+    return await _get(*args, **kwargs)
+
+async def close_redis(*args, **kwargs):
+    from .redis import close_redis as _close
+    return await _close(*args, **kwargs)
 from .exceptions import (
     AppException,
     CODE_INVALID_CREDENTIALS,

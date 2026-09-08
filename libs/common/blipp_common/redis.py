@@ -1,5 +1,18 @@
+import sys
+import types
 import logging
 from typing import Optional
+
+# Ensure async_timeout exists for redis.asyncio in Python 3.11+ environments
+if "async_timeout" not in sys.modules:
+    try:
+        import async_timeout
+    except ImportError:
+        import asyncio
+        _at = types.ModuleType("async_timeout")
+        _at.timeout = getattr(asyncio, "timeout", None)
+        sys.modules["async_timeout"] = _at
+
 import redis.asyncio as aioredis
 from blipp_common.config import settings
 
