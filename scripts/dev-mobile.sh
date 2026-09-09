@@ -113,5 +113,10 @@ echo "   Scan the QR code in the Expo Go app on your physical mobile device."
 echo "   (Make sure your phone is connected to Tailscale)"
 echo ""
 
+# Free port 8081 if previously occupied by a detached metro instance
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k 8081/tcp 2>/dev/null || true
+fi
+
 cd "${APP_DIR}"
 exec npx expo start --clear "$@"

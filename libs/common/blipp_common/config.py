@@ -97,8 +97,11 @@ class BaseCommonSettings(BaseSettings):
     KEYCLOAK_CLIENT_ID: str = "blipp-app"
     KEYCLOAK_CLIENT_SECRET: str = "blipp-secret-client-token"
     KEYCLOAK_ADMIN: str = "admin"
-    KEYCLOAK_ADMIN_PASSWORD: str = "admin_master_password"
     JWKS_URL: str = ""
+
+    # ─── Feature Flags & Scheduling ───────────────────────────────────────────
+    FEATURE_COPYRIGHT_SCAN_ENABLED: bool = False
+    SCHEDULED_PUBLISH_INTERVAL_SECONDS: int = 30
 
     def get_jwks_url(self) -> str:
         if self.JWKS_URL:

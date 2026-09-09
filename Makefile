@@ -125,6 +125,11 @@ k8s-init: ## Ensure namespace, secrets, and PVC storage exist
 	@kubectl apply -f k8s/redis/pvc.yaml
 	@kubectl apply -f k8s/nats/pvc.yaml
 	@kubectl apply -f k8s/gorse/pvc.yaml
+	@if ! kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1; then \
+		echo "Checking/Installing KEDA CRDs..."; \
+		kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml || true; \
+	fi
+
 
 k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifests
 	# Stateful infrastructure

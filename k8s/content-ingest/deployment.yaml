@@ -31,7 +31,7 @@ spec:
                 name: blipp-secrets
           env:
             - name: POSTGRES_DB
-              value: "blipp"
+              value: "blipp_ingest"
             - name: S3_PUBLIC_ENDPOINT_URL
               value: "http://localhost:9000"
           resources:

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -44,6 +45,8 @@ class UploadCompleteRequest(BaseModel):
     title: str
     description: Optional[str] = None
     duration_seconds: int = 0
+    scheduled_at: Optional[datetime] = None
+
 
 
 class BlippResponse(BaseModel):

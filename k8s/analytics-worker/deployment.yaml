@@ -28,7 +28,7 @@ spec:
                 name: blipp-secrets
           env:
             - name: POSTGRES_DB
-              value: blipp
+              value: blipp_analytics
             - name: NATS_URL
               value: nats://nats.blipp.svc.cluster.local:4222
             - name: REDIS_URL

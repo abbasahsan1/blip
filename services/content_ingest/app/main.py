@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -24,6 +25,11 @@ from blipp_common.storage import storage_service
 from blipp_common.events import event_bus
 from app.api.v1.uploads import router as uploads_router
 from app.models.schemas import HealthResponse
+from app.event_handlers import (
+    run_transcode_consumer,
+    run_scheduled_publisher,
+    stop_event_handlers,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,10 +46,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
     try:
-        await event_bus.connect()
+        await event_bus.connect("content-ingest-service")
     except Exception as e:
         logger.error(f"Event bus startup connection error: {e}")
+
+    # Launch transcode event consumer & scheduled post publisher background workers
+    consumer_task = asyncio.create_task(run_transcode_consumer())
+    publisher_task = asyncio.create_task(run_scheduled_publisher())
+
     yield
+
+    stop_event_handlers()
+    consumer_task.cancel()
+    publisher_task.cancel()
+    await asyncio.gather(consumer_task, publisher_task, return_exceptions=True)
+
     try:
         await event_bus.close()
     except Exception as e:

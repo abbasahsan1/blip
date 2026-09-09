@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: worker
     app.kubernetes.io/part-of: blipp
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: transcode-worker
@@ -27,8 +27,6 @@ spec:
             - secretRef:
                 name: blipp-secrets
           env:
-            - name: POSTGRES_DB
-              value: blipp
             - name: NATS_URL
               value: nats://nats.blipp.svc.cluster.local:4222
             - name: S3_ENDPOINT_URL

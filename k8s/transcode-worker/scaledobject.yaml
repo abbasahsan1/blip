@@ -1,0 +1,22 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: transcode-worker-scaledobject
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: transcode-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: blipp
+spec:
+  scaleTargetRef:
+    name: transcode-worker
+  minReplicaCount: 0
+  maxReplicaCount: 5
+  cooldownPeriod: 60
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats.blipp.svc.cluster.local:8222"
+        stream: "UPLOADS"
+        consumer: "transcode-worker"
+        lagThreshold: "1"

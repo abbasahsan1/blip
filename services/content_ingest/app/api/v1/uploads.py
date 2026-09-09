@@ -36,6 +36,7 @@ async def upload_media(
     upload_type: str = Form("audio"),
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    scheduled_at: Optional[datetime] = Form(None),
     current_user: TokenData = Depends(get_current_user),
 ):
     """
@@ -122,6 +123,7 @@ async def upload_media(
         "upload_type": upload_type,
         "title": title or "",
         "description": description or "",
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
         "timestamp": now_utc.isoformat(),
     }
     try:
@@ -289,14 +291,22 @@ async def complete_upload(
             message="Database pool unavailable",
         )
 
+    now_utc = datetime.now(timezone.utc)
+    if settings.FEATURE_COPYRIGHT_SCAN_ENABLED:
+        computed_status = "processing"
+    elif req.scheduled_at and req.scheduled_at > now_utc:
+        computed_status = "scheduled"
+    else:
+        computed_status = "published"
+
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO blipps (
-                    blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
+                    blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, scheduled_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, scheduled_at, created_at
                 """,
                 new_blipp_id,
                 current_user.user_id,
@@ -304,7 +314,8 @@ async def complete_upload(
                 audio_url,
                 json.dumps(audio_variants),
                 max(0, req.duration_seconds),
-                "published",
+                computed_status,
+                req.scheduled_at,
             )
     except Exception as e:
         logger.exception(f"Error persisting completed upload: {e}")
@@ -315,6 +326,34 @@ async def complete_upload(
         )
 
     _pending_uploads.pop(upload_id, None)
+
+    if computed_status == "published":
+        try:
+            await event_bus.publish(
+                subject="engagement.blipp.published",
+                payload={
+                    "blipp_id": str(new_blipp_id),
+                    "creator_id": str(current_user.user_id),
+                    "title": req.title,
+                    "audio_url": audio_url,
+                    "duration_seconds": max(0, req.duration_seconds),
+                    "published_at": now_utc.isoformat(),
+                },
+            )
+        except Exception as pub_err:
+            logger.warning(f"Failed to publish engagement.blipp.published event: {pub_err}")
+    elif computed_status == "processing":
+        try:
+            await event_bus.publish(
+                subject="copyright.scan.requested",
+                payload={
+                    "blipp_id": str(new_blipp_id),
+                    "upload_id": upload_id,
+                    "audio_url": audio_url,
+                },
+            )
+        except Exception as scan_err:
+            logger.warning(f"Failed to publish copyright.scan.requested event: {scan_err}")
 
     created_at_str = row["created_at"].isoformat() if row["created_at"] else None
     raw_variants = row["audio_variants"]
