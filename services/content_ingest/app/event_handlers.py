@@ -324,3 +324,99 @@ async def run_scheduled_publisher() -> None:
             break
 
     logger.info("Scheduled post publisher background task stopped.")
+
+
+# ─── 3. Content Takedown Consumer (§6.7) ───────────────────────────────────────
+
+TAKEDOWN_CONSUMER_NAME = "content-ingest-takedown"
+
+
+async def handle_content_takedown(data: Dict[str, Any]) -> None:
+    """
+    Handles content.takedown event (§6.7):
+    Updates blipps.status = 'taken_down' in blipp_ingest database,
+    instantly revoking feed visibility.
+    """
+    blipp_id_str = data.get("blipp_id")
+    if not blipp_id_str:
+        logger.warning(f"Missing blipp_id in content.takedown event: {data}")
+        return
+
+    try:
+        blipp_id = uuid.UUID(blipp_id_str)
+    except (ValueError, TypeError):
+        logger.error(f"Invalid blipp_id UUID in content.takedown: {blipp_id_str}")
+        return
+
+    pool = await get_db_pool()
+    if not pool:
+        logger.error("Database pool unavailable to process content takedown event")
+        return
+
+    reason = data.get("reason", "moderation_action")
+
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            """
+            UPDATE blipps
+            SET status = 'taken_down'
+            WHERE blipp_id = $1
+            """,
+            blipp_id,
+        )
+        logger.info(f"Processed content takedown for blipp {blipp_id} (reason='{reason}'): {res}")
+
+
+async def run_takedown_consumer() -> None:
+    """
+    Subscribes to content.takedown events from NATS JetStream (UPLOADS stream)
+    using durable consumer 'content-ingest-takedown'.
+    """
+    global _running
+
+    while _running:
+        if not event_bus.is_connected or not event_bus.js:
+            connected = await event_bus.connect("content-ingest-takedown-consumer")
+            if not connected:
+                await asyncio.sleep(2.0)
+                continue
+
+        js = event_bus.js
+        try:
+            psub = await js.pull_subscribe(
+                subject="content.takedown",
+                durable=TAKEDOWN_CONSUMER_NAME,
+                stream=settings.NATS_STREAM_UPLOADS,
+            )
+            logger.info(f"Durable pull consumer '{TAKEDOWN_CONSUMER_NAME}' subscribed to 'content.takedown'")
+
+            while _running:
+                try:
+                    msgs = await psub.fetch(batch=5, timeout=2.0)
+                    for msg in msgs:
+                        try:
+                            payload = json.loads(msg.data.decode("utf-8"))
+                            await handle_content_takedown(payload)
+                            await msg.ack()
+                        except Exception as msg_err:
+                            logger.exception(f"Error handling message on {msg.subject}: {msg_err}")
+                            await msg.ack()
+                except (nats.errors.TimeoutError, asyncio.TimeoutError):
+                    continue
+                except asyncio.CancelledError:
+                    _running = False
+                    break
+                except Exception as loop_err:
+                    if _running:
+                        logger.warning(f"Error in takedown fetch loop: {loop_err}")
+                        await asyncio.sleep(1.0)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as conn_err:
+            if _running:
+                logger.warning(f"NATS subscription connection error in takedown consumer: {conn_err}. Reconnecting in 3s...")
+                await asyncio.sleep(3.0)
+
+    logger.info("Content takedown consumer background task stopped.")
+

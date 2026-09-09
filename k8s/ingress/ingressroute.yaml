@@ -121,6 +121,24 @@ spec:
         - name: messaging-service
           port: 8004
 
+    # User Reports Route (/v1/reports)
+    - match: PathPrefix(`/v1/reports`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: moderation-service
+          port: 8005
+
+    # Moderation Actions Route (/v1/moderation)
+    - match: PathPrefix(`/v1/moderation`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: moderation-service
+          port: 8005
+
     # General Versioned Route (/v1)
     - match: PathPrefix(`/v1`)
       kind: Rule

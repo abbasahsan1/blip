@@ -62,6 +62,7 @@ class BaseCommonSettings(BaseSettings):
     S3_BUCKET_STORIES: str = "blipp-stories"
     MESSAGING_SERVICE_URL: str = "http://messaging-service.blipp.svc.cluster.local:8004"
     SOCIAL_GRAPH_URL: str = "http://social-graph-service.blipp.svc.cluster.local:8003"
+    MODERATION_SERVICE_URL: str = "http://moderation-service.blipp.svc.cluster.local:8005"
     S3_ACCESS_KEY_ID: str = "minioadmin"
     S3_SECRET_ACCESS_KEY: str = "minioadmin"
     S3_REGION_NAME: str = "us-east-1"

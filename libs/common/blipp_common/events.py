@@ -85,11 +85,11 @@ class EventBus:
         stream_definitions: List[Dict[str, Any]] = [
             {
                 "name": self.settings.NATS_STREAM_UPLOADS,
-                "subjects": [self.settings.NATS_SUBJECT_UPLOADS, "transcode.>", "media.>", "copyright.>"],
+                "subjects": [self.settings.NATS_SUBJECT_UPLOADS, "transcode.>", "media.>", "copyright.>", "content.>"],
             },
             {
                 "name": self.settings.NATS_STREAM_ENGAGEMENT,
-                "subjects": [self.settings.NATS_SUBJECT_ENGAGEMENT],
+                "subjects": [self.settings.NATS_SUBJECT_ENGAGEMENT, "user.>"],
             },
         ]
 

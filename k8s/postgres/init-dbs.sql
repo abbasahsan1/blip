@@ -5,6 +5,7 @@ SELECT 'CREATE DATABASE blipp_feed'    WHERE NOT EXISTS (SELECT FROM pg_database
 SELECT 'CREATE DATABASE blipp_social'  WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_social')\gexec
 SELECT 'CREATE DATABASE blipp_analytics' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_analytics')\gexec
 SELECT 'CREATE DATABASE blipp_messaging' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_messaging')\gexec
+SELECT 'CREATE DATABASE blipp_moderation' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_moderation')\gexec
 
 -- Grant connection and administrative privileges to keycloak user
 GRANT ALL PRIVILEGES ON DATABASE blipp_auth TO keycloak;
@@ -13,3 +14,4 @@ GRANT ALL PRIVILEGES ON DATABASE blipp_feed TO keycloak;
 GRANT ALL PRIVILEGES ON DATABASE blipp_social TO keycloak;
 GRANT ALL PRIVILEGES ON DATABASE blipp_analytics TO keycloak;
 GRANT ALL PRIVILEGES ON DATABASE blipp_messaging TO keycloak;
+GRANT ALL PRIVILEGES ON DATABASE blipp_moderation TO keycloak;

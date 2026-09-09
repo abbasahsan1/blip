@@ -2,87 +2,89 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from blipp_common.config import settings
+from blipp_common.database import (
+    close_db_pool,
+    get_db_pool,
+    init_db_pool,
+    CREATE_TABLES_SQL,
+)
+from blipp_common.events import event_bus
 from blipp_common.exceptions import (
     AppException,
-    CODE_VALIDATION_ERROR,
-    CODE_INTERNAL_SERVER_ERROR,
-    CODE_UNAUTHORIZED,
     CODE_FORBIDDEN,
+    CODE_INTERNAL_SERVER_ERROR,
     CODE_NOT_FOUND,
-    CODE_SERVICE_UNAVAILABLE,
+    CODE_UNAUTHORIZED,
+    CODE_VALIDATION_ERROR,
 )
-from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
-from blipp_common.storage import storage_service
-from blipp_common.events import event_bus
-from app.api.v1.uploads import router as uploads_router
-from app.api.v1.saves import router as saves_router
-from app.models.schemas import HealthResponse
-from app.event_handlers import (
-    run_transcode_consumer,
-    run_scheduled_publisher,
-    run_takedown_consumer,
-    stop_event_handlers,
-)
+from app.api.v1.reports import router as reports_router
+from app.api.v1.moderation import router as moderation_router
+from app.models.moderation import HealthResponse
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("content-ingest.main")
+logger = logging.getLogger("moderation.main")
 
+
+# ─── Application Lifespan ──────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting Content Ingest Service v{settings.APP_VERSION}")
+    logger.info(f"Starting Blipp Moderation Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
+        logger.info("Database connection pool initialized")
+        # Ensure schema tables exist in blipp_moderation
+        pool = await get_db_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute(CREATE_TABLES_SQL)
+                logger.info("Ensured moderation tables and indexes exist")
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
-    try:
-        await event_bus.connect("content-ingest-service")
-    except Exception as e:
-        logger.error(f"Event bus startup connection error: {e}")
 
-    # Launch transcode event consumer, scheduled post publisher, & content takedown background workers
-    consumer_task = asyncio.create_task(run_transcode_consumer())
-    publisher_task = asyncio.create_task(run_scheduled_publisher())
-    takedown_task = asyncio.create_task(run_takedown_consumer())
+    try:
+        await event_bus.connect(client_name="moderation-service")
+        logger.info("Connected to NATS JetStream Event Bus")
+    except Exception as e:
+        logger.warning(f"NATS startup connection warning: {e}")
 
     yield
-
-    stop_event_handlers()
-    consumer_task.cancel()
-    publisher_task.cancel()
-    takedown_task.cancel()
-    await asyncio.gather(consumer_task, publisher_task, takedown_task, return_exceptions=True)
 
     try:
         await event_bus.close()
     except Exception as e:
-        logger.error(f"Event bus shutdown error: {e}")
+        logger.warning(f"Event bus shutdown note: {e}")
+
     try:
         await close_db_pool()
     except Exception as e:
-        logger.error(f"Database pool shutdown error: {e}")
-    logger.info("Shutting down Content Ingest Service")
+        logger.warning(f"Database pool shutdown note: {e}")
 
+    logger.info("Shutting down Blipp Moderation Service")
+
+
+# ─── FastAPI Initialization ───────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Blipp Content Ingest Service",
+    title="Blipp Moderation Service",
+    description="Dedicated microservice for User Reports, Creator Strikes, and Content Takedowns (§3 #6, §5.5, §6.7)",
     version=settings.APP_VERSION,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 
@@ -93,7 +95,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID")
         if not request_id:
             request_id = str(uuid.uuid4())
-        
+
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
@@ -102,7 +104,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestIDMiddleware)
 
-# CORS configuration: permissive during development
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -131,9 +133,9 @@ async def app_exception_handler(request: Request, exc: AppException):
             "error": {
                 "code": exc.code,
                 "message": exc.message,
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
@@ -142,10 +144,11 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
     req_id = get_request_id(request)
     error_messages = []
     for err in exc.errors():
-        loc = " -> ".join(str(item) for item in err.get("loc", []))
-        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
-    
-    message = "; ".join(error_messages) if error_messages else "Request validation failed"
+        loc = " -> ".join(str(l) for l in err.get("loc", []))
+        msg = err.get("msg", "Invalid value")
+        error_messages.append(f"{loc}: {msg}")
+    message = "; ".join(error_messages) if error_messages else "Request validation error"
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         headers={"X-Request-ID": req_id},
@@ -153,31 +156,9 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
             "error": {
                 "code": CODE_VALIDATION_ERROR,
                 "message": message,
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
-    )
-
-
-@app.exception_handler(ValidationError)
-async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
-    req_id = get_request_id(request)
-    error_messages = []
-    for err in exc.errors():
-        loc = " -> ".join(str(item) for item in err.get("loc", []))
-        error_messages.append(f"{loc}: {err.get('msg', 'invalid value')}")
-    
-    message = "; ".join(error_messages) if error_messages else "Model validation failed"
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        headers={"X-Request-ID": req_id},
-        content={
-            "error": {
-                "code": CODE_VALIDATION_ERROR,
-                "message": message,
-                "request_id": req_id
-            }
-        }
+        },
     )
 
 
@@ -185,7 +166,6 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     req_id = get_request_id(request)
-    
     if isinstance(exc.detail, dict):
         code = exc.detail.get("code", f"HTTP_{exc.status_code}")
         message = exc.detail.get("message", str(exc.detail))
@@ -199,7 +179,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             409: "CONFLICT",
             422: CODE_VALIDATION_ERROR,
             500: CODE_INTERNAL_SERVER_ERROR,
-            503: CODE_SERVICE_UNAVAILABLE,
+            503: "SERVICE_UNAVAILABLE",
         }
         code = status_to_code.get(exc.status_code, f"HTTP_{exc.status_code}")
         message = str(exc.detail) if exc.detail else "An error occurred"
@@ -217,9 +197,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "error": {
                 "code": code,
                 "message": message,
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
@@ -234,9 +214,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
             "error": {
                 "code": CODE_INTERNAL_SERVER_ERROR,
                 "message": "An internal server error occurred",
-                "request_id": req_id
+                "request_id": req_id,
             }
-        }
+        },
     )
 
 
@@ -247,12 +227,14 @@ async def docs_redirect():
     return RedirectResponse(url="/api/docs")
 
 
-# Mount routes under /v1/uploads and /uploads
-app.include_router(uploads_router, prefix="/v1/uploads")
-app.include_router(uploads_router, prefix="/uploads")
-app.include_router(saves_router, prefix="/v1")
-app.include_router(saves_router)
+# Mount versioned routers
+app.include_router(reports_router, prefix="/v1")
+app.include_router(reports_router)
+app.include_router(moderation_router, prefix="/v1")
+app.include_router(moderation_router)
 
+
+# ─── Probes ──────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/healthz", response_model=HealthResponse, tags=["Health"])
@@ -266,39 +248,28 @@ async def health_check():
 
 
 @app.get("/readyz", tags=["Health"])
-@app.get("/v1/readyz", tags=["Health"])
+@app.get("/ready", tags=["Health"])
+@app.get("/v1/ready", tags=["Health"])
 async def readiness_check():
-    """
-    Readiness probe verifying PostgreSQL, MinIO S3 object storage, and NATS JetStream connectivity.
-    """
+    """Readiness probe checking database and NATS event bus."""
     db_healthy = False
-    storage_healthy = False
     event_bus_healthy = False
 
-    # 1. Check Database
     try:
         pool = await get_db_pool()
         if pool:
             async with pool.acquire() as conn:
-                val = await conn.fetchval("SELECT 1")
-                if val == 1:
-                    db_healthy = True
+                await conn.fetchval("SELECT 1")
+                db_healthy = True
     except Exception as e:
         logger.warning(f"Readiness check DB error: {e}")
 
-    # 2. Check MinIO / S3 Storage
-    try:
-        storage_healthy = await storage_service.check_health()
-    except Exception as e:
-        logger.warning(f"Readiness check storage error: {e}")
-
-    # 3. Check NATS JetStream Event Bus
     try:
         event_bus_healthy = await event_bus.check_health()
     except Exception as e:
         logger.warning(f"Readiness check event bus error: {e}")
 
-    all_ready = db_healthy and storage_healthy and event_bus_healthy
+    all_ready = db_healthy and event_bus_healthy
     status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(
@@ -308,8 +279,7 @@ async def readiness_check():
             "version": settings.APP_VERSION,
             "components": {
                 "database": "healthy" if db_healthy else "unhealthy",
-                "storage": "healthy" if storage_healthy else "unhealthy",
                 "event_bus": "healthy" if event_bus_healthy else "unhealthy",
-            }
-        }
+            },
+        },
     )
