@@ -23,7 +23,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  type AudioPlayer,
+  type AudioStatus,
+} from 'expo-audio';
 import { PALETTE } from '@/lib/palette';
 import { PlayMark, PauseMark } from '@/components/common/Icons';
 import { resolvePublicAudioUrl } from '@/lib/api';
@@ -67,7 +72,8 @@ export function StoryModal({
   const [positionSeconds, setPositionSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const playerSubRef = useRef<{ remove: () => void } | null>(null);
   const webAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Synchronize initialIndex when opening modal
@@ -157,51 +163,55 @@ export function StoryModal({
     let isMounted = true;
     const rawAudioUrl = currentStory.audio_url;
     const publicUrl = resolvePublicAudioUrl(rawAudioUrl);
-
     async function loadAudio() {
       cleanupAudio();
 
-      if (Platform.OS === 'web' && typeof Audio === 'undefined') {
-        // Fallback for SSR
-        return;
-      }
+      if (!publicUrl) return;
 
       try {
-        // Attempt expo-av playback
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: false,
-          shouldDuckAndroid: true,
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: false,
         }).catch(() => {});
 
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: publicUrl },
-          { shouldPlay: true },
-          onPlaybackStatusUpdate,
-        );
+        const player = createAudioPlayer(publicUrl);
+        playerRef.current = player;
 
-        if (!isMounted) {
-          await sound.unloadAsync();
-          return;
-        }
+        const sub = (player as any).addListener(
+          'playbackStatusUpdate',
+          (status: AudioStatus) => {
+          if (!isMounted) return;
+          setIsPlaying(status.playing);
+          const posSec = status.currentTime || 0;
+          const durSec =
+            status.duration || currentStory?.duration_seconds || 15;
+          setPositionSeconds(posSec);
+          setDurationSeconds(durSec);
+          setProgress(durSec > 0 ? Math.min(1, posSec / durSec) : 0);
 
-        soundRef.current = sound;
-        setIsPlaying(true);
-      } catch (err) {
-        // Fallback to HTML5 Audio on Web if expo-av sound creation failed
+          if (status.didJustFinish) {
+            handleNextStory();
+          }
+        });
+        playerSubRef.current = sub;
+
+        player.play();
+        if (isMounted) setIsPlaying(true);
+      } catch {
+        // Fallback to HTML5 Audio on Web if createAudioPlayer failed or in web environment
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           const audio = new window.Audio(publicUrl);
           webAudioRef.current = audio;
 
           audio.onloadedmetadata = () => {
             if (!isMounted) return;
-            setDurationSeconds(audio.duration || currentStory.duration_seconds || 15);
+            setDurationSeconds(audio.duration || currentStory?.duration_seconds || 15);
           };
 
           audio.ontimeupdate = () => {
             if (!isMounted) return;
             const cur = audio.currentTime || 0;
-            const dur = audio.duration || currentStory.duration_seconds || 15;
+            const dur = audio.duration || currentStory?.duration_seconds || 15;
             setPositionSeconds(cur);
             setProgress(Math.min(1, cur / dur));
           };
@@ -235,31 +245,23 @@ export function StoryModal({
     };
   }, [visible, currentIndex, currentStory?.audio_url]);
 
-  const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) {
-        setIsPlaying(false);
-      }
-      return;
-    }
-
-    setIsPlaying(status.isPlaying);
-    const posSec = status.positionMillis / 1000;
-    const durSec = (status.durationMillis || (currentStory?.duration_seconds ? currentStory.duration_seconds * 1000 : 15000)) / 1000;
-
-    setPositionSeconds(posSec);
-    setDurationSeconds(durSec);
-    setProgress(durSec > 0 ? Math.min(1, posSec / durSec) : 0);
-
-    if (status.didJustFinish) {
-      handleNextStory();
-    }
-  };
-
   const cleanupAudio = () => {
-    if (soundRef.current) {
-      soundRef.current.unloadAsync().catch(() => {});
-      soundRef.current = null;
+    if (playerSubRef.current) {
+      try {
+        playerSubRef.current.remove();
+      } catch {}
+      playerSubRef.current = null;
+    }
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+        if (typeof (playerRef.current as any).release === 'function') {
+          (playerRef.current as any).release();
+        } else if (typeof (playerRef.current as any).remove === 'function') {
+          (playerRef.current as any).remove();
+        }
+      } catch {}
+      playerRef.current = null;
     }
     if (webAudioRef.current) {
       webAudioRef.current.pause();
@@ -272,20 +274,24 @@ export function StoryModal({
   };
 
   const togglePlayPause = async () => {
-    if (soundRef.current) {
+    if (playerRef.current) {
       if (isPlaying) {
-        await soundRef.current.pauseAsync().catch(() => {});
+        playerRef.current.pause();
+        setIsPlaying(false);
       } else {
-        await soundRef.current.playAsync().catch(() => {});
+        playerRef.current.play();
+        setIsPlaying(true);
       }
     } else if (webAudioRef.current) {
       if (isPlaying) {
         webAudioRef.current.pause();
+        setIsPlaying(false);
       } else {
         webAudioRef.current.play().catch(() => {});
+        setIsPlaying(true);
       }
     }
-  };
+  };;
 
   if (!visible || !currentStory) {
     return null;
@@ -474,7 +480,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#09090b',
   },
   segmentedProgressRow: {
@@ -578,7 +584,7 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans_600SemiBold',
   },
   tapZonesContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     flexDirection: 'row',
     zIndex: 10,
   },

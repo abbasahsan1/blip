@@ -17,7 +17,15 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import {
+  useAudioRecorder,
+  createAudioPlayer,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  RecordingPresets,
+  type AudioPlayer,
+  type AudioStatus,
+} from 'expo-audio';
 import { PALETTE } from '@/lib/palette';
 import { PlayMark, PauseMark } from '@/components/common/Icons';
 import { api } from '@/lib/api';
@@ -46,7 +54,8 @@ export function StoryRecordingSheet({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Audio Recording references
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const isRecordingRef = useRef(false);
   const mediaRecorderRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordedBlobRef = useRef<Blob | null>(null);
@@ -57,7 +66,8 @@ export function StoryRecordingSheet({
 
   // Preview playback references
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-  const previewSoundRef = useRef<Audio.Sound | null>(null);
+  const previewPlayerRef = useRef<AudioPlayer | null>(null);
+  const previewSubRef = useRef<{ remove: () => void } | null>(null);
   const previewWebAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Reset state on open/close
@@ -130,22 +140,21 @@ export function StoryRecordingSheet({
         return;
       }
 
-      // 2. Native expo-av Recording
-      const perm = await Audio.requestPermissionsAsync();
+      // 2. Native expo-audio Recording
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
         setErrorMessage('Microphone permission is required to record a story.');
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      }).catch(() => {});
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await recording.startAsync();
-      recordingRef.current = recording;
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      isRecordingRef.current = true;
       setPhase('recording');
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to start recording.');
@@ -160,11 +169,11 @@ export function StoryRecordingSheet({
         mediaRecorderRef.current = null;
       }
 
-      if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadAsync();
-        const uri = recordingRef.current.getURI();
+      if (isRecordingRef.current || recorder.isRecording) {
+        await recorder.stop();
+        isRecordingRef.current = false;
+        const uri = recorder.uri;
         recordedUriRef.current = uri;
-        recordingRef.current = null;
       }
 
       setPhase('preview');
@@ -179,8 +188,10 @@ export function StoryRecordingSheet({
     if (!uri) return;
 
     if (isPreviewPlaying) {
-      if (previewSoundRef.current) {
-        await previewSoundRef.current.pauseAsync().catch(() => {});
+      if (previewPlayerRef.current) {
+        try {
+          previewPlayerRef.current.pause();
+        } catch {}
       }
       if (previewWebAudioRef.current) {
         previewWebAudioRef.current.pause();
@@ -199,20 +210,19 @@ export function StoryRecordingSheet({
         audio.onpause = () => setIsPreviewPlaying(false);
         await audio.play();
       } else {
-        if (!previewSoundRef.current) {
-          const { sound } = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: true },
-            (status) => {
-              if (status.isLoaded && status.didJustFinish) {
-                setIsPreviewPlaying(false);
-              }
+        cleanupPreview();
+        const player = createAudioPlayer(uri);
+        previewPlayerRef.current = player;
+        const sub = (player as any).addListener(
+          'playbackStatusUpdate',
+          (status: AudioStatus) => {
+            if (status.didJustFinish) {
+              setIsPreviewPlaying(false);
             }
-          );
-          previewSoundRef.current = sound;
-        } else {
-          await previewSoundRef.current.replayAsync();
-        }
+          },
+        );
+        previewSubRef.current = sub;
+        player.play();
         setIsPreviewPlaying(true);
       }
     } catch {
@@ -267,9 +277,22 @@ export function StoryRecordingSheet({
   };
 
   const cleanupPreview = () => {
-    if (previewSoundRef.current) {
-      previewSoundRef.current.unloadAsync().catch(() => {});
-      previewSoundRef.current = null;
+    if (previewSubRef.current) {
+      try {
+        previewSubRef.current.remove();
+      } catch {}
+      previewSubRef.current = null;
+    }
+    if (previewPlayerRef.current) {
+      try {
+        previewPlayerRef.current.pause();
+        if (typeof (previewPlayerRef.current as any).release === 'function') {
+          (previewPlayerRef.current as any).release();
+        } else if (typeof (previewPlayerRef.current as any).remove === 'function') {
+          (previewPlayerRef.current as any).remove();
+        }
+      } catch {}
+      previewPlayerRef.current = null;
     }
     if (previewWebAudioRef.current) {
       previewWebAudioRef.current.pause();
@@ -281,9 +304,9 @@ export function StoryRecordingSheet({
 
   const cleanupAll = () => {
     cleanupPreview();
-    if (recordingRef.current) {
-      recordingRef.current.stopAndUnloadAsync().catch(() => {});
-      recordingRef.current = null;
+    if (isRecordingRef.current || recorder.isRecording) {
+      recorder.stop().catch(() => {});
+      isRecordingRef.current = false;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();

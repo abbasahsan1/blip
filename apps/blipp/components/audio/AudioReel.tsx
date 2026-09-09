@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   consoleBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: PALETTE.bg,
   },
   content: {
