@@ -175,18 +175,25 @@ k8s-status: ## Show status of all cluster pods, services, and PVCs
 # Local Networking & Port Forwarding
 # ==============================================================================
 
-port-forward: port-forward-stop ## Start background port-forwarding on all interfaces
+port-forward: port-forward-stop ## Start background port-forwarding with diagnostic logs
+	@mkdir -p .logs
 	@echo "Establishing port-forwards for namespace: $(NAMESPACE) on 0.0.0.0..."
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/auth-service 8000:8000 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/content-ingest-service 8001:8001 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/feed-service 8002:8002 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/social-graph-service 8003:8003 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/messaging-service 8004:8004 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/moderation-service 8005:8005 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/minio 9000:9000 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/keycloak 8080:8080 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/redis 6379:6379 > /dev/null 2>&1 &
-	@echo "Active endpoints bound to 0.0.0.0:"
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/auth-service 8000:8000 > .logs/pf-auth.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/content-ingest-service 8001:8001 > .logs/pf-ingest.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/feed-service 8002:8002 > .logs/pf-feed.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/social-graph-service 8003:8003 > .logs/pf-social.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/messaging-service 8004:8004 > .logs/pf-messaging.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/moderation-service 8005:8005 > .logs/pf-moderation.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/minio 9000:9000 > .logs/pf-minio.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/keycloak 8080:8080 > .logs/pf-keycloak.log 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/redis 6379:6379 > .logs/pf-redis.log 2>&1 &
+	@sleep 2
+	@if ! pgrep -f "[k]ubectl port-forward.*8000" > /dev/null; then \
+		echo "ERROR: Auth port-forward failed to bind! Dumping .logs/pf-auth.log:"; \
+		cat .logs/pf-auth.log; \
+		exit 1; \
+	fi
+	@echo "Active endpoints bound to 0.0.0.0 successfully."
 	@echo "  - Auth:           http://localhost:8000"
 	@echo "  - Content Ingest: http://localhost:8001"
 	@echo "  - Feed:           http://localhost:8002"

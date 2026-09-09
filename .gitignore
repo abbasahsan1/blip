@@ -37,6 +37,7 @@ Thumbs.db
 
 # Docker / Local logs
 *.log
+.logs/
 
 # Playwright Test Artifacts
 playwright-report/

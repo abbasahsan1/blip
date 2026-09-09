@@ -372,12 +372,19 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(auth_router, prefix="/v1")
 
 
+@app.get("/healthz", tags=["Health"])
+@app.get("/api/healthz", tags=["Health"])
+@app.get("/v1/healthz", tags=["Health"])
+def healthz():
+    """Liveness probe returning immediate healthy status."""
+    return {"status": "ok"}
+
+
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
 @app.get("/v1/health", response_model=HealthResponse, tags=["Health"])
-@app.get("/healthz", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Liveness probe and readiness indicator."""
+    """Detailed health check indicator."""
     keycloak_status = "unknown"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -399,7 +406,7 @@ async def health_check():
 async def readiness_check():
     """
     Readiness probe verifying PostgreSQL and Keycloak connectivity.
-    Returns HTTP 200 if healthy, otherwise HTTP 503.
+    Returns HTTP 200 if database is healthy.
     """
     db_healthy = False
     keycloak_healthy = False
@@ -415,7 +422,7 @@ async def readiness_check():
     except Exception as e:
         logger.warning(f"Readiness check DB error: {e}")
 
-    # 2. Check Keycloak
+    # 2. Check Keycloak (non-blocking for readiness)
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{settings.KEYCLOAK_INTERNAL_URL}/realms/{settings.KEYCLOAK_REALM}")
@@ -424,7 +431,7 @@ async def readiness_check():
     except Exception as e:
         logger.warning(f"Readiness check Keycloak error: {e}")
 
-    all_ready = db_healthy and keycloak_healthy
+    all_ready = db_healthy
     status_code = status.HTTP_200_OK if all_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(

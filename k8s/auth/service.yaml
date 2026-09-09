@@ -4,6 +4,7 @@ metadata:
   name: auth-service
   namespace: blipp
   labels:
+    app: auth-service
     app.kubernetes.io/name: auth-service
     app.kubernetes.io/component: backend
     app.kubernetes.io/part-of: blipp
