@@ -17,13 +17,16 @@ from .database import (
     CREATE_TABLES_SQL,
 )
 from .events import EventBus, event_bus
-from .storage import (
-    StorageService,
-    StorageManager,
-    storage_service,
-    storage_manager,
-    get_playback_url,
-)
+try:
+    from .storage import (
+        StorageService,
+        StorageManager,
+        storage_service,
+        storage_manager,
+        get_playback_url,
+    )
+except ImportError:
+    pass
 async def get_redis_client(*args, **kwargs):
     from .redis import get_redis_client as _get
     return await _get(*args, **kwargs)
@@ -45,16 +48,19 @@ from .exceptions import (
     CODE_FORBIDDEN,
     CODE_NOT_FOUND,
 )
-from .security import (
-    AuthenticatedUser,
-    TokenData,
-    UserResponse,
-    security_scheme,
-    get_jwks,
-    verify_token,
-    get_current_user,
-    get_optional_current_user,
-)
+try:
+    from .security import (
+        AuthenticatedUser,
+        TokenData,
+        UserResponse,
+        security_scheme,
+        get_jwks,
+        verify_token,
+        get_current_user,
+        get_optional_current_user,
+    )
+except ImportError:
+    pass
 
 __all__ = [
     "BaseCommonSettings",

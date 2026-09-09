@@ -1,5 +1,19 @@
 from typing import Optional, Dict, Any
-from fastapi import HTTPException
+
+try:
+    from fastapi import HTTPException
+except ImportError:
+    class HTTPException(Exception):  # type: ignore
+        def __init__(
+            self,
+            status_code: int = 500,
+            detail: Any = None,
+            headers: Optional[Dict[str, str]] = None,
+        ):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+            self.headers = headers
 
 
 class AppException(HTTPException):

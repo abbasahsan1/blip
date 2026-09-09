@@ -43,7 +43,8 @@ export const getApiBaseUrl = (): string => {
 
 export const getKeycloakUrl = (): string => {
   if (process.env.EXPO_PUBLIC_KEYCLOAK_URL) {
-    return process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
+    const raw = process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
+    return raw.endsWith('/keycloak') ? raw : `${raw}/keycloak`;
   }
   // In production browser environments where /keycloak is reverse-proxied via ingress
   if (typeof window !== 'undefined' && window.location && window.location.origin) {

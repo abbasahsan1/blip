@@ -27,7 +27,10 @@ data:
 
     [recommend]
     cache_size = 100
-    data_source = ["listen"]
+
+    [recommend.data_source]
+    positive_feedback_types = ["listen"]
+    read_feedback_types = ["read"]
 
     [recommend.collaborative]
     enable_index = false

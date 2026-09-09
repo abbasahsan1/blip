@@ -1,271 +1,178 @@
-SHELL := /bin/bash
+CLUSTER_NAME := blipp-cluster
+NAMESPACE    := blipp
+SHELL        := /bin/bash
 
-# Configuration & Environment Variables
-ENV_FILE ?= .env
-ifneq (,$(wildcard $(ENV_FILE)))
-    include $(ENV_FILE)
-    export
-endif
+IMAGES := blipp-auth:latest \
+          blipp-content-ingest:latest \
+          blipp-feed:latest \
+          blipp-social-graph:latest \
+          blipp-transcode-worker:latest \
+          blipp-analytics-worker:latest
 
-CLUSTER_NAME ?= blipp-cluster
-HOST_IP ?= 100.122.207.32
-HOST_PORT ?= 8419
-NAMESPACE ?= blipp
+.PHONY: help all upgrade destroy cluster-up k3d-import build-all build-auth build-ingest \
+        build-feed build-social build-transcode build-analytics k8s-init k8s-deploy \
+        k8s-status port-forward port-forward-stop dev-mobile
 
-# Docker image tags
-IMAGE_AUTH ?= blipp-auth-service:latest
-IMAGE_CONTENT_INGEST ?= blipp-content-ingest:latest
-IMAGE_FEED ?= blipp-feed-service:latest
-IMAGE_SOCIAL_GRAPH ?= blipp-social-graph-service:latest
-IMAGE_WORKER ?= blipp-transcode-worker:latest
-IMAGE_ANALYTICS ?= blipp-analytics-worker:latest
-IMAGE_APP ?= blipp-app:latest
-IMAGE_KEYCLOAK ?= quay.io/keycloak/keycloak:26.1.3
-IMAGE_POSTGRES ?= postgres:16-alpine
+help: ## Show available commands
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: all destroy build import deploy wait status logs cluster-up cluster-down check-prereqs clean dev-mobile build-content-ingest deploy-content-ingest build-feed deploy-feed test-e2e test-e2e-ui
+# ==============================================================================
+# Top-Level Autonomous Lifecycle Targets
+# ==============================================================================
 
+all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything from scratch (cluster, images, storage, workloads, port-forwards)
+	@echo "Waiting for core microservices to reach Ready state..."
+	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s || true
+	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s || true
+	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s || true
+	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s || true
+	@$(MAKE) port-forward
+	@echo "=================================================================="
+	@echo "  Blipps Platform is fully deployed and accessible on localhost!"
+	@echo "=================================================================="
+	@echo "  - Auth:           http://localhost:8000"
+	@echo "  - Content Ingest: http://localhost:8001"
+	@echo "  - Feed:           http://localhost:8002"
+	@echo "  - Social Graph:   http://localhost:8003"
+	@echo "  - MinIO S3:       http://localhost:9000"
+	@echo "  - Keycloak:       http://localhost:8080"
+	@echo "  - Redis:          localhost:6379"
+	@echo "------------------------------------------------------------------"
+	@echo "Launch mobile/web client with: cd apps/blipp && npx expo start"
 
-# Default Target: Fully build and deploy the entire production baseline
-all: check-prereqs init-env cluster-up build import deploy wait status
-	@echo ""
-	@echo "=========================================================================="
-	@echo "🎉 Blipp Platform is fully running inside the k3d cluster!"
-	@echo "   - Expo Web App:       http://$(HOST_IP):$(HOST_PORT)/"
-	@echo "   - Keycloak OIDC:      http://$(HOST_IP):$(HOST_PORT)/keycloak"
-	@echo "   - FastAPI Swagger UI: http://$(HOST_IP):$(HOST_PORT)/api/docs"
-	@echo "   - FastAPI Health API: http://$(HOST_IP):$(HOST_PORT)/api/health"
-	@echo "   - Keycloak Discovery: http://$(HOST_IP):$(HOST_PORT)/keycloak/realms/blipp/.well-known/openid-configuration"
-	@echo "=========================================================================="
-
-# Destroy Target: Cleanly tear down the cluster and resources
-destroy:
-	@echo "🛑 Destroying k3d cluster '$(CLUSTER_NAME)'..."
-	@k3d cluster delete $(CLUSTER_NAME) || true
-	@echo "✅ Cluster and all associated resources destroyed."
-
-# Verify required host CLI tools
-check-prereqs:
-	@command -v docker >/dev/null 2>&1 || { echo "❌ Docker is required but not installed."; exit 1; }
-	@command -v k3d >/dev/null 2>&1 || { echo "❌ k3d is required but not installed."; exit 1; }
-	@command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl is required but not installed."; exit 1; }
-	@docker info >/dev/null 2>&1 || { echo "❌ Docker daemon is not running or accessible."; exit 1; }
-	@echo "✅ Prerequisites check passed."
-
-# Ensure .env exists
-init-env:
-	@if [ ! -f $(ENV_FILE) ]; then \
-		echo "⚙️ Creating $(ENV_FILE) from $(ENV_FILE).example..."; \
-		cp $(ENV_FILE).example $(ENV_FILE); \
-	fi
-
-# Create k3d cluster with Traefik Ingress mapped to host port without port-forwarding
-cluster-up:
-	@if ! k3d cluster list | grep -q "^$(CLUSTER_NAME) "; then \
-		echo "🚀 Creating k3d cluster '$(CLUSTER_NAME)' with host port $(HOST_PORT)..."; \
-		k3d cluster create $(CLUSTER_NAME) \
-			--port "$(HOST_PORT):80@loadbalancer" \
-			--wait; \
-	else \
-		echo "ℹ️ Cluster '$(CLUSTER_NAME)' already exists."; \
-	fi
-
-# Delete k3d cluster
-cluster-down: destroy
-
-# Build all service containers using Docker layer caching
-build:
-	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) -f services/auth/Dockerfile .
-	@echo "📦 Building Content Ingest Service container [$(IMAGE_CONTENT_INGEST)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_CONTENT_INGEST) -f services/content_ingest/Dockerfile .
-	@echo "📦 Building Feed Service container [$(IMAGE_FEED)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_FEED) -f services/feed/Dockerfile .
-	@echo "📦 Building Social Graph Service container [$(IMAGE_SOCIAL_GRAPH)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_SOCIAL_GRAPH) -f services/social_graph/Dockerfile .
-	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) -f services/transcode_worker/Dockerfile .
-	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) -f services/analytics_worker/Dockerfile .
-	@echo "📦 Building Expo Frontend container [$(IMAGE_APP)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_APP) ./apps/blipp
-	@echo "📦 Pulling base images..."
-	@docker pull $(IMAGE_KEYCLOAK)
-	@docker pull $(IMAGE_POSTGRES)
-	@echo "✅ Container builds completed."
-
-# Import images into k3d cluster so no external registry is needed
-import:
-	@echo "📥 Importing container images into k3d cluster '$(CLUSTER_NAME)'..."
-	k3d image import $(IMAGE_AUTH) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_CONTENT_INGEST) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_FEED) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_SOCIAL_GRAPH) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_WORKER) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_ANALYTICS) -c $(CLUSTER_NAME)
-	k3d image import $(IMAGE_APP) -c $(CLUSTER_NAME)
-	@echo "✅ Images imported."
-
-# Apply Kubernetes manifests
-deploy:
-	@echo "☸️ Applying Kubernetes manifests to namespace '$(NAMESPACE)'..."
-	@kubectl apply -f k8s/namespace.yaml
-	@echo "🔐 Applying Secret 'blipp-secrets'..."
+upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running application services
+	@echo "Applying updated manifests to namespace $(NAMESPACE)..."
 	@kubectl apply -f k8s/secrets.yaml
-	@echo "💾 Deploying PostgreSQL..."
-	@kubectl apply -f k8s/postgres/
-	@echo "🔴 Deploying Redis..."
-	@kubectl apply -f k8s/redis/
-	@echo "🧠 Deploying Gorse..."
-	@kubectl apply -f k8s/gorse/
-	@echo "📡 Deploying NATS JetStream..."
-	@kubectl apply -f k8s/nats/
-	@echo "🪣 Deploying MinIO Object Storage..."
-	@kubectl apply -f k8s/minio/
-	@echo "🔑 Deploying Keycloak..."
-	@kubectl apply -f k8s/keycloak/
-	@echo "⚡ Deploying FastAPI Auth Service..."
 	@kubectl apply -f k8s/auth/
-	@echo "📤 Deploying Content Ingest Service..."
 	@kubectl apply -f k8s/content-ingest/
-	@echo "📰 Deploying Feed Service..."
 	@kubectl apply -f k8s/feed/
-	@echo "👥 Deploying Social Graph Service..."
 	@kubectl apply -f k8s/social-graph/
-	@echo "⚙️ Deploying Transcode Worker..."
 	@kubectl apply -f k8s/transcode-worker/
-	@echo "📊 Deploying Analytics Worker..."
 	@kubectl apply -f k8s/analytics-worker/
-	@echo "📱 Deploying Blipp Expo Frontend..."
-	@kubectl apply -f k8s/blipp-app/
-	@echo "🌐 Deploying Traefik Ingress & IngressRoutes..."
 	@kubectl apply -f k8s/ingress/
-	@echo "✅ Manifests applied."
+	@echo "Triggering zero-downtime rolling restart..."
+	@kubectl rollout restart deployment/auth-service -n $(NAMESPACE)
+	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
+	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
+	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
+	@kubectl rollout restart deployment/transcode-worker -n $(NAMESPACE)
+	@kubectl rollout restart deployment/analytics-worker -n $(NAMESPACE)
+	@echo "Upgrade complete. Workloads are rolling forward."
 
-# Wait for all deployments to reach ready status
-wait:
-	@echo "⏳ Waiting for PostgreSQL readiness..."
-	@kubectl rollout status deployment/postgres -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Redis readiness..."
-	@kubectl rollout status deployment/redis -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Gorse readiness..."
-	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s || true
-	@echo "⏳ Waiting for NATS JetStream readiness..."
-	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for MinIO readiness..."
-	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Keycloak readiness (this can take ~30-60s on initial DB migration)..."
-	@kubectl rollout status deployment/keycloak -n $(NAMESPACE) --timeout=180s
-	@echo "⏳ Waiting for FastAPI Auth Service readiness..."
-	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Content Ingest Service readiness..."
-	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Feed Service readiness..."
-	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Social Graph Service readiness..."
-	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Transcode Worker readiness..."
-	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Analytics Worker readiness..."
-	@kubectl rollout status deployment/analytics-worker -n $(NAMESPACE) --timeout=120s
-	@echo "⏳ Waiting for Blipp Expo App readiness..."
-	@kubectl rollout status deployment/blipp-app -n $(NAMESPACE) --timeout=120s
-	@echo "✅ All microservices are healthy and ready!"
+destroy: port-forward-stop ## Destroy everything (cluster, workloads, storage, and port-forwards)
+	@echo "Stopping port-forwards..."
+	@$(MAKE) port-forward-stop
+	@if k3d cluster list 2>/dev/null | grep -E "^$(CLUSTER_NAME)\s" >/dev/null 2>&1; then \
+		echo "Deleting k3d cluster '$(CLUSTER_NAME)'..."; \
+		k3d cluster delete $(CLUSTER_NAME); \
+	else \
+		echo "Deleting namespace '$(NAMESPACE)'..."; \
+		kubectl delete namespace $(NAMESPACE) --ignore-not-found=true; \
+	fi
+	@echo "Environment completely destroyed."
+
+# ==============================================================================
+# Cluster Management & Image Import
+# ==============================================================================
+
+cluster-up: ## Create local k3d cluster if it does not exist
+	@if ! k3d cluster list 2>/dev/null | grep -E "^$(CLUSTER_NAME)\s" >/dev/null 2>&1; then \
+		echo "Creating k3d cluster '$(CLUSTER_NAME)'..."; \
+		k3d cluster create $(CLUSTER_NAME) --wait; \
+	else \
+		echo "k3d cluster '$(CLUSTER_NAME)' is already running."; \
+	fi
+	@kubectl config use-context k3d-$(CLUSTER_NAME) >/dev/null 2>&1 || true
+
+k3d-import: ## Import all locally built Docker images into the k3d cluster
+	@echo "Importing container images into k3d cluster '$(CLUSTER_NAME)'..."
+	@k3d image import $(IMAGES) -c $(CLUSTER_NAME)
+	@echo "All images imported successfully."
+
+# ==============================================================================
+# Container Builds (Context pinned to repository root for libs/common)
+# ==============================================================================
 
 build-auth:
-	@echo "📦 Building FastAPI Auth Service container [$(IMAGE_AUTH)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_AUTH) -f services/auth/Dockerfile .
+	docker build -t blipp-auth:latest -t blipp-auth-service:latest -f services/auth/Dockerfile .
 
-deploy-auth:
-	@kubectl apply -f k8s/auth/
-	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s
-
-port-forward:
-	@./scripts/dev-mobile.sh --ports-only
-
-build-content-ingest:
-	@echo "📦 Building Content Ingest Service container [$(IMAGE_CONTENT_INGEST)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_CONTENT_INGEST) -f services/content_ingest/Dockerfile .
-
-deploy-content-ingest:
-	@kubectl apply -f k8s/content-ingest/
-	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s
+build-ingest:
+	docker build -t blipp-content-ingest:latest -f services/content_ingest/Dockerfile .
 
 build-feed:
-	@echo "📦 Building Feed Service container [$(IMAGE_FEED)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_FEED) -f services/feed/Dockerfile .
+	docker build -t blipp-feed:latest -f services/feed/Dockerfile .
 
-deploy-feed:
-	@kubectl apply -f k8s/feed/
-	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s
+build-social:
+	docker build -t blipp-social-graph:latest -f services/social_graph/Dockerfile .
 
-build-social-graph:
-	@echo "📦 Building Social Graph Service container [$(IMAGE_SOCIAL_GRAPH)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_SOCIAL_GRAPH) -f services/social_graph/Dockerfile .
+build-transcode:
+	docker build -t blipp-transcode-worker:latest -f services/transcode_worker/Dockerfile .
 
-deploy-social-graph:
-	@kubectl apply -f k8s/social-graph/
-	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s
+build-analytics:
+	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
+build-all: build-auth build-ingest build-feed build-social build-transcode build-analytics ## Build all Docker images
 
-build-analytics-worker:
-	@echo "📦 Building Analytics Worker container [$(IMAGE_ANALYTICS)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_ANALYTICS) -f services/analytics_worker/Dockerfile .
+# ==============================================================================
+# Kubernetes Infrastructure & Deployments
+# ==============================================================================
 
-deploy-analytics-worker:
-	@kubectl apply -f k8s/analytics-worker/
-	@kubectl rollout status deployment/analytics-worker -n $(NAMESPACE) --timeout=120s
+k8s-init: ## Ensure namespace, secrets, and PVC storage exist
+	@kubectl apply -f k8s/namespace.yaml
+	@kubectl apply -f k8s/secrets.yaml
+	@kubectl apply -f k8s/postgres/pvc.yaml
+	@kubectl apply -f k8s/minio/pvc.yaml
+	@kubectl apply -f k8s/redis/pvc.yaml
+	@kubectl apply -f k8s/nats/pvc.yaml
+	@kubectl apply -f k8s/gorse/pvc.yaml
 
-build-transcode-worker:
-	@echo "📦 Building Transcode Worker container [$(IMAGE_WORKER)]..."
-	DOCKER_BUILDKIT=0 docker build -t $(IMAGE_WORKER) -f services/transcode_worker/Dockerfile .
-
-deploy-transcode-worker:
-	@kubectl apply -f k8s/transcode-worker/
-	@kubectl rollout status deployment/transcode-worker -n $(NAMESPACE) --timeout=120s
-
-deploy-nats:
-	@kubectl apply -f k8s/nats/
-	@kubectl rollout status deployment/nats -n $(NAMESPACE) --timeout=120s
-
-deploy-minio:
+k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifests
+	# Stateful infrastructure
+	@kubectl apply -f k8s/postgres/
 	@kubectl apply -f k8s/minio/
-	@kubectl rollout status deployment/minio -n $(NAMESPACE) --timeout=120s
-
-deploy-redis:
+	@kubectl apply -f k8s/nats/
 	@kubectl apply -f k8s/redis/
-	@kubectl rollout status deployment/redis -n $(NAMESPACE) --timeout=120s
-
-deploy-gorse:
+	@kubectl apply -f k8s/keycloak/
 	@kubectl apply -f k8s/gorse/
-	@kubectl rollout status deployment/gorse -n $(NAMESPACE) --timeout=120s
-lint:
-	@echo "🔍 Linting and compiling Python codebase..."
-	@python3 -m compileall libs/ services/
-	@echo "✅ Zero dangling imports or syntax errors."
+	# Core microservices
+	@kubectl apply -f k8s/auth/
+	@kubectl apply -f k8s/content-ingest/
+	@kubectl apply -f k8s/feed/
+	@kubectl apply -f k8s/social-graph/
+	# Batch workers
+	@kubectl apply -f k8s/transcode-worker/
+	@kubectl apply -f k8s/analytics-worker/
+	# Ingress routing
+	@kubectl apply -f k8s/ingress/
 
-test-e2e:
-	@echo "🎭 Running Playwright E2E Test Suite..."
-	@npx playwright test
+k8s-status: ## Show status of all cluster pods, services, and PVCs
+	@kubectl get pods,svc,pvc -n $(NAMESPACE) -o wide
 
-test-e2e-ui:
-	@echo "🎭 Launching Playwright E2E Interactive UI..."
-	@npx playwright test --ui
+# ==============================================================================
+# Local Networking & Port Forwarding
+# ==============================================================================
 
-# Show cluster and pod status
-status:
-	@echo "📊 Cluster Status (Namespace: $(NAMESPACE)):"
-	@kubectl get pods,services,ingress -n $(NAMESPACE)
+port-forward: port-forward-stop ## Start background port-forwarding on all interfaces
+	@echo "Establishing port-forwards for namespace: $(NAMESPACE) on 0.0.0.0..."
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/auth-service 8000:8000 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/content-ingest-service 8001:8001 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/feed-service 8002:8002 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/social-graph-service 8003:8003 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/minio 9000:9000 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/keycloak 8080:8080 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/redis 6379:6379 > /dev/null 2>&1 &
+	@echo "Active endpoints bound to 0.0.0.0:"
+	@echo "  - Auth:           http://localhost:8000"
+	@echo "  - Content Ingest: http://localhost:8001"
+	@echo "  - Feed:           http://localhost:8002"
+	@echo "  - Social Graph:   http://localhost:8003"
+	@echo "  - MinIO:          http://localhost:9000"
+	@echo "  - Keycloak:       http://localhost:8080"
+	@echo "  - Redis:          localhost:6379"
 
-# Tail logs across all services
-logs:
-	@kubectl logs -n $(NAMESPACE) -l app.kubernetes.io/part-of=blipp --all-containers=true -f --prefix=true
+port-forward-stop: ## Kill any active kubectl port-forward processes safely
+	@-pkill -f "[k]ubectl port-forward" 2>/dev/null || true
+	@echo "Port-forwards stopped."
 
-# Clean up dangling images
-clean:
-	@docker image prune -f
-
-# Start mobile dev environment for physical devices via Expo Go on LAN
-dev-mobile:
-	@chmod +x ./scripts/dev-mobile.sh
-	@./scripts/dev-mobile.sh
+dev-mobile: ## Run mobile environment auto-configuration script
+	./scripts/dev-mobile.sh

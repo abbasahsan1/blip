@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: feed
-          image: blipp-feed-service:latest
+          image: blipp-feed:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
