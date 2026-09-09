@@ -1,7 +1,16 @@
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSessionStore } from './store/sessionStore';
-import type { AuthTokens, PlaybackTelemetryPayload, User, BlippItem, StoryItem } from './types';
+import type {
+  AuthTokens,
+  PlaybackTelemetryPayload,
+  User,
+  BlippItem,
+  StoryItem,
+  DMMessageItem,
+  DMThreadItem,
+  MessageListResponse,
+} from './types';
 
 // ─── Platform Error Envelope ───────────────────────────────────────────────────
 
@@ -288,9 +297,42 @@ export async function unsaveBlipp(blippId: string): Promise<void> {
 }
 
 export async function getSavedBlipps(): Promise<BlippItem[]> {
-  const res = await requestRaw<{ items: BlippItem[] } | BlippItem[]>('/v1/blipps/saved', { method: 'GET' });
-  if (Array.isArray(res.data)) return res.data;
-  return (res.data as any)?.items || [];
+  const res = await requestRaw<{ items: any[] } | any[]>('/v1/blipps/saved', { method: 'GET' });
+  const rawItems = Array.isArray(res.data) ? res.data : (res.data as any)?.items || [];
+  const GRADIENTS: [string, string][] = [
+    ['#2563eb', '#8b5cf6'],
+    ['#6366f1', '#a855f7'],
+    ['#0f172a', '#1e3a5f'],
+    ['#064e3b', '#065f46'],
+  ];
+  return rawItems.map((item: any, idx: number) => {
+    const rawStandard = item.audio_variants?.standard || item.audio_url || '';
+    const standardUrl = resolvePublicAudioUrl(rawStandard);
+    return {
+      id: item.blipp_id || item.id,
+      blipp_id: item.blipp_id || item.id,
+      title: item.title || 'Saved Broadcast',
+      description: item.description,
+      author: item.display_name || item.author || (item.username ? `@${item.username}` : `Creator ${item.creator_id ? item.creator_id.slice(0, 6) : ''}`),
+      authorId: item.creator_id || '',
+      creator_id: item.creator_id,
+      duration: item.duration_seconds || item.duration || 30,
+      duration_seconds: item.duration_seconds || item.duration || 30,
+      audio_url: standardUrl,
+      audioUrl: standardUrl,
+      audio_variants: {
+        standard: standardUrl,
+        low: resolvePublicAudioUrl(item.audio_variants?.low || rawStandard),
+        high: resolvePublicAudioUrl(item.audio_variants?.high || rawStandard),
+      },
+      coverGradient: GRADIENTS[idx % GRADIENTS.length],
+      listenCount: item.listens_count || item.listenCount || 0,
+      likeCount: item.likes_count || item.likeCount || 0,
+      isLiked: false,
+      is_saved: true,
+      createdAt: item.saved_at || item.created_at || new Date().toISOString(),
+    };
+  });
 }
 
 export async function getStories(): Promise<StoryItem[]> {
@@ -302,6 +344,60 @@ export async function getStories(): Promise<StoryItem[]> {
 
 export async function uploadStory(formData: FormData): Promise<void> {
   await requestRaw<void>('/v1/stories', { method: 'POST', body: formData });
+}
+
+// ─── Direct Messaging Methods (§5.4) ──────────────────────────────────────────
+
+export async function getThreads(limit = 20, offset = 0): Promise<DMThreadItem[]> {
+  const res = await requestRaw<DMThreadItem[]>(`/v1/messages/threads?limit=${limit}&offset=${offset}`, { method: 'GET' });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function createThread(recipientId: string): Promise<DMThreadItem> {
+  const res = await requestRaw<DMThreadItem>('/v1/messages/threads', {
+    method: 'POST',
+    body: { recipient_id: recipientId },
+  });
+  return res.data;
+}
+
+export async function getThreadMessages(
+  threadId: string,
+  limit = 30,
+  cursor?: string | null,
+): Promise<MessageListResponse> {
+  let path = `/v1/messages/threads/${threadId}?limit=${limit}`;
+  if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+  const res = await requestRaw<MessageListResponse>(path, { method: 'GET' });
+  return res.data;
+}
+
+export async function sendMessage(
+  threadId: string,
+  payload: {
+    message_type: 'text' | 'blipp_share';
+    body?: string;
+    blipp_id?: string;
+  },
+): Promise<DMMessageItem> {
+  const res = await requestRaw<DMMessageItem>(`/v1/messages/threads/${threadId}`, {
+    method: 'POST',
+    body: payload,
+  });
+  return res.data;
+}
+
+export async function getProfileByUsername(username: string): Promise<UserProfile> {
+  const res = await requestRaw<UserProfile>(`/v1/profiles/${encodeURIComponent(username)}`, { method: 'GET' });
+  return res.data;
+}
+
+export async function getUserFollowing(userId: string): Promise<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }> {
+  const res = await requestRaw<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }>(
+    `/v1/social/${userId}/following`,
+    { method: 'GET' },
+  );
+  return res.data || { items: [] };
 }
 
 export const api = {
@@ -324,6 +420,12 @@ export const api = {
   getSavedBlipps,
   getStories,
   uploadStory,
+  getThreads,
+  createThread,
+  getThreadMessages,
+  sendMessage,
+  getProfileByUsername,
+  getUserFollowing,
 };
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────

@@ -139,6 +139,39 @@ export interface PlayerState {
   error: string | null;
 }
 
+// ─── Direct Messaging (§5.4) ────────────────────────────────────────────────
+
+export interface DMMessageItem {
+  message_id: string;
+  thread_id: string;
+  sender_id: string;
+  message_type: 'text' | 'blipp_share';
+  blipp_id?: string | null;
+  body?: string | null;
+  created_at: string;
+  blipp?: Blipp;
+}
+
+export interface DMThreadItem {
+  thread_id: string;
+  participant_ids: string[];
+  created_at: string;
+  updated_at?: string | null;
+  latest_message?: DMMessageItem | null;
+  other_participant?: {
+    user_id: string;
+    username: string;
+    display_name?: string | null;
+    avatar_url?: string | null;
+  };
+}
+
+export interface MessageListResponse {
+  items: DMMessageItem[];
+  next_cursor?: string | null;
+  has_more?: boolean;
+}
+
 // ─── Session ─────────────────────────────────────────────────────────────────
 
 export type SessionStatus = 'loading' | 'authenticated' | 'unauthenticated';

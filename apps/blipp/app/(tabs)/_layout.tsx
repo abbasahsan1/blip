@@ -6,6 +6,7 @@ import {
   FeedConsoleMark,
   UploadConsoleMark,
   ProfileConsoleMark,
+  BookmarkMark,
 } from '@/components/common/Icons';
 
 function TabIcon({
@@ -56,6 +57,21 @@ export default function TabLayout() {
             </TabIcon>
           ),
           tabBarAccessibilityLabel: 'Feed console tab',
+        }}
+      />
+      <Tabs.Screen
+        name="saved"
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon label="Saved" focused={focused}>
+              <BookmarkMark
+                size={20}
+                color={focused ? PALETTE.accent : PALETTE.textMuted}
+                filled={focused}
+              />
+            </TabIcon>
+          ),
+          tabBarAccessibilityLabel: 'Saved blipps tab',
         }}
       />
       <Tabs.Screen

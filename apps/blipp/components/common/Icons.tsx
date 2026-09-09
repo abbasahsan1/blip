@@ -168,3 +168,51 @@ export function StatusCheckMark({ size = 16, color = '#10b981' }: IconProps) {
     </Svg>
   );
 }
+
+/**
+ * Direct Message / Share Vector Mark (Paper airplane / direct share arrow)
+ */
+export function ShareMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21.5 2.5L10.5 13.5M21.5 2.5L14.5 21.5L10.5 13.5L2.5 9.5L21.5 2.5Z"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Message Send Action Vector Mark
+ */
+export function SendMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z"
+        fill={color}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Plus / Add Vector Mark
+ */
+export function PlusMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1="12" y1="5" x2="12" y2="19" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Line x1="5" y1="12" x2="19" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+

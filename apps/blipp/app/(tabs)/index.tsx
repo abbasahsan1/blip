@@ -58,6 +58,15 @@ export default function FeedScreen() {
     [pageHeight],
   );
 
+  const handleAutoSkip = useCallback(
+    (index: number) => {
+      if (index < posts.length - 1) {
+        listRef.current?.scrollToIndex({ index: index + 1, animated: true });
+      }
+    },
+    [posts.length],
+  );
+
   const renderItem = useCallback(
     ({ item, index }: { item: AudioPost; index: number }) => (
       <AudioReel
@@ -65,11 +74,12 @@ export default function FeedScreen() {
         isActive={index === activeIndex}
         height={pageHeight}
         onLike={() => toggleLike(item.id)}
+        onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
       />
     ),
-    [activeIndex, pageHeight, posts, toggleLike],
+    [activeIndex, handleAutoSkip, pageHeight, posts, toggleLike],
   );
 
   return (

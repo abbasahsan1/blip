@@ -19,19 +19,27 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Animated,
+  FlatList,
   Linking,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
-import { PlayMark, PauseMark, HeartMark, BookmarkMark } from '@/components/common/Icons';
+import {
+  PlayMark,
+  PauseMark,
+  HeartMark,
+  BookmarkMark,
+  ShareMark,
+} from '@/components/common/Icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api } from '@/lib/api';
-import type { AudioPost, Blipp } from '@/lib/types';
+import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -54,6 +62,7 @@ interface Props {
   isActive: boolean;
   height: number;
   onLike: () => void;
+  onAutoSkip?: () => void;
   /**
    * Full feed item array — passed to useAudioPrefetch so it can speculatively
    * download upcoming audio before the user swipes to it (§6.4).
@@ -75,6 +84,7 @@ export function AudioReel({
   isActive,
   height,
   onLike,
+  onAutoSkip,
   feedItems = [],
   activeIndex = 0,
 }: Props) {
@@ -88,7 +98,7 @@ export function AudioReel({
     item?.author ||
     'Creator';
 
-  // ── Engagement States (Save / Follow) ───────────────────────────────────────
+  // ── Engagement States (Save / Follow / Share) ────────────────────────────────
   const [isSaved, setIsSaved] = useState(Boolean(item?.is_saved));
   const [isSaveLoading, setIsSaveLoading] = useState(false);
 
@@ -139,6 +149,44 @@ export function AudioReel({
     }
   };
 
+  // Direct Messaging Share Sheet
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareThreads, setShareThreads] = useState<DMThreadItem[]>([]);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  const openShareSheet = async () => {
+    setIsShareModalOpen(true);
+    setShareFeedback(null);
+    try {
+      const data = await api.getThreads(20, 0);
+      setShareThreads(data || []);
+    } catch {
+      setShareThreads([]);
+    }
+  };
+
+  const handleShareToThread = async (threadId: string, name: string) => {
+    if (!blippId || isSharing) return;
+    setIsSharing(true);
+    try {
+      await api.sendMessage(threadId, {
+        message_type: 'blipp_share',
+        blipp_id: blippId,
+        body: item?.title || 'Shared Blipp broadcast',
+      });
+      setShareFeedback(`Shared with ${name}!`);
+      setTimeout(() => {
+        setIsShareModalOpen(false);
+        setShareFeedback(null);
+      }, 900);
+    } catch {
+      setShareFeedback('Failed to share.');
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   // ── §6.4 Speculative prefetch ──────────────────────────────────────────────
   // Pre-download the next 2–3 upcoming audio tracks so playback starts instantly.
   const { getCachedUri } = useAudioPrefetch({
@@ -149,14 +197,23 @@ export function AudioReel({
   const localUri = blippId ? getCachedUri(blippId) : null;
 
   // ── Audio player ───────────────────────────────────────────────────────────
-  // Manages Web Audio lifecycle, active position, playback controls.
+  // Manages Web Audio lifecycle, active position, playback controls & ad resilience.
   const {
     isPlaying,
     positionSeconds,
     durationSeconds,
     progress,
     togglePlayPause,
+    isAdFallback,
+    adCountdown,
   } = useAudioPlayer({ item, isActive, localUri });
+
+  // Auto-skip sponsored slot on countdown expiration
+  useEffect(() => {
+    if (isAdFallback && isActive && adCountdown <= 0) {
+      onAutoSkip?.();
+    }
+  }, [isAdFallback, isActive, adCountdown, onAutoSkip]);
 
   // ── Engagement telemetry ───────────────────────────────────────────────────
   // Emits periodic 5s play_progress, terminal play_complete (>=90%), and skip on navigate.
@@ -347,6 +404,21 @@ export function AudioReel({
             </Text>
           </View>
 
+          {/* Share / DM Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              pressed && styles.actionBtnPressed,
+            ]}
+            onPress={openShareSheet}
+            accessibilityRole="button"
+            accessibilityLabel="Share blipp to direct message"
+            testID="share-blipp-button"
+          >
+            <ShareMark size={20} color={PALETTE.textSecondary} />
+            <Text style={styles.actionBtnText}>Share</Text>
+          </Pressable>
+
           {/* Save / Bookmark Button */}
           <Pressable
             style={({ pressed }) => [
@@ -401,6 +473,38 @@ export function AudioReel({
           </Pressable>
         </View>
 
+        {/* Sponsored Promo Fallback Card (Visual Ad with 5s countdown when audio is unavailable) */}
+        {isAd && isAdFallback && (
+          <View style={styles.adPromoCard} testID="sponsored-promo-fallback-card">
+            <View style={styles.adPromoHeader}>
+              <View style={styles.adBadge}>
+                <Text style={styles.adBadgeText}>SPONSORED PROMOTION</Text>
+              </View>
+              <Pressable
+                style={styles.skipNowBtn}
+                onPress={() => onAutoSkip?.()}
+                accessibilityRole="button"
+                accessibilityLabel="Skip sponsored ad"
+                testID="skip-ad-button"
+              >
+                <Text style={styles.skipNowText}>Skip ({adCountdown}s)</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.adPromoTagline}>
+              {item?.sponsor?.tagline || 'Experience partner highlights curated for your stream.'}
+            </Text>
+            {/* Auto-skip countdown progress bar */}
+            <View style={styles.adCountdownTrack}>
+              <View
+                style={[
+                  styles.adCountdownFill,
+                  { width: `${((5 - adCountdown) / 5) * 100}%` },
+                ]}
+              />
+            </View>
+          </View>
+        )}
+
         {/* Sponsored Call To Action: Clean text trigger, no decorative arrows */}
         {item?.is_sponsored && item?.sponsor && (
           <Pressable
@@ -431,6 +535,83 @@ export function AudioReel({
           </View>
         )}
       </View>
+
+      {/* Share / Direct Message Modal */}
+      <Modal
+        visible={isShareModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsShareModalOpen(false)}
+      >
+        <Pressable
+          style={styles.shareOverlay}
+          onPress={() => setIsShareModalOpen(false)}
+        >
+          <Pressable style={styles.shareSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.shareHandle} />
+            <Text style={styles.shareTitle}>Share Blipp to Direct Message</Text>
+            {shareFeedback && (
+              <Text style={styles.shareFeedbackText}>{shareFeedback}</Text>
+            )}
+            <FlatList
+              data={shareThreads}
+              keyExtractor={(t) => t.thread_id}
+              style={styles.shareList}
+              ListEmptyComponent={
+                <View style={styles.emptyThreads}>
+                  <Text style={styles.emptyThreadsText}>No recent DM conversations found</Text>
+                </View>
+              }
+              renderItem={({ item: thread }) => (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.threadShareRow,
+                    pressed && styles.threadShareRowPressed,
+                  ]}
+                  onPress={() =>
+                    handleShareToThread(
+                      thread.thread_id,
+                      thread.other_participant?.display_name ||
+                        thread.other_participant?.username ||
+                        'user'
+                    )
+                  }
+                  disabled={isSharing}
+                >
+                  <View style={styles.threadAvatar}>
+                    <Text style={styles.threadAvatarText}>
+                      {(
+                        thread.other_participant?.display_name ||
+                        thread.other_participant?.username ||
+                        'U'
+                      )[0].toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.threadInfo}>
+                    <Text style={styles.threadName}>
+                      {thread.other_participant?.display_name ||
+                        thread.other_participant?.username ||
+                        'Conversation'}
+                    </Text>
+                    <Text style={styles.threadUsername}>
+                      @{thread.other_participant?.username || 'user'}
+                    </Text>
+                  </View>
+                  <View style={styles.sendChip}>
+                    <Text style={styles.sendChipText}>Send</Text>
+                  </View>
+                </Pressable>
+              )}
+            />
+            <Pressable
+              style={styles.closeShareBtn}
+              onPress={() => setIsShareModalOpen(false)}
+            >
+              <Text style={styles.closeShareText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -692,5 +873,175 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 12,
     color: PALETTE.textMuted,
+  },
+  // Sponsored Promo Fallback
+  adPromoCard: {
+    backgroundColor: '#18181b',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.35)',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginTop: 4,
+  },
+  adPromoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  adBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  adBadgeText: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 10,
+    color: '#fbbf24',
+    letterSpacing: 0.5,
+  },
+  skipNowBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  skipNowText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 11,
+    color: PALETTE.textSecondary,
+  },
+  adPromoTagline: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 13,
+    color: PALETTE.text,
+    lineHeight: 18,
+  },
+  adCountdownTrack: {
+    height: 3,
+    backgroundColor: PALETTE.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  adCountdownFill: {
+    height: '100%',
+    backgroundColor: '#fbbf24',
+    borderRadius: 2,
+  },
+  // DM Share Sheet
+  shareOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+  },
+  shareSheet: {
+    backgroundColor: PALETTE.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+    paddingBottom: 36,
+    paddingHorizontal: 20,
+    maxHeight: '65%',
+    borderTopWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  shareHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: PALETTE.border,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  shareTitle: {
+    fontFamily: 'Sora_600SemiBold',
+    fontSize: 18,
+    color: PALETTE.text,
+    marginBottom: 12,
+  },
+  shareFeedbackText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
+    color: PALETTE.accent,
+    marginBottom: 10,
+  },
+  shareList: {
+    maxHeight: 280,
+  },
+  emptyThreads: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  emptyThreadsText: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: PALETTE.textMuted,
+  },
+  threadShareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: PALETTE.borderSubtle,
+    gap: 12,
+  },
+  threadShareRowPressed: {
+    opacity: 0.7,
+  },
+  threadAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  threadAvatarText: {
+    fontFamily: 'Sora_600SemiBold',
+    fontSize: 15,
+    color: PALETTE.accent,
+  },
+  threadInfo: {
+    flex: 1,
+  },
+  threadName: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: PALETTE.text,
+  },
+  threadUsername: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
+    color: PALETTE.textMuted,
+  },
+  sendChip: {
+    backgroundColor: PALETTE.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  sendChipText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: '#ffffff',
+  },
+  closeShareBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    backgroundColor: PALETTE.card,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  closeShareText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: PALETTE.textSecondary,
   },
 });
