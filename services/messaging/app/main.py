@@ -197,17 +197,27 @@ app.add_middleware(
 )
 
 
-# ─── Standardized Exception Handlers ──────────────────────────────────────────
+def get_request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", str(uuid.uuid4()))
+
 
 @app.exception_handler(AppException)
 async def app_exception_handler(request: Request, exc: AppException):
+    req_id = get_request_id(request)
+    headers = exc.headers or {}
+    headers["X-Request-ID"] = req_id
     return JSONResponse(
         status_code=exc.status_code,
+        headers=headers,
         content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "request_id": req_id,
+            },
             "code": exc.code,
             "message": exc.message,
-            "details": exc.details,
-            "request_id": getattr(request.state, "request_id", None),
+            "request_id": req_id,
         },
     )
 

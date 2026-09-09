@@ -18,7 +18,32 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
+try:
+    import pytest
+except ImportError:
+    class MockPytest:
+        @staticmethod
+        def fixture(*args, **kwargs):
+            if args and callable(args[0]):
+                return args[0]
+            def decorator(f):
+                return f
+            return decorator
+        class mark:
+            @staticmethod
+            def asyncio(f):
+                return f
+        @staticmethod
+        def raises(exc):
+            class RaisesContext:
+                def __enter__(self):
+                    return self
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    if exc_type is not None and issubclass(exc_type, exc):
+                        return True
+                    raise AssertionError(f"Expected exception {exc} but got {exc_type}")
+            return RaisesContext()
+    pytest = MockPytest()
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -205,7 +230,7 @@ class MockConnection:
             tid = args[0]
             p_ids = args[1]
             created = args[2]
-            updated = args[3]
+            updated = args[3] if len(args) > 3 else created
             self.db.threads[tid] = {
                 "thread_id": tid,
                 "participant_ids": p_ids,
@@ -298,6 +323,17 @@ def user_eve():
         username="eve",
         email="eve@blipp.local",
     )
+
+
+@pytest.fixture(autouse=True)
+def disable_lifespan():
+    with patch("app.main.init_db_pool", AsyncMock()), \
+         patch("app.main.event_bus.connect", AsyncMock()), \
+         patch("app.main.event_bus.close", AsyncMock()), \
+         patch("app.main.close_db_pool", AsyncMock()), \
+         patch("app.main.run_story_cleanup_loop", AsyncMock()), \
+         patch("app.main.storage_service.use_s3", False):
+        yield
 
 
 # ─── Direct Messaging Integration Tests ────────────────────────────────────────
@@ -487,13 +523,20 @@ if __name__ == "__main__":
     bob = user_bob()
     eve = user_eve()
 
-    test_prevent_self_dm(db, alice)
-    print("✓ test_prevent_self_dm passed")
-    test_thread_creation_and_idempotency(db, alice, bob)
-    print("✓ test_thread_creation_and_idempotency passed")
-    test_send_and_retrieve_messages(db, alice, bob, eve)
-    print("✓ test_send_and_retrieve_messages passed")
+    with patch("app.main.init_db_pool", AsyncMock()), \
+         patch("app.main.event_bus.connect", AsyncMock()), \
+         patch("app.main.event_bus.close", AsyncMock()), \
+         patch("app.main.close_db_pool", AsyncMock()), \
+         patch("app.main.run_story_cleanup_loop", AsyncMock()), \
+         patch("app.main.storage_service.use_s3", False):
 
-    asyncio.run(test_stories_expiration_and_cleanup(MockDB(), alice, bob))
-    print("✓ test_stories_expiration_and_cleanup passed")
-    print("\nALL MESSAGING & STORIES TESTS PASSED SUCCESSFULLY! 🚀")
+        test_prevent_self_dm(db, alice)
+        print("✓ test_prevent_self_dm passed")
+        test_thread_creation_and_idempotency(db, alice, bob)
+        print("✓ test_thread_creation_and_idempotency passed")
+        test_send_and_retrieve_messages(db, alice, bob, eve)
+        print("✓ test_send_and_retrieve_messages passed")
+
+        asyncio.run(test_stories_expiration_and_cleanup(MockDB(), alice, bob))
+        print("✓ test_stories_expiration_and_cleanup passed")
+        print("\nALL MESSAGING & STORIES TESTS PASSED SUCCESSFULLY! 🚀")
