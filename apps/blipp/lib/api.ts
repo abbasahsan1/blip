@@ -43,7 +43,8 @@ export const getApiBaseUrl = (): string => {
 
 export const getKeycloakUrl = (): string => {
   if (process.env.EXPO_PUBLIC_KEYCLOAK_URL) {
-    return process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
+    const raw = process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
+    return raw.endsWith('/keycloak') ? raw : `${raw}/keycloak`;
   }
   // In production browser environments where /keycloak is reverse-proxied via ingress
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
@@ -52,6 +53,64 @@ export const getKeycloakUrl = (): string => {
     }
   }
   return 'http://localhost:8080/keycloak';
+};
+export const getContentIngestUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_CONTENT_INGEST_URL) {
+    return process.env.EXPO_PUBLIC_CONTENT_INGEST_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8001');
+  }
+  return base;
+};
+
+export const getFeedServiceUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_FEED_URL) {
+    return process.env.EXPO_PUBLIC_FEED_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8002');
+  }
+  return base;
+};
+
+export const getSocialGraphUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL) {
+    return process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8003');
+  }
+  return base;
+};
+
+export const getMinioPublicUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_MINIO_URL) {
+    return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
+    const host = window.location.hostname;
+    return `http://${host}:9000`;
+  }
+  return 'http://localhost:9000';
+};
+
+export const resolvePublicAudioUrl = (url?: string | null): string => {
+  if (!url) return '';
+  const internalPatterns = [
+    'minio.blipp.svc.cluster.local:9000',
+    'minio:9000',
+  ];
+  for (const pattern of internalPatterns) {
+    if (url.includes(pattern)) {
+      const publicBase = getMinioPublicUrl();
+      return url.replace(/^https?:\/\/[^/]+(:9000)?/, publicBase);
+    }
+  }
+  return url;
 };
 
 export interface ApiResponse<T = any> {
@@ -99,8 +158,38 @@ export async function requestRaw<T = any>(
     headers['Authorization'] = `Bearer ${activeToken}`;
   }
 
-  const baseUrl = getApiBaseUrl();
+  let baseUrl = getApiBaseUrl();
   let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  if (
+    normalizedPath === '/v1/uploads' ||
+    normalizedPath.startsWith('/v1/uploads/') ||
+    normalizedPath === '/uploads' ||
+    normalizedPath.startsWith('/uploads/')
+  ) {
+    baseUrl = getContentIngestUrl();
+  } else if (
+    normalizedPath === '/v1/feed' ||
+    normalizedPath.startsWith('/v1/feed/') ||
+    normalizedPath === '/feed' ||
+    normalizedPath.startsWith('/feed/') ||
+    normalizedPath === '/v1/blipps' ||
+    normalizedPath.startsWith('/v1/blipps/')
+  ) {
+    baseUrl = getFeedServiceUrl();
+  } else if (
+    normalizedPath === '/v1/profiles' ||
+    normalizedPath.startsWith('/v1/profiles/') ||
+    normalizedPath === '/profiles' ||
+    normalizedPath.startsWith('/profiles/') ||
+    normalizedPath === '/v1/social' ||
+    normalizedPath.startsWith('/v1/social/') ||
+    normalizedPath === '/social' ||
+    normalizedPath.startsWith('/social/')
+  ) {
+    baseUrl = getSocialGraphUrl();
+  }
+
   if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
     normalizedPath = normalizedPath.slice(3);
   }
@@ -400,15 +489,52 @@ export interface FeedResponse {
 export interface UserProfile {
   user_id: string;
   username: string;
-  display_name: string;
+  display_name?: string | null;
   bio?: string | null;
   avatar_url?: string | null;
+  is_creator?: boolean;
+  verification_status?: string;
   created_at?: string | null;
+  followers_count?: number;
+  following_count?: number;
+  is_following?: boolean;
+}
+
+export interface FollowActionResponse {
+  success: boolean;
+  follower_id: string;
+  followee_id: string;
+  is_following: boolean;
+}
+
+export interface FollowListResponse {
+  items: UserProfile[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export const profileApi = {
+  async claimUsername(data: {
+    username: string;
+    display_name?: string;
+    bio?: string;
+    avatar_url?: string;
+  }): Promise<UserProfile> {
+    const res = await requestRaw<UserProfile>('/v1/profiles', {
+      method: 'POST',
+      body: data,
+    });
+    return res.data;
+  },
+
   async getMyProfile(): Promise<UserProfile> {
     const res = await api.get<UserProfile>('/v1/profiles/me');
+    return res.data;
+  },
+
+  async getProfile(username: string): Promise<UserProfile> {
+    const res = await api.get<UserProfile>(`/v1/profiles/${encodeURIComponent(username)}`);
     return res.data;
   },
 
@@ -425,16 +551,55 @@ export const profileApi = {
   },
 };
 
+export const socialApi = {
+  async follow(userId: string): Promise<FollowActionResponse> {
+    const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
+      method: 'POST',
+    });
+    return res.data;
+  },
+
+  async unfollow(userId: string): Promise<FollowActionResponse> {
+    const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
+      method: 'DELETE',
+    });
+    return res.data;
+  },
+
+  async getFollowers(
+    userId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<FollowListResponse> {
+    const res = await api.get<FollowListResponse>(
+      `/v1/social/${userId}/followers?limit=${limit}&offset=${offset}`,
+    );
+    return res.data;
+  },
+
+  async getFollowing(
+    userId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<FollowListResponse> {
+    const res = await api.get<FollowListResponse>(
+      `/v1/social/${userId}/following?limit=${limit}&offset=${offset}`,
+    );
+    return res.data;
+  },
+};
+
 export const blippApi = {
   async getBlipps(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/blipps');
+    const res = await api.get<FeedResponse>('/v1/feed');
     return res.data;
   },
 
   async getFeed(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/blipps');
+    const res = await api.get<FeedResponse>('/v1/feed');
     return res.data;
   },
+
 
   async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
     const res = await requestRaw<BlippUploadResponse>('/v1/blipps/upload', {

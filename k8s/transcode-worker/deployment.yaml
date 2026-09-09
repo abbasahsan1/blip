@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: worker
     app.kubernetes.io/part-of: blipp
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: transcode-worker
@@ -27,8 +27,6 @@ spec:
             - secretRef:
                 name: blipp-secrets
           env:
-            - name: POSTGRES_DB
-              value: blipp
             - name: NATS_URL
               value: nats://nats.blipp.svc.cluster.local:4222
             - name: S3_ENDPOINT_URL
@@ -39,8 +37,31 @@ spec:
               value: blipp-audio-variants
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 1000m
+              cpu: 500m
               memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          # Exec-based probes: transcode-worker has no HTTP server.
+          # readinessProbe delays traffic/dependencies until the process is up.
+          # livenessProbe restarts the pod if the main process dies unexpectedly.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3

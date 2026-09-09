@@ -56,16 +56,14 @@ export async function pollUploadStatus(
   intervalMs = 2000,
   maxAttempts = 30,
 ): Promise<UploadStatusResponse> {
-  const sessionToken =
-    useSessionStore.getState().tokens?.accessToken || useSessionStore.getState().accessToken || undefined;
-
   let attempts = 0;
   while (attempts < maxAttempts) {
     attempts += 1;
     try {
-      const statusRes = await uploadApi.getStatus(uploadId, sessionToken);
+      const statusRes = await uploadApi.getStatus(uploadId);
       const currentStatus = statusRes.processing_status;
 
+      // Note: We deliberately only inspect processing_status and avoid any GET fetch on raw_file_url
       if (currentStatus === 'done') {
         return statusRes;
       }
@@ -122,18 +120,33 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
   try {
     const formData = new FormData();
 
-    if (Platform.OS === 'web' && (webBlob || file instanceof File)) {
-      formData.append('file', webBlob || (file as File), fileName);
-    } else {
-      if (webBlob) {
-        formData.append('file', webBlob, fileName);
-      } else {
-        formData.append('file', {
-          uri: fileUri,
-          name: fileName,
-          type: mimeType,
-        } as any);
+    if (Platform.OS === 'web') {
+      let blobToSend: Blob | null = null;
+      if (file instanceof Blob || file instanceof File) {
+        blobToSend = file;
+      } else if (webBlob instanceof Blob) {
+        blobToSend = webBlob;
+      } else if (fileUri) {
+        try {
+          const resp = await fetch(fileUri);
+          blobToSend = await resp.blob();
+        } catch (fetchErr) {
+          console.warn('Failed to fetch file URI into Blob on Web:', fetchErr);
+        }
       }
+
+      if (blobToSend) {
+        formData.append('file', blobToSend, fileName);
+      } else {
+        throw new Error('Could not convert audio file to a binary Blob for web upload.');
+      }
+    } else {
+      // Mobile (iOS/Android): Retain { uri, name, type } notation
+      formData.append('file', {
+        uri: fileUri,
+        name: fileName,
+        type: mimeType,
+      } as any);
     }
 
     formData.append('upload_type', 'audio');
@@ -144,8 +157,8 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
 
     uploadStore.setProgress(40);
 
-    // 1. Authenticated multipart POST /v1/uploads
-    const uploadRes = await uploadApi.upload(formData, sessionToken);
+    // 1. Authenticated multipart POST /v1/uploads via central api client
+    const uploadRes = await uploadApi.upload(formData);
     const uploadId = uploadRes.upload_id;
     uploadStore.setUploadId(uploadId);
     uploadStore.setProgress(60);
@@ -160,13 +173,14 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
 
     return completed;
   } catch (err: unknown) {
-    const msg =
-      err instanceof ApiError
-        ? err.message
-        : err instanceof Error
-        ? err.message
-        : 'An unexpected error occurred during audio upload.';
+    let msg = 'An unexpected error occurred during audio upload.';
+    if (err instanceof ApiError) {
+      msg = `Upload failed (${err.status}): ${err.message}`;
+    } else if (err instanceof Error) {
+      msg = err.message;
+    }
     uploadStore.setError(msg);
-    throw err;
+    throw new Error(msg);
   }
+
 }

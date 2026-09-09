@@ -141,6 +141,8 @@ export default function UploadScreen() {
         onChange={handleFileChange}
         accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"
         style={{ display: 'none' }}
+        data-testid="audio-file-input"
+        id="audio-file-input"
       />
 
       {/* Header: Studio Console Header */}
@@ -156,7 +158,7 @@ export default function UploadScreen() {
 
       {/* Structured Feedback Banners with bespoke status marks */}
       {displayError && (
-        <View style={styles.errorBanner} accessibilityRole="alert">
+        <View style={styles.errorBanner} accessibilityRole="alert" testID="upload-error-banner">
           <StatusAlertMark size={16} color={PALETTE.error} />
           <View style={{ flex: 1 }}>
             <Text style={styles.errorText}>{displayError}</Text>
@@ -173,7 +175,7 @@ export default function UploadScreen() {
       )}
 
       {successMessage && (
-        <View style={styles.successBanner} accessibilityRole="alert">
+        <View style={styles.successBanner} accessibilityRole="alert" testID="upload-success-banner">
           <StatusCheckMark size={16} color={PALETTE.success} />
           <Text style={styles.successText}>{successMessage}</Text>
         </View>
@@ -191,6 +193,7 @@ export default function UploadScreen() {
           disabled={isUploading}
           accessibilityRole="button"
           accessibilityLabel={selectedFile ? `Selected: ${selectedFile.name}` : 'Select audio file'}
+          testID="audio-dropzone"
         >
           <View style={styles.dropzoneIconWrap}>
             <AudioReelMark
@@ -229,6 +232,7 @@ export default function UploadScreen() {
             editable={!isUploading}
             maxLength={100}
             accessibilityLabel="Blipp Title"
+            testID="blipp-title-input"
           />
         </View>
 
@@ -248,17 +252,18 @@ export default function UploadScreen() {
             numberOfLines={3}
             maxLength={500}
             accessibilityLabel="Blipp Description"
+            testID="blipp-description-input"
           />
         </View>
 
         {/* Dynamic Multi-Stage Processing Indicator */}
         {isUploading && (
-          <View style={styles.progressSection}>
+          <View style={styles.progressSection} testID="upload-progress-section">
             <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progress}%` }]} />
+              <View style={[styles.progressFill, { width: `${progress}%` }]} testID="upload-progress-bar" />
             </View>
             <View style={styles.progressInfo}>
-              <Text style={styles.progressText}>
+              <Text style={styles.progressText} testID="upload-status-text">
                 {uploadStatus === 'transcoding'
                   ? 'Transcoding audio variants...'
                   : uploadStatus === 'completed'
@@ -281,6 +286,7 @@ export default function UploadScreen() {
           disabled={isUploading}
           accessibilityRole="button"
           accessibilityLabel="Post Blipp"
+          testID="post-blipp-button"
         >
           {isUploading ? (
             <View style={styles.buttonRow}>

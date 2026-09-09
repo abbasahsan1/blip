@@ -1,0 +1,41 @@
+import uuid
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, Field
+
+from blipp_common.security import AuthenticatedUser, TokenData
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+
+
+class FeedItemResponse(BaseModel):
+    id: Optional[str] = None
+    blipp_id: Union[uuid.UUID, str]
+    creator_id: Optional[Union[uuid.UUID, str]] = None
+    is_ad: bool = False
+    title: Optional[str] = None
+    description: Optional[str] = None
+    audio_url: str
+    audio_variants: dict = Field(default_factory=dict)
+    duration_seconds: float = 0.0
+    author: Optional[str] = None
+    username: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    creator: Optional[Dict[str, Any]] = None
+
+
+class FeedResponse(BaseModel):
+    items: List[FeedItemResponse] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
+
+
+__all__ = [
+    "HealthResponse",
+    "FeedItemResponse",
+    "FeedResponse",
+    "AuthenticatedUser",
+    "TokenData",
+]

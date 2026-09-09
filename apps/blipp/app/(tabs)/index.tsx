@@ -64,9 +64,11 @@ export default function FeedScreen() {
         isActive={index === activeIndex}
         height={pageHeight}
         onLike={() => toggleLike(item.id)}
+        feedItems={posts}
+        activeIndex={index}
       />
     ),
-    [activeIndex, pageHeight, toggleLike],
+    [activeIndex, pageHeight, posts, toggleLike],
   );
 
   return (

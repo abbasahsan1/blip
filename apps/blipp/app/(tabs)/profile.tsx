@@ -53,11 +53,11 @@ export default function ProfileScreen() {
       </View>
 
       {/* Operator Identity */}
-      <Text style={styles.displayName}>
+      <Text style={styles.displayName} testID="profile-display-name">
         {user?.displayName ?? user?.username ?? 'Operator'}
       </Text>
-      <Text style={styles.handle}>@{user?.username ?? 'account'}</Text>
-      {user?.email && <Text style={styles.email}>{user.email}</Text>}
+      <Text style={styles.handle} testID="profile-username">@{user?.username ?? 'account'}</Text>
+      {user?.email && <Text style={styles.email} testID="profile-email">{user.email}</Text>}
 
       {/* Acoustic Console Stats */}
       <View style={styles.statsRow}>

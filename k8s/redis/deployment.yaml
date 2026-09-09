@@ -38,7 +38,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 250m
-              memory: 256Mi
+              memory: 512Mi
           volumeMounts:
             - name: redis-data
               mountPath: /data
@@ -62,19 +62,3 @@ spec:
         - name: redis-data
           persistentVolumeClaim:
             claimName: redis-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: blipp
-  labels:
-    app.kubernetes.io/name: redis
-    app.kubernetes.io/component: cache
-    app.kubernetes.io/part-of: blipp
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi

@@ -28,7 +28,7 @@ spec:
             - /bin/sh
             - -c
             - |
-              mkdir -p /data/blipp-raw-uploads /data/blipp-audio-variants
+              mkdir -p /data/blipp-raw-uploads /data/blipp-audio-variants /data/blipp-stories
               chmod -R 777 /data
           volumeMounts:
             - name: minio-data
@@ -67,7 +67,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 1Gi
           volumeMounts:
             - name: minio-data
               mountPath: /data
@@ -89,19 +89,3 @@ spec:
         - name: minio-data
           persistentVolumeClaim:
             claimName: minio-pvc
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: minio-pvc
-  namespace: blipp
-  labels:
-    app.kubernetes.io/name: minio
-    app.kubernetes.io/component: object-storage
-    app.kubernetes.io/part-of: blipp
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 5Gi

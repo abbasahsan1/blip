@@ -40,23 +40,59 @@ spec:
         - name: auth-service
           port: 8000
 
+    # User Profiles Route (/v1/profiles)
+    - match: PathPrefix(`/v1/profiles`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: social-graph-service
+          port: 8003
+
+    # Social Graph & Relationships Route (/v1/social)
+    - match: PathPrefix(`/v1/social`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: social-graph-service
+          port: 8003
+
     # Direct Uploads Route (/v1/uploads)
     - match: PathPrefix(`/v1/uploads`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: content-ingest-service
+          port: 8001
 
-    # Blipps Content Route (/v1/blipps)
+    # Feed Route (/v1/feed)
+    - match: PathPrefix(`/v1/feed`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: feed-service
+          port: 8002
+
+    # Blipps Saves & Bookmarks Route (/v1/blipps/saved and /v1/blipps/{id}/save -> content-ingest-service)
+    - match: PathPrefix(`/v1/blipps/saved`) || (PathPrefix(`/v1/blipps`) && PathRegexp(`/v1/blipps/[^/]+/save`))
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: content-ingest-service
+          port: 8001
+
+    # Blipps Content Route (/v1/blipps -> feed-service)
     - match: PathPrefix(`/v1/blipps`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: feed-service
+          port: 8002
 
     # Telemetry Events Route (/v1/events)
     - match: PathPrefix(`/v1/events`)
@@ -67,14 +103,41 @@ spec:
         - name: auth-service
           port: 8000
 
-    # Feed Route (/v1/feed)
-    - match: PathPrefix(`/v1/feed`)
+    # Direct Messages Route (/v1/messages)
+    - match: PathPrefix(`/v1/messages`)
       kind: Rule
       middlewares:
         - name: blipp-ratelimit
       services:
-        - name: auth-service
-          port: 8000
+        - name: messaging-service
+          port: 8004
+
+    # 24-Hour Ephemeral Audio Stories Route (/v1/stories)
+    - match: PathPrefix(`/v1/stories`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: messaging-service
+          port: 8004
+
+    # User Reports Route (/v1/reports)
+    - match: PathPrefix(`/v1/reports`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: moderation-service
+          port: 8005
+
+    # Moderation Actions Route (/v1/moderation)
+    - match: PathPrefix(`/v1/moderation`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: moderation-service
+          port: 8005
 
     # General Versioned Route (/v1)
     - match: PathPrefix(`/v1`)
@@ -84,6 +147,7 @@ spec:
       services:
         - name: auth-service
           port: 8000
+
 
     # Legacy /api Microservice Route
     - match: PathPrefix(`/api`)

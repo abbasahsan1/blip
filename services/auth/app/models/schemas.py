@@ -1,20 +1,8 @@
 import uuid
-from typing import List, Optional, Literal
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
-
-class AuthenticatedUser(BaseModel):
-    user_id: uuid.UUID = Field(..., description="Subject claim (sub) extracted as UUID")
-    id: str = Field(..., description="String representation of user_id for compatibility")
-    username: str = Field(default="", description="Keycloak username")
-    email: Optional[str] = Field(default=None, description="User email")
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    roles: List[str] = Field(default_factory=list, description="Assigned realm roles")
-
-
-# Compatibility alias
-UserResponse = AuthenticatedUser
+from blipp_common.security import AuthenticatedUser, TokenData, UserResponse
 
 
 class MessageResponse(BaseModel):
@@ -28,136 +16,10 @@ class HealthResponse(BaseModel):
     keycloak_status: str
 
 
-class BlippResponse(BaseModel):
-    blipp_id: uuid.UUID
-    creator_id: uuid.UUID
-    title: Optional[str] = None
-    description: Optional[str] = None
-    audio_url: str
-    audio_variants: dict = Field(default_factory=dict)
-    duration_seconds: float = 0.0
-    language: str = "en"
-    status: str = "published"
-    scheduled_at: Optional[str] = None
-    source_type: str = "direct_upload"
-    parent_upload_id: Optional[uuid.UUID] = None
-    created_at: Optional[str] = None
-
-
-class FeedItemResponse(BaseModel):
-    blipp_id: uuid.UUID
-    creator_id: uuid.UUID
-    title: Optional[str] = None
-    description: Optional[str] = None
-    audio_url: str
-    audio_variants: dict = Field(default_factory=dict)
-    duration_seconds: float = 0.0
-    author: Optional[str] = None
-    username: Optional[str] = None
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
-
-
-class FeedResponse(BaseModel):
-    items: List[FeedItemResponse] = Field(default_factory=list)
-    next_cursor: Optional[str] = None
-
-
-TokenData = AuthenticatedUser
-
-
-class UploadPresignRequest(BaseModel):
-    file_name: str
-    mime_type: Optional[str] = "audio/mpeg"
-    size_bytes: int
-
-
-class UploadPresignResponse(BaseModel):
-    upload_id: str
-    storage_key: str
-    presigned_url: str
-    content_type: str
-
-
-class UploadCompleteRequest(BaseModel):
-    title: str
-    description: Optional[str] = None
-    duration_seconds: int = 0
-
-
-class TelemetryEvent(BaseModel):
-    event_type: str = "play_progress"
-    user_id: str
-    blipp_id: str
-    session_id: str
-    position_seconds: int
-    duration_seconds: int
-    device_signal: str
-    timestamp: str
-
-
-class UploadResponse(BaseModel):
-    upload_id: uuid.UUID
-    status: str = "queued"
-    message: str = "Upload received and queued for processing"
-
-
-class UploadStatusResponse(BaseModel):
-    upload_id: uuid.UUID
-    creator_id: uuid.UUID
-    raw_file_url: str
-    upload_type: str = "audio"
-    processing_status: str = "queued"
-    title: Optional[str] = None
-    description: Optional[str] = None
-    created_at: Optional[str] = None
-
-
-class EngagementEvent(BaseModel):
-    event_type: Literal["play_progress", "play_complete", "skip", "like", "save", "follow", "share"]
-    user_id: uuid.UUID
-    blipp_id: uuid.UUID
-    session_id: uuid.UUID
-    position_seconds: float = Field(..., ge=0)
-    duration_seconds: float = Field(..., ge=0)
-    device_signal: Literal["screen_on", "screen_off", "bluetooth_connected", "app_backgrounded"]
-    timestamp: str
-
-
-class ListeningHistoryItem(BaseModel):
-    session_id: uuid.UUID
-    blipp_id: uuid.UUID
-    title: Optional[str] = None
-    description: Optional[str] = None
-    audio_url: str
-    duration_seconds: float
-    total_seconds_listened: float
-    completed: bool
-    drop_off_position_seconds: Optional[float] = None
-    session_date: str
-    creator_id: uuid.UUID
-    creator_name: Optional[str] = None
-    creator_username: Optional[str] = None
-
-
-class ListeningHistoryResponse(BaseModel):
-    items: List[ListeningHistoryItem] = Field(default_factory=list)
-    total: int = 0
-
-
-class CreatorTopBlipp(BaseModel):
-    blipp_id: uuid.UUID
-    title: Optional[str] = None
-    total_minutes_listened: float = 0.0
-    play_count: int = 0
-    completed_count: int = 0
-
-
-class CreatorAnalyticsResponse(BaseModel):
-    creator_id: uuid.UUID
-    total_listen_minutes: float = 0.0
-    completed_play_count: int = 0
-    total_plays: int = 0
-    top_blipps: List[CreatorTopBlipp] = Field(default_factory=list)
-
-
+__all__ = [
+    "AuthenticatedUser",
+    "TokenData",
+    "UserResponse",
+    "MessageResponse",
+    "HealthResponse",
+]

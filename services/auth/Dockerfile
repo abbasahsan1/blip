@@ -9,13 +9,15 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 
-# Install shared core library first
-COPY libs/common /libs/common
-RUN /opt/venv/bin/pip install --no-cache-dir /libs/common
-
 # Install service dependencies
 COPY services/auth/requirements.txt .
-RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN sed -i '/libs\/common/d' requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Install shared core library directly into site-packages
+COPY libs/common /libs/common
+RUN /opt/venv/bin/pip install --no-cache-dir --no-deps /libs/common && \
+    cp -r /libs/common/blipp_common /opt/venv/lib/python3.11/site-packages/
 
 # In python:3.11-slim, /opt/venv/bin/python points to /usr/local/bin/python
 # In gcr.io/distroless/python3-debian12, the python3 binary is located at /usr/bin/python3
@@ -37,9 +39,8 @@ ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
 # Copy installed virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy application code and tests
+# Copy application code
 COPY services/auth/app/ ./app/
-COPY services/auth/tests/ ./tests/
 
 EXPOSE 8000
 

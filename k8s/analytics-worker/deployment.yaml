@@ -28,7 +28,7 @@ spec:
                 name: blipp-secrets
           env:
             - name: POSTGRES_DB
-              value: blipp
+              value: blipp_analytics
             - name: NATS_URL
               value: nats://nats.blipp.svc.cluster.local:4222
             - name: REDIS_URL
@@ -40,5 +40,28 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 1000m
-              memory: 512Mi
+              cpu: 500m
+              memory: 256Mi
+          # Exec-based probes: analytics-worker has no HTTP server.
+          # readinessProbe delays traffic/dependencies until the process is up.
+          # livenessProbe restarts the pod if the main process dies unexpectedly.
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - kill -0 1
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3

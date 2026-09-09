@@ -5,23 +5,19 @@ import signal
 import asyncio
 import logging
 import tempfile
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import nats
 from nats.aio.client import Client as NATSClient
 from nats.js.client import JetStreamContext
 from nats.js.api import StreamConfig, StorageType, RetentionPolicy
 
-from app.config import settings
-from app.storage import storage_manager
+from blipp_common.config import settings
+from blipp_common.storage import storage_manager
 from app.transcoder import transcode_variants
-from app.database import (
-    init_db,
-    close_db,
-    update_upload_status,
-    get_upload,
-    create_blipp,
-)
+
+# Worker-specific NATS consumer group (aligned to KEDA trigger)
+NATS_CONSUMER_GROUP = "transcode-worker"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,12 +34,15 @@ def handle_shutdown(sig, frame):
     _running = False
 
 
+# ─── Stream / message handling ────────────────────────────────────────────────
+
+
 async def ensure_streams(js: JetStreamContext) -> None:
     """
-    Ensures that stream UPLOADS exists and includes both upload.> and transcode.>
+    Ensures that stream UPLOADS exists and includes upload.>, transcode.>, and media.>
     """
     stream_name = settings.NATS_STREAM_UPLOADS
-    subjects = ["upload.>", "transcode.>"]
+    subjects = ["upload.>", "transcode.>", "media.>"]
     try:
         await js.stream_info(stream_name)
         try:
@@ -86,28 +85,28 @@ async def process_message(js: JetStreamContext, msg) -> None:
     raw_file_url = data.get("raw_file_url")
     title = data.get("title")
     description = data.get("description")
+    scheduled_at = data.get("scheduled_at")
+    blipp_id_str = data.get("blipp_id")
+    blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else uuid.uuid4()
 
     with tempfile.TemporaryDirectory(prefix=f"transcode_{upload_id}_") as tmpdir:
         input_filename = os.path.basename(storage_manager.extract_storage_key(raw_file_url)) or "input.bin"
         local_input_path = os.path.join(tmpdir, input_filename)
 
         try:
-            # 1. Update status to transcoding
-            await update_upload_status(upload_id, "transcoding")
-
-            # 2. Download source file from blipp-raw-uploads bucket
+            # 1. Download source file from blipp-raw-uploads bucket
             storage_key = storage_manager.extract_storage_key(raw_file_url)
             logger.info(f"Downloading raw source '{storage_key}' from {storage_manager.raw_bucket}...")
             await storage_manager.download_file(storage_key, local_input_path)
 
-            # 3. Transcode into 3 audio tiers and measure exact duration
+            # 2. Transcode into 3 audio tiers and measure exact duration
             output_dir = os.path.join(tmpdir, "output")
             logger.info(f"Transcoding '{local_input_path}' into 3 tiers (low, standard, high)...")
             variants_local, duration_seconds, detected_source_type = await transcode_variants(
                 local_input_path, output_dir
             )
 
-            # 4. Upload the 3 variants to blipp-audio-variants bucket in MinIO
+            # 3. Upload the 3 variants to blipp-audio-variants bucket in MinIO
             uploaded_variants = {}
             for tier in ("low", "standard", "high"):
                 tier_file = variants_local[tier]
@@ -122,64 +121,61 @@ async def process_message(js: JetStreamContext, msg) -> None:
 
             canonical_audio_url = uploaded_variants["high"]
 
-            # Hydrate creator_id / metadata if not fully populated in the event payload
-            if not creator_id:
-                upload_rec = await get_upload(upload_id)
-                if upload_rec:
-                    creator_id = upload_rec["creator_id"]
-                    title = title or upload_rec.get("title")
-                    description = description or upload_rec.get("description")
-
-            if not creator_id:
-                raise RuntimeError(f"Creator ID could not be determined for upload {upload_id}")
-
-            # 5. Insert Blipp record into PostgreSQL
-            # TODO: temporary status='published' until automated copyright scanner is active (Section 6.2)
-            new_blipp_id = uuid.uuid4()
-            await create_blipp(
-                blipp_id=new_blipp_id,
-                creator_id=creator_id,
-                title=title or "Untitled Blipp",
-                description=description,
-                audio_url=canonical_audio_url,
-                audio_variants=uploaded_variants,
-                duration_seconds=duration_seconds,
-                source_type=detected_source_type,
-                parent_upload_id=upload_id,
-                status="published",
+            # 4. Publish media.transcode.completed event to NATS JetStream (UPLOADS stream)
+            completed_payload = {
+                "upload_id": str(upload_id),
+                "blipp_id": str(blipp_id),
+                "creator_id": str(creator_id) if creator_id else "",
+                "title": title or "",
+                "description": description or "",
+                "audio_url": canonical_audio_url,
+                "audio_variants": uploaded_variants,
+                "duration_seconds": float(duration_seconds),
+                "source_type": detected_source_type or "direct_upload",
+                "scheduled_at": scheduled_at,
+            }
+            await js.publish(
+                subject="media.transcode.completed",
+                payload=json.dumps(completed_payload).encode("utf-8"),
             )
-            logger.info(f"Created Blipp {new_blipp_id} (duration={duration_seconds:.2f}s, status=published)")
+            logger.info(f"Published media.transcode.completed for upload {upload_id}")
 
-            # 6. Update source Upload record: processing_status = 'done'
-            await update_upload_status(upload_id, "done")
-
-            # 7. Publish transcode.complete event to NATS JetStream
-            complete_payload = {
-                "blipp_id": str(new_blipp_id),
+            # Optional compatibility event for legacy consumers
+            legacy_payload = {
+                "blipp_id": str(blipp_id),
                 "upload_id": str(upload_id),
                 "variants": uploaded_variants,
                 "duration_seconds": float(duration_seconds),
             }
-            await js.publish(
-                subject="transcode.complete",
-                payload=json.dumps(complete_payload).encode("utf-8"),
-            )
-            logger.info(f"Published transcode.complete for upload {upload_id}")
+            try:
+                await js.publish(
+                    subject="transcode.complete",
+                    payload=json.dumps(legacy_payload).encode("utf-8"),
+                )
+            except Exception as leg_err:
+                logger.debug(f"Legacy transcode.complete publication note: {leg_err}")
 
-            # 8. Acknowledge (ack) message
+            # 5. Acknowledge (ack) message
             await msg.ack()
             logger.info(f"Successfully finished job for upload {upload_id}")
 
         except Exception as e:
             logger.exception(f"Error during transcoding of upload {upload_id}: {e}")
-            try:
-                await update_upload_status(upload_id, "failed")
-            except Exception as db_err:
-                logger.error(f"Failed to update upload status to failed: {db_err}")
-
             delivery_count = getattr(getattr(msg, "metadata", None), "num_delivered", 1)
             if delivery_count >= 3:
-                logger.warning(f"Upload {upload_id} exceeded max retries ({delivery_count}); acknowledging.")
+                logger.warning(f"Upload {upload_id} exceeded max retries ({delivery_count}); acknowledging and reporting failure.")
+                failed_payload = {
+                    "upload_id": str(upload_id),
+                    "error": str(e),
+                }
+                try:
+                    await js.publish(
+                        subject="media.transcode.failed",
+                        payload=json.dumps(failed_payload).encode("utf-8"),
+                    )
+                except Exception as pub_err:
+                    logger.warning(f"Failed to publish media.transcode.failed event: {pub_err}")
+
                 try:
                     await msg.ack()
                 except Exception:
@@ -197,9 +193,6 @@ async def run_worker() -> None:
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
 
-    logger.info("Initializing database pool...")
-    await init_db()
-
     logger.info(f"Connecting to NATS at {settings.NATS_URL}...")
     nc: NATSClient = await nats.connect(
         servers=[settings.NATS_URL],
@@ -211,10 +204,10 @@ async def run_worker() -> None:
 
     await ensure_streams(js)
 
-    logger.info(f"Binding durable consumer '{settings.NATS_CONSUMER_GROUP}' on subject 'upload.received'...")
+    logger.info(f"Binding durable consumer '{NATS_CONSUMER_GROUP}' on subject 'upload.received'...")
     psub = await js.pull_subscribe(
         subject="upload.received",
-        durable=settings.NATS_CONSUMER_GROUP,
+        durable=NATS_CONSUMER_GROUP,
         stream=settings.NATS_STREAM_UPLOADS,
     )
 
@@ -239,7 +232,6 @@ async def run_worker() -> None:
         await nc.close()
     except Exception as e:
         logger.warning(f"Error during NATS close: {e}")
-    await close_db()
     logger.info("Worker shutdown complete.")
 
 

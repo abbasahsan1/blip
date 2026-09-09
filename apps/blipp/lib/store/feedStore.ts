@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { blippApi } from '../api';
+import { blippApi, resolvePublicAudioUrl } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
 const GRADIENTS: [string, string][] = [
@@ -41,12 +41,16 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
     try {
-      const res = await blippApi.getBlipps();
+      const res = await blippApi.getFeed();
       const serverItems = res.items || [];
+
       const nextCursor = res.next_cursor ?? null;
 
       const mapped: Blipp[] = serverItems.map((item, idx: number) => {
-        const standardUrl = item.audio_variants?.standard || item.audio_url || '';
+        const rawStandard = item.audio_variants?.standard || item.audio_url || '';
+        const standardUrl = resolvePublicAudioUrl(rawStandard);
+        const lowUrl = resolvePublicAudioUrl(item.audio_variants?.low || rawStandard);
+        const highUrl = resolvePublicAudioUrl(item.audio_variants?.high || rawStandard);
         return {
           id: item.blipp_id,
           blipp_id: item.blipp_id,
@@ -57,11 +61,11 @@ export const useFeedStore = create<FeedState>((set, get) => ({
           creator_id: item.creator_id,
           duration: item.duration_seconds || 30,
           duration_seconds: item.duration_seconds || 30,
-          audio_url: item.audio_url || standardUrl,
+          audio_url: standardUrl,
           audio_variants: {
             standard: standardUrl,
-            low: item.audio_variants?.low || standardUrl,
-            high: item.audio_variants?.high || standardUrl,
+            low: lowUrl,
+            high: highUrl,
           },
           audioUrl: standardUrl,
           coverGradient: GRADIENTS[idx % GRADIENTS.length],
