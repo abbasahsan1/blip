@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey
+from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from blipp_common.database import Base
@@ -46,4 +46,27 @@ class Blipp(Base):
     )
 
 
-__all__ = ["Blipp"]
+class BlippSave(Base):
+    """
+    SQLAlchemy model representing a saved/bookmarked audio reel matching Section 5.3.
+    """
+    __tablename__ = "saves"
+
+    user_id = Column(UUID(as_uuid=True), primary_key=True)
+    blipp_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("blipps.blipp_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "blipp_id", name="uq_user_blipp_save"),
+    )
+
+
+__all__ = ["Blipp", "BlippSave"]

@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from blipp_common.security import AuthenticatedUser, TokenData
@@ -11,8 +11,10 @@ class HealthResponse(BaseModel):
 
 
 class FeedItemResponse(BaseModel):
-    blipp_id: uuid.UUID
-    creator_id: uuid.UUID
+    id: Optional[str] = None
+    blipp_id: Union[uuid.UUID, str]
+    creator_id: Optional[Union[uuid.UUID, str]] = None
+    is_ad: bool = False
     title: Optional[str] = None
     description: Optional[str] = None
     audio_url: str
@@ -22,6 +24,7 @@ class FeedItemResponse(BaseModel):
     username: Optional[str] = None
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
+    creator: Optional[Dict[str, Any]] = None
 
 
 class FeedResponse(BaseModel):

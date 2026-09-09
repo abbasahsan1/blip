@@ -76,6 +76,15 @@ spec:
         - name: feed-service
           port: 8002
 
+    # Blipps Saves & Bookmarks Route (/v1/blipps/saved and /v1/blipps/{id}/save -> content-ingest-service)
+    - match: PathPrefix(`/v1/blipps/saved`) || (PathPrefix(`/v1/blipps`) && PathRegexp(`/v1/blipps/[^/]+/save`))
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: content-ingest-service
+          port: 8001
+
     # Blipps Content Route (/v1/blipps -> feed-service)
     - match: PathPrefix(`/v1/blipps`)
       kind: Rule

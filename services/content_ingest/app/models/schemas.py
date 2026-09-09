@@ -65,6 +65,31 @@ class BlippResponse(BaseModel):
     created_at: Optional[str] = None
 
 
+class SaveActionResponse(BaseModel):
+    status: str
+    blipp_id: uuid.UUID
+
+
+class SavedBlippItem(BaseModel):
+    blipp_id: uuid.UUID
+    creator_id: uuid.UUID
+    title: Optional[str] = None
+    description: Optional[str] = None
+    audio_url: str
+    audio_variants: dict = Field(default_factory=dict)
+    duration_seconds: float = 0.0
+    language: str = "en"
+    status: str = "published"
+    saved_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class SavedBlippsResponse(BaseModel):
+    items: List[SavedBlippItem]
+    next_cursor: Optional[str] = None
+    has_more: bool = False
+
+
 __all__ = [
     "AuthenticatedUser",
     "TokenData",
@@ -75,4 +100,8 @@ __all__ = [
     "UploadPresignResponse",
     "UploadCompleteRequest",
     "BlippResponse",
+    "SaveActionResponse",
+    "SavedBlippItem",
+    "SavedBlippsResponse",
 ]
+

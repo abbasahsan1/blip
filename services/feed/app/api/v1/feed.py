@@ -209,8 +209,10 @@ async def get_feed(
 
         items.append(
             FeedItemResponse(
+                id=str(r["blipp_id"]),
                 blipp_id=r["blipp_id"],
                 creator_id=r["creator_id"],
+                is_ad=False,
                 title=r["title"],
                 description=r["description"],
                 audio_url=playback_url,
@@ -220,10 +222,46 @@ async def get_feed(
                 username=r["username"],
                 display_name=r["display_name"],
                 avatar_url=r["avatar_url"],
+                creator={
+                    "username": r["username"],
+                    "display_name": r["display_name"],
+                    "avatar_url": r["avatar_url"],
+                } if r.get("username") else None,
             )
         )
 
-    return FeedResponse(items=items, next_cursor=None)
+    # Stage 5: Server-side ad interleaving (Section 6.4)
+    # Interleave ad slots every 5 organic items (index % 5 == 4)
+    final_feed_items: List[FeedItemResponse] = []
+    for idx, item in enumerate(items):
+        final_feed_items.append(item)
+        if idx % 5 == 4:
+            ad_id = f"ad-{uuid.uuid4()}"
+            final_feed_items.append(
+                FeedItemResponse(
+                    id=ad_id,
+                    blipp_id=ad_id,
+                    is_ad=True,
+                    title="Sponsored Announcement",
+                    description="Featured partner broadcast",
+                    audio_url="https://cdn.blipps.internal/ads/sample-ad.aac",
+                    duration_seconds=15.0,
+                    creator={
+                        "username": "sponsor",
+                        "display_name": "Sponsor Spotlight",
+                        "avatar_url": None,
+                    },
+                    audio_variants={
+                        "standard": "https://cdn.blipps.internal/ads/sample-ad.aac",
+                    },
+                    author="Sponsor Spotlight",
+                    username="sponsor",
+                    display_name="Sponsor Spotlight",
+                    avatar_url=None,
+                )
+            )
+
+    return FeedResponse(items=final_feed_items, next_cursor=None)
 
 
 @router.api_route("/audio/{filename:path}", methods=["GET", "HEAD"])

@@ -234,6 +234,18 @@ CREATE INDEX IF NOT EXISTS idx_blipps_status_created ON blipps (status, created_
 CREATE INDEX IF NOT EXISTS idx_blipps_creator_id ON blipps (creator_id);
 CREATE INDEX IF NOT EXISTS idx_blipps_parent_upload_id ON blipps (parent_upload_id);
 
+CREATE TABLE IF NOT EXISTS saves (
+    user_id UUID NOT NULL,
+    blipp_id UUID NOT NULL REFERENCES blipps(blipp_id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_blipp_save UNIQUE (user_id, blipp_id),
+    PRIMARY KEY (user_id, blipp_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_saves_user_id ON saves (user_id);
+CREATE INDEX IF NOT EXISTS idx_saves_blipp_id ON saves (blipp_id);
+CREATE INDEX IF NOT EXISTS idx_saves_created_at ON saves (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS listening_session_agg (
     session_id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,

@@ -1,6 +1,6 @@
 from blipp_common.database import Base
 from .upload import Upload
-from .blipp import Blipp
+from .blipp import Blipp, BlippSave
 from .schemas import (
     AuthenticatedUser,
     TokenData,
@@ -17,6 +17,7 @@ __all__ = [
     "Base",
     "Upload",
     "Blipp",
+    "BlippSave",
     "AuthenticatedUser",
     "TokenData",
     "HealthResponse",

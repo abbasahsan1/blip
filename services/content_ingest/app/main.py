@@ -24,6 +24,7 @@ from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
 from blipp_common.storage import storage_service
 from blipp_common.events import event_bus
 from app.api.v1.uploads import router as uploads_router
+from app.api.v1.saves import router as saves_router
 from app.models.schemas import HealthResponse
 from app.event_handlers import (
     run_transcode_consumer,
@@ -246,6 +247,8 @@ async def docs_redirect():
 # Mount routes under /v1/uploads and /uploads
 app.include_router(uploads_router, prefix="/v1/uploads")
 app.include_router(uploads_router, prefix="/uploads")
+app.include_router(saves_router, prefix="/v1")
+app.include_router(saves_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
