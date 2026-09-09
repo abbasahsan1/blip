@@ -94,6 +94,24 @@ spec:
         - name: auth-service
           port: 8000
 
+    # Direct Messages Route (/v1/messages)
+    - match: PathPrefix(`/v1/messages`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: messaging-service
+          port: 8004
+
+    # 24-Hour Ephemeral Audio Stories Route (/v1/stories)
+    - match: PathPrefix(`/v1/stories`)
+      kind: Rule
+      middlewares:
+        - name: blipp-ratelimit
+      services:
+        - name: messaging-service
+          port: 8004
+
     # General Versioned Route (/v1)
     - match: PathPrefix(`/v1`)
       kind: Rule

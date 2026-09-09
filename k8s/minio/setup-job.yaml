@@ -58,8 +58,10 @@ spec:
               echo "Creating default buckets..."
               mc mb --ignore-existing localminio/blipp-raw-uploads
               mc mb --ignore-existing localminio/blipp-audio-variants
-              echo "Configuring public download policy on blipp-audio-variants..."
+              mc mb --ignore-existing localminio/blipp-stories
+              echo "Configuring public download policy on blipp-audio-variants & blipp-stories..."
               mc anonymous set download localminio/blipp-audio-variants
+              mc anonymous set download localminio/blipp-stories
               echo "Listing buckets:"
               mc ls localminio
               echo "MinIO bucket initialization complete!"

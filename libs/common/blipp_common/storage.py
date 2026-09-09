@@ -28,6 +28,7 @@ class StorageService:
         )
         self.raw_bucket = self.settings.S3_BUCKET_RAW_UPLOADS or "blipp-raw-uploads"
         self.variants_bucket = self.settings.S3_BUCKET_AUDIO_VARIANTS or "blipp-audio-variants"
+        self.stories_bucket = getattr(self.settings, "S3_BUCKET_STORIES", "blipp-stories") or "blipp-stories"
         self.use_s3 = False
         self.internal_s3_client = None
         self.public_s3_client = None
@@ -403,7 +404,7 @@ class StorageService:
             return clean_url.split("/v1/blipps/audio/", 1)[1]
         if clean_url.startswith("http://") or clean_url.startswith("https://") or clean_url.startswith("s3://"):
             path = urlparse(clean_url).path.lstrip("/")
-            for b in (self.bucket_name, self.raw_bucket, self.variants_bucket):
+            for b in (self.bucket_name, self.raw_bucket, self.variants_bucket, self.stories_bucket):
                 if b and path.startswith(f"{b}/"):
                     return path[len(b) + 1:]
             return path
@@ -483,6 +484,39 @@ class StorageService:
         if candidate_flat.exists() and candidate_flat.is_file():
             return candidate_flat
         return None
+
+    async def delete_file(self, storage_key: str, bucket_name: Optional[str] = None) -> bool:
+        """Asynchronously deletes an object from S3/MinIO and/or local filesystem fallback."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._delete_file_sync, storage_key, bucket_name)
+
+    def _delete_file_sync(self, storage_key: str, bucket_name: Optional[str] = None) -> bool:
+        """Synchronously deletes an object from S3/MinIO and/or local filesystem."""
+        bucket = bucket_name or self.bucket_name
+        safe_key = self.extract_storage_key(storage_key)
+        deleted = False
+
+        if self.use_s3:
+            client = self.internal_s3_client or self.s3_client
+            if client:
+                try:
+                    client.delete_object(Bucket=bucket, Key=safe_key)
+                    deleted = True
+                    logger.info(f"Deleted object '{safe_key}' from bucket '{bucket}'")
+                except Exception as e:
+                    logger.warning(f"Failed to delete S3 object {bucket}/{safe_key}: {e}")
+
+        # Local storage fallback removal
+        local_path = self.local_dir / safe_key.lstrip("/")
+        if local_path.exists() and local_path.is_file():
+            try:
+                local_path.unlink()
+                deleted = True
+                logger.info(f"Deleted local file '{local_path}'")
+            except Exception as e:
+                logger.warning(f"Failed to remove local file {local_path}: {e}")
+
+        return deleted
 
 
 # Re-export StorageManager alias for backward compatibility across worker services

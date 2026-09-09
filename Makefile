@@ -6,11 +6,12 @@ IMAGES := blipp-auth:latest \
           blipp-content-ingest:latest \
           blipp-feed:latest \
           blipp-social-graph:latest \
+          blipp-messaging:latest \
           blipp-transcode-worker:latest \
           blipp-analytics-worker:latest
 
 .PHONY: help all upgrade destroy cluster-up k3d-import build-all build-auth build-ingest \
-        build-feed build-social build-transcode build-analytics k8s-init k8s-deploy \
+        build-feed build-social build-messaging build-transcode build-analytics k8s-init k8s-deploy \
         k8s-status port-forward port-forward-stop dev-mobile
 
 help: ## Show available commands
@@ -26,6 +27,7 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s || true
+	@kubectl rollout status deployment/messaging -n $(NAMESPACE) --timeout=120s || true
 	@$(MAKE) port-forward
 	@echo "=================================================================="
 	@echo "  Blipps Platform is fully deployed and accessible on localhost!"
@@ -34,6 +36,7 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 	@echo "  - Content Ingest: http://localhost:8001"
 	@echo "  - Feed:           http://localhost:8002"
 	@echo "  - Social Graph:   http://localhost:8003"
+	@echo "  - Messaging:      http://localhost:8004"
 	@echo "  - MinIO S3:       http://localhost:9000"
 	@echo "  - Keycloak:       http://localhost:8080"
 	@echo "  - Redis:          localhost:6379"
@@ -47,6 +50,7 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
+	@kubectl apply -f k8s/messaging/
 	@kubectl apply -f k8s/transcode-worker/
 	@kubectl apply -f k8s/analytics-worker/
 	@kubectl apply -f k8s/ingress/
@@ -55,6 +59,7 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
 	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
 	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
+	@kubectl rollout restart deployment/messaging -n $(NAMESPACE)
 	@kubectl rollout restart deployment/transcode-worker -n $(NAMESPACE)
 	@kubectl rollout restart deployment/analytics-worker -n $(NAMESPACE)
 	@echo "Upgrade complete. Workloads are rolling forward."
@@ -105,13 +110,16 @@ build-feed:
 build-social:
 	docker build -t blipp-social-graph:latest -f services/social_graph/Dockerfile .
 
+build-messaging:
+	docker build -t blipp-messaging:latest -f services/messaging/Dockerfile .
+
 build-transcode:
 	docker build -t blipp-transcode-worker:latest -f services/transcode_worker/Dockerfile .
 
 build-analytics:
 	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
-build-all: build-auth build-ingest build-feed build-social build-transcode build-analytics ## Build all Docker images
+build-all: build-auth build-ingest build-feed build-social build-messaging build-transcode build-analytics ## Build all Docker images
 
 # ==============================================================================
 # Kubernetes Infrastructure & Deployments
@@ -144,6 +152,7 @@ k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifes
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
+	@kubectl apply -f k8s/messaging/
 	# Batch workers
 	@kubectl apply -f k8s/transcode-worker/
 	@kubectl apply -f k8s/analytics-worker/
@@ -163,6 +172,7 @@ port-forward: port-forward-stop ## Start background port-forwarding on all inter
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/content-ingest-service 8001:8001 > /dev/null 2>&1 &
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/feed-service 8002:8002 > /dev/null 2>&1 &
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/social-graph-service 8003:8003 > /dev/null 2>&1 &
+	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/messaging-service 8004:8004 > /dev/null 2>&1 &
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/minio 9000:9000 > /dev/null 2>&1 &
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/keycloak 8080:8080 > /dev/null 2>&1 &
 	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/redis 6379:6379 > /dev/null 2>&1 &
@@ -171,6 +181,7 @@ port-forward: port-forward-stop ## Start background port-forwarding on all inter
 	@echo "  - Content Ingest: http://localhost:8001"
 	@echo "  - Feed:           http://localhost:8002"
 	@echo "  - Social Graph:   http://localhost:8003"
+	@echo "  - Messaging:      http://localhost:8004"
 	@echo "  - MinIO:          http://localhost:9000"
 	@echo "  - Keycloak:       http://localhost:8080"
 	@echo "  - Redis:          localhost:6379"

@@ -28,7 +28,7 @@ spec:
             - /bin/sh
             - -c
             - |
-              mkdir -p /data/blipp-raw-uploads /data/blipp-audio-variants
+              mkdir -p /data/blipp-raw-uploads /data/blipp-audio-variants /data/blipp-stories
               chmod -R 777 /data
           volumeMounts:
             - name: minio-data
