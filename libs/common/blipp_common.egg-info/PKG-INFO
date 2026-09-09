@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: blipp-common
+Version: 0.1.0
+Summary: Shared core infrastructure library for Blipp microservices
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic-settings>=2.7.0
+Requires-Dist: sqlalchemy>=2.0.0
+Requires-Dist: asyncpg>=0.30.0
+Requires-Dist: nats-py>=2.9.0
+Requires-Dist: boto3>=1.36.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: async-timeout>=4.0.3
+Requires-Dist: httpx>=0.27.0
+
+# Blipp Common Library
+
+Shared core database, configuration, event bus, and storage library for Blipp microservices.
