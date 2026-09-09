@@ -187,8 +187,10 @@ CREATE TABLE IF NOT EXISTS users_profile (
 
 ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS is_creator BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS verification_status VARCHAR(50) NOT NULL DEFAULT 'unverified';
+ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active';
 
 CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username);
+CREATE INDEX IF NOT EXISTS idx_users_profile_status ON users_profile (status);
 
 CREATE TABLE IF NOT EXISTS follows (
     follower_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,

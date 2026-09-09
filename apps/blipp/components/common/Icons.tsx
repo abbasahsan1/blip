@@ -54,6 +54,24 @@ export function HeartMark({ size = 20, color = '#ffffff', filled = false }: Icon
 }
 
 /**
+ * Audio Bookmark / Save Mark (Filled or Outlined)
+ */
+export function BookmarkMark({ size = 20, color = '#ffffff', filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 4.5A2.5 2.5 0 0 1 7.5 2H16.5A2.5 2.5 0 0 1 19 4.5V21.5L12 17.5L5 21.5V4.5Z"
+        fill={filled ? color : 'none'}
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
  * Feed Console Navigation Mark (Acoustic Spectrum Bars)
  */
 export function FeedConsoleMark({ size = 20, color = '#71717a' }: IconProps) {

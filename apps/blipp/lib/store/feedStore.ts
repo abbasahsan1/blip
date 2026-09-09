@@ -51,6 +51,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         const standardUrl = resolvePublicAudioUrl(rawStandard);
         const lowUrl = resolvePublicAudioUrl(item.audio_variants?.low || rawStandard);
         const highUrl = resolvePublicAudioUrl(item.audio_variants?.high || rawStandard);
+        const isAd = Boolean(item.is_ad || item.is_sponsored);
         return {
           id: item.blipp_id,
           blipp_id: item.blipp_id,
@@ -69,10 +70,18 @@ export const useFeedStore = create<FeedState>((set, get) => ({
           },
           audioUrl: standardUrl,
           coverGradient: GRADIENTS[idx % GRADIENTS.length],
-          listenCount: 0,
-          likeCount: 0,
-          isLiked: false,
-          createdAt: new Date().toISOString(),
+          listenCount: item.listens_count || item.listenCount || 0,
+          likeCount: item.likes_count || item.likeCount || 0,
+          isLiked: Boolean(item.isLiked || item.is_liked),
+          is_ad: isAd,
+          is_sponsored: isAd,
+          is_saved: Boolean(item.is_saved),
+          is_following: Boolean(item.is_following),
+          creator: item.creator,
+          sponsor: item.sponsor,
+          tags: item.tags || [],
+          sourceName: item.sourceName,
+          createdAt: item.created_at || new Date().toISOString(),
         };
       });
 

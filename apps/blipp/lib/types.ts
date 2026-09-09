@@ -32,7 +32,8 @@ export interface AudioVariants {
 }
 
 export interface SponsorInfo {
-  name: string;
+  name?: string;
+  brand_name?: string;
   tagline?: string;
   cta_text: string;
   cta_url: string;
@@ -71,12 +72,37 @@ export interface Blipp {
   sourceType?: 'podcast' | 'interview' | 'documentary' | 'other' | string;
   // Server-hydrated sponsored ad slot (§6.4)
   is_sponsored?: boolean;
+  is_ad?: boolean;
   sponsor?: SponsorInfo;
   ad_metadata?: AdMetadata;
+  // User engagement state (§5.3, §6.7)
+  is_saved?: boolean;
+  is_following?: boolean;
+  creator?: {
+    id?: string;
+    username?: string;
+    display_name?: string;
+    avatar_url?: string | null;
+  };
 }
 
 // Alias AudioPost to Blipp for seamless compatibility
 export type AudioPost = Blipp;
+export type BlippItem = Blipp;
+
+export interface StoryItem {
+  story_id: string;
+  creator_id: string;
+  audio_url: string;
+  duration_seconds: number;
+  expires_at: string;
+  created_at: string;
+  creator?: {
+    username?: string;
+    display_name?: string;
+    avatar_url?: string | null;
+  };
+}
 
 export interface FeedState {
   posts: Blipp[];

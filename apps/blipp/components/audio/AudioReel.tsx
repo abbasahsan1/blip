@@ -16,7 +16,7 @@
  *   - useAudioPrefetch    — §6.4 speculative prefetch of upcoming audio
  */
 
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Animated,
   Linking,
@@ -26,10 +26,11 @@ import {
   View,
 } from 'react-native';
 import { PALETTE } from '@/lib/palette';
-import { PlayMark, PauseMark, HeartMark } from '@/components/common/Icons';
+import { PlayMark, PauseMark, HeartMark, BookmarkMark } from '@/components/common/Icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
+import { api } from '@/lib/api';
 import type { AudioPost, Blipp } from '@/lib/types';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -78,6 +79,65 @@ export function AudioReel({
   activeIndex = 0,
 }: Props) {
   const item = (post || propItem) as Blipp;
+  const isAd = Boolean(item?.is_ad || item?.is_sponsored);
+  const blippId = item?.blipp_id || item?.id;
+  const creatorId = item?.creator?.id || item?.creator_id || item?.authorId;
+  const creatorDisplayName =
+    item?.creator?.display_name ||
+    item?.creator?.username ||
+    item?.author ||
+    'Creator';
+
+  // ── Engagement States (Save / Follow) ───────────────────────────────────────
+  const [isSaved, setIsSaved] = useState(Boolean(item?.is_saved));
+  const [isSaveLoading, setIsSaveLoading] = useState(false);
+
+  useEffect(() => {
+    setIsSaved(Boolean(item?.is_saved));
+  }, [item?.is_saved]);
+
+  const handleSaveToggle = async () => {
+    if (!blippId || isSaveLoading) return;
+    setIsSaveLoading(true);
+    const nextState = !isSaved;
+    setIsSaved(nextState);
+    try {
+      if (nextState) {
+        await api.saveBlipp(blippId);
+      } else {
+        await api.unsaveBlipp(blippId);
+      }
+    } catch {
+      setIsSaved(!nextState);
+    } finally {
+      setIsSaveLoading(false);
+    }
+  };
+
+  const [isFollowing, setIsFollowing] = useState(Boolean(item?.is_following));
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
+
+  useEffect(() => {
+    setIsFollowing(Boolean(item?.is_following));
+  }, [item?.is_following]);
+
+  const handleFollowToggle = async () => {
+    if (!creatorId || isFollowLoading) return;
+    setIsFollowLoading(true);
+    const nextState = !isFollowing;
+    setIsFollowing(nextState);
+    try {
+      if (nextState) {
+        await api.followUser(creatorId);
+      } else {
+        await api.unfollowUser(creatorId);
+      }
+    } catch {
+      setIsFollowing(!nextState);
+    } finally {
+      setIsFollowLoading(false);
+    }
+  };
 
   // ── §6.4 Speculative prefetch ──────────────────────────────────────────────
   // Pre-download the next 2–3 upcoming audio tracks so playback starts instantly.
@@ -86,7 +146,6 @@ export function AudioReel({
     activeIndex,
     enabled: isActive,
   });
-  const blippId = item?.blipp_id || item?.id;
   const localUri = blippId ? getCachedUri(blippId) : null;
 
   // ── Audio player ───────────────────────────────────────────────────────────
@@ -101,13 +160,18 @@ export function AudioReel({
 
   // ── Engagement telemetry ───────────────────────────────────────────────────
   // Emits periodic 5s play_progress, terminal play_complete (>=90%), and skip on navigate.
-  useEngagementTelemetry({
+  const { dispatchLike } = useEngagementTelemetry({
     item,
     isPlaying,
     positionSeconds,
     durationSeconds,
     isActive,
   });
+
+  const handleLike = async () => {
+    onLike();
+    await dispatchLike();
+  };
 
   // ── Animated waveform ──────────────────────────────────────────────────────
   // 36 bars animated in a staggered loop while isPlaying; decay to rest when paused.
@@ -174,9 +238,9 @@ export function AudioReel({
             </View>
           )}
 
-          {item?.is_sponsored && (
-            <View style={styles.sponsoredBadge}>
-              <Text style={styles.sponsoredBadgeText}>Sponsored Broadcast</Text>
+          {isAd && (
+            <View style={styles.sponsoredBadge} testID="sponsored-pill-badge">
+              <Text style={styles.sponsoredBadgeText}>Sponsored</Text>
             </View>
           )}
         </View>
@@ -188,11 +252,34 @@ export function AudioReel({
 
         {/* Creator Attribution */}
         <View style={styles.authorRow}>
-          <Text style={styles.author}>{item?.author}</Text>
+          <Text style={styles.author}>{creatorDisplayName}</Text>
           {item?.sponsor?.tagline && (
             <Text style={styles.sponsorTagline} numberOfLines={1}>
               · {item.sponsor.tagline}
             </Text>
+          )}
+          {!isAd && creatorId && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.followBtn,
+                isFollowing && styles.followingBtn,
+                pressed && styles.actionBtnPressed,
+              ]}
+              onPress={handleFollowToggle}
+              disabled={isFollowLoading}
+              accessibilityRole="button"
+              accessibilityLabel={isFollowing ? 'Unfollow creator' : 'Follow creator'}
+              testID="follow-creator-button"
+            >
+              <Text
+                style={[
+                  styles.followBtnText,
+                  isFollowing && styles.followingBtnText,
+                ]}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </Pressable>
           )}
         </View>
 
@@ -260,14 +347,43 @@ export function AudioReel({
             </Text>
           </View>
 
+          {/* Save / Bookmark Button */}
           <Pressable
             style={({ pressed }) => [
-              styles.likeBtn,
-              pressed && styles.likeBtnPressed,
+              styles.actionBtn,
+              pressed && styles.actionBtnPressed,
             ]}
-            onPress={onLike}
+            onPress={handleSaveToggle}
+            disabled={isSaveLoading}
+            accessibilityRole="button"
+            accessibilityLabel={isSaved ? 'Remove from saved' : 'Save blipp'}
+            testID="save-blipp-button"
+          >
+            <BookmarkMark
+              size={20}
+              color={isSaved ? PALETTE.accent : PALETTE.textSecondary}
+              filled={isSaved}
+            />
+            <Text
+              style={[
+                styles.actionBtnText,
+                isSaved && styles.actionBtnTextActive,
+              ]}
+            >
+              {isSaved ? 'Saved' : 'Save'}
+            </Text>
+          </Pressable>
+
+          {/* Like Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              pressed && styles.actionBtnPressed,
+            ]}
+            onPress={handleLike}
             accessibilityRole="button"
             accessibilityLabel={item?.isLiked ? 'Unlike audio' : 'Like audio'}
+            testID="like-blipp-button"
           >
             <HeartMark
               size={20}
@@ -276,8 +392,8 @@ export function AudioReel({
             />
             <Text
               style={[
-                styles.likeCount,
-                item?.isLiked && styles.likeCountActive,
+                styles.actionBtnText,
+                item?.isLiked && styles.actionBtnTextActive,
               ]}
             >
               {formatListens(item?.likeCount || 0)}
@@ -393,6 +509,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: PALETTE.textSecondary,
   },
+  followBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: PALETTE.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+    minHeight: 28,
+  },
+  followingBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  followBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: '#ffffff',
+  },
+  followingBtnText: {
+    color: PALETTE.textSecondary,
+  },
   sponsorTagline: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
@@ -476,6 +615,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: PALETTE.textMuted,
     fontVariant: ['tabular-nums'],
+  },
+  actionBtn: {
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  actionBtnPressed: {
+    opacity: 0.7,
+  },
+  actionBtnText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 11,
+    color: PALETTE.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  actionBtnTextActive: {
+    color: PALETTE.accent,
   },
   likeBtn: {
     alignItems: 'center',

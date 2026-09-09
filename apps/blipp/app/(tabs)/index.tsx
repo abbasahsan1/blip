@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioReel } from '@/components/audio/AudioReel';
+import { StoriesTray } from '@/components/stories/StoriesTray';
 import { AcousticDeckMark } from '@/components/common/Icons';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { useSessionStore } from '@/lib/store/sessionStore';
@@ -73,29 +74,32 @@ export default function FeedScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Studio Header Bar */}
+      {/* Studio Header Bar & Stories Tray */}
       <View
         style={[
-          styles.header,
+          styles.headerContainer,
           { paddingTop: insets.top + 10 },
         ]}
       >
-        <Text style={styles.headerLogo}>blipp</Text>
-        <View style={styles.sortChips}>
-          {SORTS.map((s) => (
-            <Pressable
-              key={s.value}
-              style={[styles.chip, sort === s.value && styles.chipActive]}
-              onPress={() => setSort(s.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: sort === s.value }}
-            >
-              <Text style={[styles.chipText, sort === s.value && styles.chipTextActive]}>
-                {s.label}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={styles.header}>
+          <Text style={styles.headerLogo}>blipp</Text>
+          <View style={styles.sortChips}>
+            {SORTS.map((s) => (
+              <Pressable
+                key={s.value}
+                style={[styles.chip, sort === s.value && styles.chipActive]}
+                onPress={() => setSort(s.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sort === s.value }}
+              >
+                <Text style={[styles.chipText, sort === s.value && styles.chipTextActive]}>
+                  {s.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
+        <StoriesTray />
       </View>
 
       {/* Structured Acoustic Loading Skeletons */}
@@ -162,20 +166,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PALETTE.bg,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingBottom: 14,
-    backgroundColor: PALETTE.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: PALETTE.borderSubtle,
+  headerContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     zIndex: 10,
+    backgroundColor: PALETTE.bg,
+    borderBottomWidth: 1,
+    borderBottomColor: PALETTE.borderSubtle,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 10,
   },
   headerLogo: {
     fontFamily: 'Sora_700Bold',

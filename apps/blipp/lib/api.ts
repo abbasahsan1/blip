@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSessionStore } from './store/sessionStore';
-import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
+import type { AuthTokens, PlaybackTelemetryPayload, User, BlippItem, StoryItem } from './types';
 
 // ─── Platform Error Envelope ───────────────────────────────────────────────────
 
@@ -87,6 +87,17 @@ export const getSocialGraphUrl = (): string => {
   return base;
 };
 
+export const getMessagingUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_MESSAGING_URL) {
+    return process.env.EXPO_PUBLIC_MESSAGING_URL.replace(/\/+$/, '');
+  }
+  const base = getApiBaseUrl();
+  if (base.includes(':8000')) {
+    return base.replace(':8000', ':8004');
+  }
+  return base;
+};
+
 export const getMinioPublicUrl = (): string => {
   if (process.env.EXPO_PUBLIC_MINIO_URL) {
     return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
@@ -165,7 +176,10 @@ export async function requestRaw<T = any>(
     normalizedPath === '/v1/uploads' ||
     normalizedPath.startsWith('/v1/uploads/') ||
     normalizedPath === '/uploads' ||
-    normalizedPath.startsWith('/uploads/')
+    normalizedPath.startsWith('/uploads/') ||
+    normalizedPath === '/v1/blipps/saved' ||
+    normalizedPath === '/blipps/saved' ||
+    normalizedPath.endsWith('/save')
   ) {
     baseUrl = getContentIngestUrl();
   } else if (
@@ -188,6 +202,17 @@ export async function requestRaw<T = any>(
     normalizedPath.startsWith('/social/')
   ) {
     baseUrl = getSocialGraphUrl();
+  } else if (
+    normalizedPath === '/v1/messages' ||
+    normalizedPath.startsWith('/v1/messages/') ||
+    normalizedPath === '/v1/stories' ||
+    normalizedPath.startsWith('/v1/stories/') ||
+    normalizedPath === '/messages' ||
+    normalizedPath.startsWith('/messages/') ||
+    normalizedPath === '/stories' ||
+    normalizedPath.startsWith('/stories/')
+  ) {
+    baseUrl = getMessagingUrl();
   }
 
   if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
@@ -244,6 +269,41 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
 // ─── Centralized API Client (Axios-like verbs returning { data, status, headers }) ──
 
+// ─── Typed Social, Saves, and Stories API Methods (§5.3, §5.4, §6.7) ───────────
+
+export async function followUser(userId: string): Promise<void> {
+  await requestRaw<void>(`/v1/social/follow/${userId}`, { method: 'POST' });
+}
+
+export async function unfollowUser(userId: string): Promise<void> {
+  await requestRaw<void>(`/v1/social/follow/${userId}`, { method: 'DELETE' });
+}
+
+export async function saveBlipp(blippId: string): Promise<void> {
+  await requestRaw<void>(`/v1/blipps/${blippId}/save`, { method: 'POST' });
+}
+
+export async function unsaveBlipp(blippId: string): Promise<void> {
+  await requestRaw<void>(`/v1/blipps/${blippId}/save`, { method: 'DELETE' });
+}
+
+export async function getSavedBlipps(): Promise<BlippItem[]> {
+  const res = await requestRaw<{ items: BlippItem[] } | BlippItem[]>('/v1/blipps/saved', { method: 'GET' });
+  if (Array.isArray(res.data)) return res.data;
+  return (res.data as any)?.items || [];
+}
+
+export async function getStories(): Promise<StoryItem[]> {
+  const res = await requestRaw<StoryItem[] | { items: StoryItem[] }>('/v1/stories', { method: 'GET' });
+  if (Array.isArray(res.data)) return res.data;
+  if (res.data && Array.isArray((res.data as any).items)) return (res.data as any).items;
+  return [];
+}
+
+export async function uploadStory(formData: FormData): Promise<void> {
+  await requestRaw<void>('/v1/stories', { method: 'POST', body: formData });
+}
+
 export const api = {
   get: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
     requestRaw<T>(path, { ...options, method: 'GET' }),
@@ -256,6 +316,14 @@ export const api = {
 
   delete: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
+
+  followUser,
+  unfollowUser,
+  saveBlipp,
+  unsaveBlipp,
+  getSavedBlipps,
+  getStories,
+  uploadStory,
 };
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
@@ -479,6 +547,31 @@ export interface FeedResponseItem {
   username?: string;
   display_name?: string;
   avatar_url?: string;
+  listens_count?: number;
+  listenCount?: number;
+  likes_count?: number;
+  likeCount?: number;
+  isLiked?: boolean;
+  is_liked?: boolean;
+  is_ad?: boolean;
+  is_sponsored?: boolean;
+  is_saved?: boolean;
+  is_following?: boolean;
+  creator?: {
+    id: string;
+    handle: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+  sponsor?: {
+    brand_name: string;
+    cta_text: string;
+    cta_url: string;
+    tagline: string;
+  };
+  tags?: string[];
+  sourceName?: string;
+  created_at?: string;
 }
 
 export interface FeedResponse {
