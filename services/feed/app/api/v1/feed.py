@@ -3,9 +3,10 @@ import json
 import uuid
 import logging
 import mimetypes
+from datetime import datetime, timezone
 from typing import Optional, List
 import httpx
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import FileResponse
 
 from blipp_common.config import settings
@@ -13,6 +14,7 @@ from blipp_common.security import get_optional_current_user, AuthenticatedUser
 from blipp_common.database import get_db_pool
 from blipp_common.storage import storage_service
 from blipp_common.exceptions import AppException
+from blipp_common.pagination import decode_cursor, encode_cursor
 from blipp_common.redis import get_redis_client
 from app.models.schemas import FeedResponse, FeedItemResponse
 
@@ -24,6 +26,7 @@ router = APIRouter(tags=["Audio Reels Feed"])
 @router.get("", response_model=FeedResponse)
 @router.get("/", response_model=FeedResponse)
 async def get_feed(
+    cursor: Optional[str] = Query(None, description="Cursor for feed pagination"),
     current_user: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
 ):
     """
@@ -261,7 +264,13 @@ async def get_feed(
                 )
             )
 
-    return FeedResponse(items=final_feed_items, next_cursor=None)
+    next_cursor = None
+    if items:
+        last_item = items[-1]
+        now_dt = datetime.now(timezone.utc)
+        next_cursor = encode_cursor(now_dt, str(last_item.blipp_id))
+
+    return FeedResponse(items=final_feed_items, next_cursor=next_cursor)
 
 
 @router.api_route("/audio/{filename:path}", methods=["GET", "HEAD"])

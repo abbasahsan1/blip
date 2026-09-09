@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from blipp_common.database import get_db_pool
 from blipp_common.exceptions import AppException
+from blipp_common.pagination import decode_cursor, encode_cursor
 from blipp_common.security import AuthenticatedUser, get_current_user
 from app.models.moderation import (
     CreateReportRequest,
@@ -77,6 +78,7 @@ async def list_reports(
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by report status ('open', 'reviewed', 'actioned', 'dismissed')"),
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
+    cursor: Optional[str] = Query(None, description="Cursor for keyset pagination"),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
@@ -97,36 +99,74 @@ async def list_reports(
             message=f"Status filter must be one of: {sorted(list(REPORT_STATUSES))}",
         )
 
+    cursor_dt = None
+    if cursor:
+        decoded = decode_cursor(cursor)
+        if decoded:
+            cursor_dt, _ = decoded
+        else:
+            try:
+                cursor_dt = datetime.fromisoformat(cursor)
+            except ValueError:
+                pass
+
     async with pool.acquire() as conn:
         if status_filter:
             total = await conn.fetchval(
                 "SELECT COUNT(*) FROM reports WHERE status = $1",
                 status_filter.lower(),
             )
-            rows = await conn.fetch(
-                """
-                SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
-                FROM reports
-                WHERE status = $1
-                ORDER BY created_at DESC
-                LIMIT $2 OFFSET $3
-                """,
-                status_filter.lower(),
-                limit,
-                offset,
-            )
+            if cursor_dt:
+                rows = await conn.fetch(
+                    """
+                    SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
+                    FROM reports
+                    WHERE status = $1 AND created_at < $2
+                    ORDER BY created_at DESC
+                    LIMIT $3
+                    """,
+                    status_filter.lower(),
+                    cursor_dt,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
+                    FROM reports
+                    WHERE status = $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    status_filter.lower(),
+                    limit,
+                    offset,
+                )
         else:
             total = await conn.fetchval("SELECT COUNT(*) FROM reports")
-            rows = await conn.fetch(
-                """
-                SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
-                FROM reports
-                ORDER BY created_at DESC
-                LIMIT $1 OFFSET $2
-                """,
-                limit,
-                offset,
-            )
+            if cursor_dt:
+                rows = await conn.fetch(
+                    """
+                    SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
+                    FROM reports
+                    WHERE created_at < $1
+                    ORDER BY created_at DESC
+                    LIMIT $2
+                    """,
+                    cursor_dt,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT report_id, reporter_id, blipp_id, creator_id, reason, status, created_at
+                    FROM reports
+                    ORDER BY created_at DESC
+                    LIMIT $1 OFFSET $2
+                    """,
+                    limit,
+                    offset,
+                )
 
     items = [
         ReportResponse(
@@ -141,9 +181,17 @@ async def list_reports(
         for r in rows
     ]
 
+    next_cursor = (
+        encode_cursor(rows[-1]["created_at"], str(rows[-1]["report_id"]))
+        if (rows and rows[-1]["created_at"] and len(rows) == limit)
+        else None
+    )
+
     return ReportsListResponse(
         items=items,
         total=total or 0,
         limit=limit,
         offset=offset,
+        next_cursor=next_cursor,
     )
+

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from blipp_common.database import get_db_pool
 from blipp_common.exceptions import AppException
+from blipp_common.pagination import decode_cursor, encode_cursor
 from blipp_common.security import AuthenticatedUser, get_current_user
 from app.models.messaging import (
     DMMessageResponse,
@@ -310,14 +311,18 @@ async def get_thread_messages(
 
         fetch_limit = limit + 1
         if cursor:
-            try:
-                cursor_dt = datetime.fromisoformat(cursor)
-            except ValueError:
-                raise AppException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    code="INVALID_CURSOR",
-                    message="Cursor must be a valid ISO 8601 datetime string",
-                )
+            decoded = decode_cursor(cursor)
+            if decoded:
+                cursor_dt, _ = decoded
+            else:
+                try:
+                    cursor_dt = datetime.fromisoformat(cursor)
+                except ValueError:
+                    raise AppException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="INVALID_CURSOR",
+                        message="Cursor must be a valid cursor string",
+                    )
             rows = await conn.fetch(
                 """
                 SELECT message_id, thread_id, sender_id, message_type, blipp_id, body, created_at
@@ -359,7 +364,11 @@ async def get_thread_messages(
             for r in items_rows
         ]
 
-        next_cursor = items[-1].created_at.isoformat() if (has_more and items) else None
+        next_cursor = (
+            encode_cursor(items[-1].created_at, str(items[-1].message_id))
+            if (has_more and items)
+            else None
+        )
 
         return MessageListResponse(
             items=items,

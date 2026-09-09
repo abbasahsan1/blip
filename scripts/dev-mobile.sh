@@ -121,4 +121,4 @@ if command -v fuser >/dev/null 2>&1; then
 fi
 
 cd "${APP_DIR}"
-exec npx expo start --clear "$@"
+exec npx expo start --offline --clear "$@"

@@ -33,6 +33,7 @@ function formatTimeAgo(isoString?: string | null): string {
 export default function MessagesInboxScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const accessToken = useSessionStore((s) => s.accessToken);
   const currentUserId = useSessionStore((s) => s.user?.id);
 
   const [threads, setThreads] = useState<DMThreadItem[]>([]);
@@ -51,20 +52,30 @@ export default function MessagesInboxScreen() {
   const [isSearching, setIsSearching] = useState(false);
 
   const loadThreads = useCallback(async () => {
+    if (!accessToken) {
+      setThreads([]);
+      return;
+    }
     try {
       const data = await api.getThreads(50, 0);
       setThreads(data || []);
     } catch {
       setThreads([]);
     }
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
+    if (!accessToken) {
+      setIsLoading(false);
+      setThreads([]);
+      return;
+    }
     setIsLoading(true);
     void loadThreads().finally(() => setIsLoading(false));
-  }, [loadThreads]);
+  }, [accessToken, loadThreads]);
 
   const onRefresh = async () => {
+    if (!accessToken) return;
     setIsRefreshing(true);
     await loadThreads();
     setIsRefreshing(false);
@@ -186,6 +197,45 @@ export default function MessagesInboxScreen() {
       </Pressable>
     );
   };
+
+  if (!accessToken) {
+    return (
+      <View style={styles.root}>
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          <View style={styles.headerLeft}>
+            <Pressable
+              style={({ pressed }) => [styles.backBtn, pressed && styles.btnPressed]}
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Text style={styles.backBtnText}>←</Text>
+            </Pressable>
+            <Text style={styles.headerTitle}>Messages</Text>
+          </View>
+        </View>
+
+        <View style={styles.authGuardContainer}>
+          <View style={styles.authGuardIconWrap}>
+            <ShareMark size={40} color={PALETTE.accent} />
+          </View>
+          <Text style={styles.authGuardTitle}>Sign in to view your conversations</Text>
+          <Text style={styles.authGuardSub}>
+            Connect with creators, discuss audio stories, and share Blipps in private threads.
+          </Text>
+          <Pressable
+            style={({ pressed }) => [styles.authGuardBtn, pressed && styles.btnPressed]}
+            onPress={() => router.push('/(auth)/sign-in' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
+            testID="messages-signin-button"
+          >
+            <Text style={styles.authGuardBtnText}>Sign In</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -600,5 +650,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: PALETTE.textMuted,
     textAlign: 'center',
+  },
+  // Auth Guard
+  authGuardContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  authGuardIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: PALETTE.surface,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  authGuardTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 20,
+    color: PALETTE.text,
+    textAlign: 'center',
+  },
+  authGuardSub: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 14,
+    color: PALETTE.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 290,
+    marginBottom: 12,
+  },
+  authGuardBtn: {
+    backgroundColor: PALETTE.accent,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 160,
+  },
+  authGuardBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 15,
+    color: '#ffffff',
   },
 });

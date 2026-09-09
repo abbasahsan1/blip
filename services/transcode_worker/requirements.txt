@@ -1,3 +1,1 @@
--e ../../libs/common
-SQLAlchemy>=2.0.0
-pydantic-settings>=2.7.0
+# Dependencies inherited from /libs/common

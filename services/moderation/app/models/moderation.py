@@ -83,6 +83,7 @@ class ReportsListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    next_cursor: Optional[str] = None
 
 
 class ActionReportRequest(BaseModel):

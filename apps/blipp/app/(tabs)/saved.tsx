@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PALETTE } from '@/lib/palette';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/components/common/Icons';
 import { AudioReel } from '@/components/audio/AudioReel';
 import { api, resolvePublicAudioUrl } from '@/lib/api';
+import { useSessionStore } from '@/lib/store/sessionStore';
 import type { BlippItem } from '@/lib/types';
 
 function formatDuration(secs: number): string {
@@ -27,6 +29,9 @@ function formatDuration(secs: number): string {
 
 export default function SavedScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const accessToken = useSessionStore((s) => s.accessToken);
+
   const [items, setItems] = useState<BlippItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -39,20 +44,30 @@ export default function SavedScreen() {
   const [activeReelItem, setActiveReelItem] = useState<BlippItem | null>(null);
 
   const loadSaved = useCallback(async () => {
+    if (!accessToken) {
+      setItems([]);
+      return;
+    }
     try {
       const saved = await api.getSavedBlipps();
       setItems(saved || []);
     } catch {
       setItems([]);
     }
-  }, []);
+  }, [accessToken]);
 
   useEffect(() => {
+    if (!accessToken) {
+      setIsLoading(false);
+      setItems([]);
+      return;
+    }
     setIsLoading(true);
     void loadSaved().finally(() => setIsLoading(false));
-  }, [loadSaved]);
+  }, [accessToken, loadSaved]);
 
   const onRefresh = async () => {
+    if (!accessToken) return;
     setIsRefreshing(true);
     await loadSaved();
     setIsRefreshing(false);
@@ -198,6 +213,40 @@ export default function SavedScreen() {
     );
   };
 
+  if (!accessToken) {
+    return (
+      <View style={styles.root}>
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          <Text style={styles.headerTitle}>Saved</Text>
+          <Text style={styles.headerSubtitle}>
+            Archived audio broadcasts & saved moments
+          </Text>
+        </View>
+        <View style={styles.authGuardContainer}>
+          <View style={styles.authGuardIconCircle}>
+            <BookmarkMark size={42} color={PALETTE.accent} filled />
+          </View>
+          <Text style={styles.authGuardHeading}>Sign in to view saved Blipps</Text>
+          <Text style={styles.authGuardSubtext}>
+            Log in to your account to view bookmarked audio broadcasts and stream saved highlights.
+          </Text>
+          <Pressable
+            style={({ pressed }) => [
+              styles.authGuardBtn,
+              pressed && styles.authGuardBtnPressed,
+            ]}
+            onPress={() => router.push('/(auth)/sign-in' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in to view saved Blipps"
+            testID="saved-signin-button"
+          >
+            <Text style={styles.authGuardBtnText}>Sign In</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {/* Studio Header Bar */}
@@ -274,11 +323,11 @@ export default function SavedScreen() {
 
             <View style={styles.modalReelContainer}>
               <AudioReel
-                item={activeReelItem}
+                item={activeReelItem as any}
                 isActive={true}
                 height={600}
                 onLike={() => {}}
-                feedItems={[activeReelItem]}
+                feedItems={activeReelItem ? [activeReelItem as any] : []}
                 activeIndex={0}
               />
             </View>
@@ -507,5 +556,56 @@ const styles = StyleSheet.create({
   modalReelContainer: {
     flex: 1,
     justifyContent: 'center',
+  },
+  // Auth Guard
+  authGuardContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  authGuardIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: PALETTE.surface,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  authGuardHeading: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 20,
+    color: PALETTE.text,
+    textAlign: 'center',
+  },
+  authGuardSubtext: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 14,
+    color: PALETTE.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 290,
+    marginBottom: 12,
+  },
+  authGuardBtn: {
+    backgroundColor: PALETTE.accent,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 160,
+  },
+  authGuardBtnPressed: {
+    opacity: 0.85,
+  },
+  authGuardBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 15,
+    color: '#ffffff',
   },
 });
