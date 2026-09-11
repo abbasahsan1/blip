@@ -112,7 +112,7 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 tier_file = variants_local[tier]
                 variant_key = f"{upload_id}/{tier}.m4a"
                 variant_url = await storage_manager.upload_file(
-                    file_path=tier_file,
+                    data=tier_file,
                     storage_key=variant_key,
                     content_type="audio/mp4",
                 )
