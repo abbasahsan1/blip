@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import FileResponse
 
 from blipp_common.config import settings
-from blipp_common.security import get_optional_current_user, AuthenticatedUser
+from blipp_common.security import get_current_user, AuthenticatedUser
 from blipp_common.database import get_db_pool
 from blipp_common.storage import storage_service
 from blipp_common.exceptions import AppException
@@ -27,17 +27,19 @@ router = APIRouter(tags=["Audio Reels Feed"])
 @router.get("/", response_model=FeedResponse)
 async def get_feed(
     cursor: Optional[str] = Query(None, description="Cursor for feed pagination"),
-    current_user: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
+    limit: int = Query(10, ge=1, le=20),
+    current_user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
     Section 6.4: Multi-stage ranked feed orchestration:
     - Stage 1 (Cache): Query Redis for pre-computed candidate array tied to user.
-    - Stage 2 (RecSys Fetch): On cache miss, query Gorse REST API for recommendations & cache in Redis with 5-minute TTL.
+    - Stage 2 (RecSys Fetch): On cache miss, query Gorse REST API for recommendations & cache in Redis with 60s TTL.
     - Stage 3 (Hydration): Query PostgreSQL to resolve candidate IDs into media entities, preserving exact ranking order.
-    - Stage 4 (Cold-Start Injection): Query PostgreSQL for recent blipps with < 50 listens, interleaving into feed response.
+    - Stage 4 (Cold-Start Injection): Query PostgreSQL for recent blipps (<24h old), interleaving into feed response.
     """
-    user_id_str = str(current_user.user_id) if current_user else "anonymous"
-    cache_key = f"feed:{user_id_str}"
+    import random
+    user_id_str = str(current_user.user_id)
+    cache_key = f"feed:user:{user_id_str}"
     candidate_ids: List[str] = []
 
     # ─── Stage 1: Redis Candidate Cache ─────────────────────────────────────
@@ -53,7 +55,7 @@ async def get_feed(
     # ─── Stage 2: RecSys Fetch (Gorse) on Cache Miss ────────────────────────
     if not candidate_ids:
         try:
-            gorse_url = f"{settings.GORSE_API_URL.rstrip('/')}/api/recommend/{user_id_str}?n=20"
+            gorse_url = f"{settings.GORSE_API_URL.rstrip('/')}/api/recommend/{user_id_str}?n=30"
             headers = {}
             if settings.GORSE_API_KEY:
                 headers["X-API-Key"] = settings.GORSE_API_KEY
@@ -70,11 +72,11 @@ async def get_feed(
                                 candidate_ids.append(item["Id"])
                         logger.debug(f"Fetched {len(candidate_ids)} recommendations from Gorse for {user_id_str}")
 
-            # Cache in Redis with 5-minute (300s) TTL
+            # Cache in Redis with 60-second TTL
             if candidate_ids:
                 try:
                     redis_client = await get_redis_client()
-                    await redis_client.set(cache_key, json.dumps(candidate_ids), ex=300)
+                    await redis_client.set(cache_key, json.dumps(candidate_ids), ex=60)
                 except Exception as cache_err:
                     logger.warning(f"Failed to cache candidate IDs in Redis: {cache_err}")
 
@@ -123,10 +125,10 @@ async def get_feed(
                 hydrated_rows = list(rows)
                 seen_blipp_ids = {r["blipp_id"] for r in hydrated_rows}
 
-            # If Gorse had no recommendations or fewer than 20 items,
+            # If Gorse had no recommendations or fewer than limit,
             # supplement with latest published blipps:
-            if len(hydrated_rows) < 20:
-                needed = 20 - len(hydrated_rows)
+            if len(hydrated_rows) < limit:
+                needed = limit - len(hydrated_rows)
                 fallback_rows = await conn.fetch(
                     """
                     SELECT 
@@ -147,7 +149,7 @@ async def get_feed(
                     ORDER BY b.created_at DESC
                     LIMIT $2;
                     """,
-                    list(seen_blipp_ids),
+                    list(seen_blipp_ids) if seen_blipp_ids else [],
                     needed,
                 )
                 for fr in fallback_rows:
@@ -155,7 +157,7 @@ async def get_feed(
                     seen_blipp_ids.add(fr["blipp_id"])
 
             # ─── Stage 4: Cold-Start Exploration Injection ──────────────────
-            # Retrieve up to 2 recent published blipps that have < 50 total listens
+            # Retrieve up to 3 newly published blipps (<24h old, lowest play counts) randomly
             cold_start_rows = await conn.fetch(
                 """
                 SELECT 
@@ -172,31 +174,28 @@ async def get_feed(
                 FROM blipps b
                 LEFT JOIN users_profile u ON b.creator_id = u.user_id
                 WHERE b.status = 'published'
+                  AND b.created_at >= NOW() - INTERVAL '24 hours'
                   AND NOT (b.blipp_id = ANY($1::uuid[]))
-                  AND (
+                ORDER BY (
                       SELECT COUNT(*)
                       FROM listening_session_agg lsa
                       WHERE lsa.blipp_id = b.blipp_id
-                  ) < 50
-                ORDER BY b.created_at DESC
-                LIMIT 2;
+                  ) ASC
+                LIMIT 3;
                 """,
-                list(seen_blipp_ids),
+                list(seen_blipp_ids) if seen_blipp_ids else [],
             )
 
     except Exception as e:
         logger.exception(f"Error hydrating feed from database: {e}")
-        return FeedResponse(items=[], next_cursor=None)
+        return FeedResponse(items=[], next_cursor=None, has_more=False)
 
-    # Interleave cold-start items into the ranked feed (at index 1 and index 4)
-    final_rows = list(hydrated_rows)
+    # Interleave cold-start items randomly into the candidate slice
+    final_rows = list(hydrated_rows)[:limit]
     cold_items = list(cold_start_rows)
-    if cold_items:
-        insert_idx_1 = min(1, len(final_rows))
-        final_rows.insert(insert_idx_1, cold_items[0])
-        if len(cold_items) > 1:
-            insert_idx_2 = min(4, len(final_rows))
-            final_rows.insert(insert_idx_2, cold_items[1])
+    for cold_item in cold_items:
+        insert_idx = random.randint(0, len(final_rows))
+        final_rows.insert(insert_idx, cold_item)
 
     # Transform to FeedItemResponse with presigned playback URLs
     items = []
@@ -212,10 +211,10 @@ async def get_feed(
 
         items.append(
             FeedItemResponse(
+                item_type="blipp",
                 id=str(r["blipp_id"]),
                 blipp_id=r["blipp_id"],
                 creator_id=r["creator_id"],
-                is_ad=False,
                 title=r["title"],
                 description=r["description"],
                 audio_url=playback_url,
@@ -242,9 +241,10 @@ async def get_feed(
             ad_id = f"ad-{uuid.uuid4()}"
             final_feed_items.append(
                 FeedItemResponse(
+                    item_type="ad",
                     id=ad_id,
                     blipp_id=ad_id,
-                    is_ad=True,
+                    provider="internal",
                     title="Sponsored Announcement",
                     description="Featured partner broadcast",
                     audio_url="https://cdn.blipps.internal/ads/sample-ad.aac",
@@ -270,7 +270,7 @@ async def get_feed(
         now_dt = datetime.now(timezone.utc)
         next_cursor = encode_cursor(now_dt, str(last_item.blipp_id))
 
-    return FeedResponse(items=final_feed_items, next_cursor=next_cursor)
+    return FeedResponse(items=final_feed_items, next_cursor=next_cursor, has_more=True)
 
 
 @router.api_route("/audio/{filename:path}", methods=["GET", "HEAD"])
