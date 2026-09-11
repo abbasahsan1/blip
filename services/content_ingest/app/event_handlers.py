@@ -42,12 +42,17 @@ async def handle_transcode_completed(data: Dict[str, Any]) -> None:
         logger.warning(f"Missing upload_id in transcode completed event: {data}")
         return
 
-    upload_id = uuid.UUID(upload_id_str)
-    creator_id_str = data.get("creator_id")
-    creator_id = uuid.UUID(creator_id_str) if creator_id_str else None
+    import uuid
+    try:
+        upload_id = uuid.UUID(str(upload_id_str))
+        creator_id_str = data.get("creator_id")
+        creator_id = uuid.UUID(str(creator_id_str)) if creator_id_str else None
 
-    blipp_id_str = data.get("blipp_id")
-    blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else uuid.uuid4()
+        blipp_id_str = data.get("blipp_id")
+        blipp_id = uuid.UUID(str(blipp_id_str)) if blipp_id_str else uuid.uuid4()
+    except (ValueError, TypeError):
+        logger.error(f"Invalid UUID in transcode completed event: {data}")
+        return
 
     title = data.get("title") or "Untitled Blipp"
     description = data.get("description")
@@ -171,7 +176,12 @@ async def handle_transcode_failed(data: Dict[str, Any]) -> None:
     upload_id_str = data.get("upload_id")
     if not upload_id_str:
         return
-    upload_id = uuid.UUID(upload_id_str)
+    import uuid
+    try:
+        upload_id = uuid.UUID(str(upload_id_str))
+    except (ValueError, TypeError):
+        logger.error(f"Invalid UUID in transcode failed event: {data}")
+        return
     pool = await get_db_pool()
     if pool:
         async with pool.acquire() as conn:
@@ -219,7 +229,7 @@ async def run_transcode_consumer() -> None:
                             await msg.ack()
                         except Exception as msg_err:
                             logger.exception(f"Error handling message on {msg.subject}: {msg_err}")
-                            await msg.ack()
+                            await msg.nak(delay=2.0)
                 except (nats.errors.TimeoutError, asyncio.TimeoutError):
                     continue
                 except asyncio.CancelledError:
@@ -400,7 +410,7 @@ async def run_takedown_consumer() -> None:
                             await msg.ack()
                         except Exception as msg_err:
                             logger.exception(f"Error handling message on {msg.subject}: {msg_err}")
-                            await msg.ack()
+                            await msg.nak(delay=2.0)
                 except (nats.errors.TimeoutError, asyncio.TimeoutError):
                     continue
                 except asyncio.CancelledError:

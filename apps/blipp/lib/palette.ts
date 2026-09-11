@@ -1,28 +1,28 @@
 export const PALETTE = {
   // Deep Obsidian Canvas & Surfaces (Tactile Audio-First Experience)
-  bg: '#0B0F19', // Deep Obsidian canvas
-  surface: '#1E2638', // Surface Slate
-  surfaceSubtle: '#1E1E1E',
-  card: '#1E2638', // Elevated dark module chassis
-  cardHover: '#2D3748',
-  cardGlass: 'rgba(30, 38, 56, 0.85)',
+  bg: '#090A0F', // Deep Obsidian canvas
+  surface: '#131825', // Surface Slate
+  surfaceSubtle: '#131825',
+  card: '#131825', // Elevated dark module chassis
+  cardHover: '#1E293B',
+  cardGlass: 'rgba(19, 24, 37, 0.85)',
 
   // Mechanical / Neon Borders
-  border: '#2D3748', // Dark slate groove border
-  borderSubtle: '#1E2638',
-  borderNeon: '#EA580C',
-  borderGlass: 'rgba(234, 88, 12, 0.25)',
+  border: '#1E293B', // Dark slate groove border
+  borderSubtle: '#131825',
+  borderNeon: '#FF6B00',
+  borderGlass: 'rgba(255, 107, 0, 0.25)',
 
   // High-Contrast Readout Typography
-  text: '#F9FAFB', // Pure White signal
-  textSecondary: '#9CA3AF', // Muted Silver readout
-  textMuted: '#6B7280', // Muted Slate acoustic low
-  primary: '#EA580C',
+  text: '#FFFFFF', // Pure White signal
+  textSecondary: '#94A3B8', // Muted Silver readout
+  textMuted: '#94A3B8', // Muted Slate acoustic low
+  primary: '#FF6B00',
 
   // Expressive Social & Frequency Accents
-  accent: '#EA580C', // Accent Orange
-  accentDim: 'rgba(234, 88, 12, 0.18)',
-  accentGlow: 'rgba(234, 88, 12, 0.35)',
+  accent: '#FF6B00', // Accent Orange
+  accentDim: 'rgba(255, 107, 0, 0.18)',
+  accentGlow: 'rgba(255, 107, 0, 0.35)',
 
   // Expressive Vibrant Tints
   magenta: '#F43F5E', // Electric Magenta (Bouncing Likes & Energy)

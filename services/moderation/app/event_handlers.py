@@ -27,6 +27,14 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
         logger.warning(f"Missing upload_id or blipp_id in copyright.cleared event: {data}")
         return
 
+    import uuid
+    try:
+        upload_id = str(uuid.UUID(str(upload_id)))
+        blipp_id = str(uuid.UUID(str(blipp_id)))
+    except (ValueError, TypeError):
+        logger.error(f"Invalid UUIDs in copyright.cleared event: {data}")
+        return
+
     logger.info(f"Processing copyright.cleared for upload {upload_id}, blipp {blipp_id}")
 
     try:
@@ -42,6 +50,9 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
             logger.info(f"Successfully updated status to published for upload {upload_id}")
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error calling content-ingest for upload {upload_id}: {e}. Response: {e.response.text}")
+        if e.response.status_code == 404:
+            # Raise exception so the message is not ACKed and can be retried
+            raise Exception("Race condition: blipp not found yet, triggering retry.")
     except httpx.RequestError as e:
         logger.error(f"Network error calling content-ingest for upload {upload_id}: {e}")
     except Exception as e:
