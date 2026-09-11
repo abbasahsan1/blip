@@ -120,28 +120,24 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
   try {
     const formData = new FormData();
 
-    if (Platform.OS === 'web') {
-      let blobToSend: Blob | null = null;
-      if (file instanceof Blob || file instanceof File) {
-        blobToSend = file;
-      } else if (webBlob instanceof Blob) {
-        blobToSend = webBlob;
-      } else if (fileUri) {
-        try {
-          const resp = await fetch(fileUri);
-          blobToSend = await resp.blob();
-        } catch (fetchErr) {
-          console.warn('Failed to fetch file URI into Blob on Web:', fetchErr);
-        }
+    let blobToSend: Blob | null = null;
+    if (file instanceof Blob || file instanceof File) {
+      blobToSend = file;
+    } else if (webBlob instanceof Blob) {
+      blobToSend = webBlob;
+    } else if (fileUri) {
+      try {
+        const resp = await fetch(fileUri);
+        blobToSend = await resp.blob();
+      } catch (fetchErr) {
+        console.warn('Failed to fetch file URI into Blob:', fetchErr);
       }
+    }
 
-      if (blobToSend) {
-        formData.append('file', blobToSend, fileName);
-      } else {
-        throw new Error('Could not convert audio file to a binary Blob for web upload.');
-      }
+    if (blobToSend) {
+      formData.append('file', blobToSend, fileName);
     } else {
-      // Mobile (iOS/Android): Retain { uri, name, type } notation
+      // Fallback (might fail on worklets but required if blob fetch fails)
       formData.append('file', {
         uri: fileUri,
         name: fileName,
