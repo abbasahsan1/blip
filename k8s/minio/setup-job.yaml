@@ -61,10 +61,10 @@ spec:
               mc mb --ignore-existing localminio/blipp-stories
               mc mb --ignore-existing localminio/blipp-uploads
               mc mb --ignore-existing localminio/blipp-variants
-              echo "Configuring public download policy on blipp-audio-variants, blipp-variants, & blipp-stories..."
+              echo "Configuring public download policy on blipp-audio-variants..."
               mc anonymous set download localminio/blipp-audio-variants
-              mc anonymous set download localminio/blipp-variants
-              mc anonymous set download localminio/blipp-stories
+              echo "Enforcing strictly private policy for raw uploads..."
+              mc anonymous set none localminio/blipp-raw-uploads
               echo "Listing buckets:"
               mc ls localminio
               echo "MinIO bucket initialization complete!"
