@@ -401,48 +401,59 @@ async def update_upload_status(
     now_utc = datetime.now(timezone.utc)
     
     async with pool.acquire() as conn:
-        # Check if the blipp exists using parent_upload_id
-        row = await conn.fetchrow(
-            """
-            UPDATE blipps
-            SET status = $1
-            WHERE parent_upload_id = $2
-            RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
-            """,
-            req.status,
-            upload_id
-        )
+        try:
+            async with conn.transaction():
+                # Check if the blipp exists using parent_upload_id
+                row = await conn.fetchrow(
+                    """
+                    UPDATE blipps
+                    SET status = $1
+                    WHERE parent_upload_id = $2
+                    RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
+                    """,
+                    req.status,
+                    upload_id
+                )
 
-        if not row:
-            # Fallback if parent_upload_id wasn't set but it matches blipp_id
-            row = await conn.fetchrow(
-                """
-                UPDATE blipps
-                SET status = $1
-                WHERE blipp_id = $2
-                RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
-                """,
-                req.status,
-                upload_id
-            )
+                if not row:
+                    # Fallback if parent_upload_id wasn't set but it matches blipp_id
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE blipps
+                        SET status = $1
+                        WHERE blipp_id = $2
+                        RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
+                        """,
+                        req.status,
+                        upload_id
+                    )
 
-        if not row:
+                if not row:
+                    raise AppException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        code="NOT_FOUND",
+                        message=f"Blipp for upload/id '{upload_id}' not found",
+                    )
+                    
+                if req.status == "published":
+                    await conn.execute(
+                        """
+                        UPDATE uploads
+                        SET processing_status = 'done'
+                        WHERE upload_id = $1
+                        """,
+                        upload_id
+                    )
+        except AppException:
+            raise
+        except Exception as e:
+            logger.exception(f"Database error during status update for upload {upload_id}: {e}")
             raise AppException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="NOT_FOUND",
-                message=f"Blipp for upload/id '{upload_id}' not found",
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="DATABASE_ERROR",
+                message="Failed to update blipp and upload status in the database"
             )
-            
-        if req.status == "published":
-            await conn.execute(
-                """
-                UPDATE uploads
-                SET processing_status = 'done'
-                WHERE upload_id = $1
-                """,
-                upload_id
-            )
-            
+
     if req.status == "published":
         try:
             await event_bus.publish(

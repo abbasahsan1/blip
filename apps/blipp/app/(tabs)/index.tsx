@@ -141,8 +141,8 @@ export default function FeedScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => refresh(userId)}
-              tintColor="#8B5CF6"
-              colors={['#8B5CF6']}
+              tintColor={PALETTE.primary}
+              colors={[PALETTE.primary]}
               progressViewOffset={insets.top + 60}
             />
           }
@@ -171,7 +171,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#07080B',
+    backgroundColor: PALETTE.bg,
   },
   headerContainer: {
     position: 'absolute',

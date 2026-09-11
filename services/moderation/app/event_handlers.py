@@ -31,7 +31,7 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
 
     try:
         # Internal K8s DNS for content-ingest service
-        ingest_url = f"http://content-ingest:8000/v1/uploads/{upload_id}/status"
+        ingest_url = f"http://content-ingest-service:8001/v1/uploads/{upload_id}/status"
         
         async with httpx.AsyncClient() as client:
             response = await client.patch(
@@ -40,8 +40,10 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
             )
             response.raise_for_status()
             logger.info(f"Successfully updated status to published for upload {upload_id}")
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error calling content-ingest for upload {upload_id}: {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error calling content-ingest for upload {upload_id}: {e}. Response: {e.response.text}")
+    except httpx.RequestError as e:
+        logger.error(f"Network error calling content-ingest for upload {upload_id}: {e}")
     except Exception as e:
         logger.error(f"Unexpected error calling content-ingest for upload {upload_id}: {e}")
 

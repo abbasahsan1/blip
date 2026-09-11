@@ -298,11 +298,10 @@ export default function UploadScreen() {
             </View>
             <View style={styles.progressInfo}>
               <Text style={styles.progressText} testID="upload-status-text">
-                {uploadStatus === 'transcoding'
-                  ? 'Transcoding audio variants...'
-                  : uploadStatus === 'completed'
-                  ? 'Published successfully!'
-                  : `Uploading audio... (${progress}%)`}
+                {uploadStatus === 'idle' && selectedFile ? 'File Picked' : ''}
+                {uploadStatus === 'uploading' ? 'Uploading...' : ''}
+                {uploadStatus === 'transcoding' ? 'Processing...' : ''}
+                {uploadStatus === 'completed' ? 'Published' : ''}
               </Text>
               <Text style={styles.progressPercentage}>{progress}%</Text>
             </View>
@@ -324,11 +323,10 @@ export default function UploadScreen() {
         >
           {isUploading ? (
             <View style={styles.buttonRow}>
-              <ActivityIndicator size="small" color="#09090b" />
               <Text style={styles.submitButtonText}>
                 {uploadStatus === 'transcoding'
-                  ? 'Transcoding audio variants...'
-                  : 'Uploading audio...'}
+                  ? 'Processing...'
+                  : 'Uploading...'}
               </Text>
             </View>
           ) : uploadStatus === 'failed' ? (
@@ -544,7 +542,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   submitButton: {
-    backgroundColor: '#ffffff',
+    backgroundColor: PALETTE.primary,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
@@ -563,8 +561,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitButtonText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
-    color: '#09090b',
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 15,
+    color: '#FFFFFF',
   },
 });

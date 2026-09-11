@@ -406,25 +406,7 @@ export function AudioReel({
         end={{ x: 0.5, y: 1 }}
       />
 
-      {/* Ambient Pulsing Radial Glow responsive to playback */}
-      <Animated.View
-        style={[
-          styles.ambientRadialGlow,
-          {
-            opacity: ambientGlowAnim,
-            transform: [
-              {
-                scale: ambientGlowAnim.interpolate({
-                  inputRange: [0.2, 1],
-                  outputRange: [0.85, 1.25],
-                }),
-              },
-            ],
-          },
-        ]}
-      />
-
-      {/* 2. Sound Visualizer: 5 vertical animated bars centered on screen with random spring physics */}
+      {/* 2. Center Stage with tactile play/pause (Moved lower for one-handed use) */}
       <Pressable
         style={styles.centerStage}
         onPress={togglePlayPause}
@@ -433,24 +415,6 @@ export function AudioReel({
         testID="center-play-pause-trigger"
       >
         <View style={styles.centerVisualizerBox}>
-          {/* Dynamic pulsing audio equalizer bars */}
-          <View style={styles.eqCluster}>
-            {eqBars.map((bar, idx) => (
-              <Animated.View
-                key={idx}
-                style={[
-                  styles.eqBar,
-                  {
-                    height: bar.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['16%', '100%'],
-                    }),
-                    backgroundColor: isPlaying ? '#8B5CF6' : 'rgba(255, 255, 255, 0.4)',
-                  },
-                ]}
-              />
-            ))}
-          </View>
 
           {/* Center tactile play / pause status badge */}
           <View style={[styles.centerPlayBadge, isPlaying && styles.centerPlayBadgePlaying]}>
@@ -829,7 +793,8 @@ const styles = StyleSheet.create({
   },
   centerStage: {
     ...StyleSheet.absoluteFill,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: '40%', // Moves it to lower portion of screen
     alignItems: 'center',
     zIndex: 2,
   },
@@ -852,9 +817,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   centerPlayBadge: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: 'rgba(17, 19, 27, 0.75)',
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.2)',
@@ -866,8 +831,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
   },
   centerPlayBadgePlaying: {
-    borderColor: '#8B5CF6',
-    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    borderColor: PALETTE.primary,
+    backgroundColor: 'rgba(234, 88, 12, 0.3)',
   },
 
   // Floating Thumb-Friendly Action Column (Right Side)
@@ -931,7 +896,7 @@ const styles = StyleSheet.create({
   },
   creatorHandleText: {
     fontFamily: 'PlusJakartaSans_700Bold',
-    fontSize: 15,
+    fontSize: 18,
     color: '#FFFFFF',
     letterSpacing: 0.2,
     textShadowColor: 'rgba(0, 0, 0, 0.65)',
@@ -963,7 +928,7 @@ const styles = StyleSheet.create({
   },
   blippTitle: {
     fontFamily: 'Sora_700Bold',
-    fontSize: 15,
+    fontSize: 20,
     color: '#FFFFFF',
     lineHeight: 20,
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -1036,7 +1001,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 12,
+    height: 48, // Generous Fitts's Law touch target
     justifyContent: 'flex-end',
     zIndex: 20,
   },
@@ -1047,7 +1012,7 @@ const styles = StyleSheet.create({
   },
   bottomScrubberFill: {
     height: '100%',
-    backgroundColor: '#8B5CF6',
+    backgroundColor: PALETTE.primary,
     borderRadius: 1.5,
   },
 

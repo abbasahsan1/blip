@@ -1,28 +1,28 @@
 export const PALETTE = {
   // Deep Obsidian Canvas & Surfaces (Tactile Audio-First Experience)
-  bg: '#07080B', // Deep Obsidian canvas
-  surface: '#11131B', // Surface Slate
-  surfaceSubtle: '#0D0F16',
-  card: '#161924', // Elevated dark module chassis
-  cardHover: '#1E2232',
-  cardGlass: 'rgba(17, 19, 27, 0.85)',
+  bg: '#0B0F19', // Deep Obsidian canvas
+  surface: '#1E2638', // Surface Slate
+  surfaceSubtle: '#1E1E1E',
+  card: '#1E2638', // Elevated dark module chassis
+  cardHover: '#2D3748',
+  cardGlass: 'rgba(30, 38, 56, 0.85)',
 
   // Mechanical / Neon Borders
-  border: '#242938', // Dark slate groove border
-  borderSubtle: '#181C28',
-  borderNeon: '#7C3AED',
-  borderGlass: 'rgba(124, 58, 237, 0.25)',
+  border: '#2D3748', // Dark slate groove border
+  borderSubtle: '#1E2638',
+  borderNeon: '#EA580C',
+  borderGlass: 'rgba(234, 88, 12, 0.25)',
 
   // High-Contrast Readout Typography
-  text: '#FFFFFF', // Pure White signal
-  textSecondary: '#94A3B8', // Muted Silver readout
-  textMuted: '#64748B', // Muted Slate acoustic low
-  primary: '#FFFFFF',
+  text: '#F9FAFB', // Pure White signal
+  textSecondary: '#9CA3AF', // Muted Silver readout
+  textMuted: '#6B7280', // Muted Slate acoustic low
+  primary: '#EA580C',
 
   // Expressive Social & Frequency Accents
-  accent: '#7C3AED', // Accent Neon Violet
-  accentDim: 'rgba(124, 58, 237, 0.18)',
-  accentGlow: 'rgba(124, 58, 237, 0.35)',
+  accent: '#EA580C', // Accent Orange
+  accentDim: 'rgba(234, 88, 12, 0.18)',
+  accentGlow: 'rgba(234, 88, 12, 0.35)',
 
   // Expressive Vibrant Tints
   magenta: '#F43F5E', // Electric Magenta (Bouncing Likes & Energy)
@@ -44,11 +44,11 @@ export const PALETTE = {
   warning: '#F59E0B', // Solar Amber
 
   // Tactile Floating Overlays & Frosted Pill Tokens
-  overlay: 'rgba(7, 8, 11, 0.88)',
-  overlayRadial: 'rgba(124, 58, 237, 0.12)',
-  glass: 'rgba(17, 19, 27, 0.78)', // Frosted glass pill navigation
+  overlay: 'rgba(11, 15, 25, 0.88)',
+  overlayRadial: 'rgba(234, 88, 12, 0.12)',
+  glass: 'rgba(30, 38, 56, 0.78)', // Frosted glass pill navigation
   glassBorder: 'rgba(255, 255, 255, 0.08)',
-  floatingPill: 'rgba(17, 19, 27, 0.85)',
+  floatingPill: 'rgba(30, 38, 56, 0.85)',
 } as const;
 
 export type PaletteKey = keyof typeof PALETTE;

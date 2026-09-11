@@ -69,37 +69,13 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 2. Stash Tab */}
-      <Tabs.Screen
-        name="saved"
-        options={{
-          headerShown: false,
-          tabBarIcon: ({ focused }) => (
-            <FloatingTabItem label="Stash" emoji="🔖" focused={focused} />
-          ),
-          tabBarAccessibilityLabel: 'Stash tab',
-        }}
-      />
-
-      {/* 3. Drop Tab (Elevated Center Mic Button with neon purple glow) */}
+      {/* 2. Drop Tab (Elevated Center Mic Button with neon orange glow) */}
       <Tabs.Screen
         name="upload"
         options={{
           headerShown: false,
           tabBarIcon: ({ focused }) => <CenterDropButton focused={focused} />,
           tabBarAccessibilityLabel: 'Drop broadcast tab',
-        }}
-      />
-
-      {/* 4. Vibes Tab */}
-      <Tabs.Screen
-        name="vibes"
-        options={{
-          headerShown: false,
-          tabBarIcon: ({ focused }) => (
-            <FloatingTabItem label="Vibes" emoji="💬" focused={focused} />
-          ),
-          tabBarAccessibilityLabel: 'Vibes tab',
         }}
       />
 
@@ -145,7 +121,7 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   tabItemContainerActive: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    backgroundColor: 'rgba(234, 88, 12, 0.15)',
   },
   tabEmoji: {
     fontSize: 16,
@@ -171,14 +147,14 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#8B5CF6',
-    shadowColor: '#8B5CF6',
+    backgroundColor: PALETTE.primary,
+    shadowColor: PALETTE.primary,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 4,
   },
 
-  // Elevated Center Drop Mic Button with neon purple glow
+  // Elevated Center Drop Mic Button with neon orange glow
   centerDropWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -188,19 +164,19 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: PALETTE.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: '#07080B',
-    shadowColor: '#8B5CF6',
+    borderColor: PALETTE.bg,
+    shadowColor: PALETTE.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.85,
     shadowRadius: 14,
     elevation: 10,
   },
   centerDropButtonActive: {
-    backgroundColor: '#A855F7',
+    backgroundColor: '#F97316',
     shadowOpacity: 1,
   },
   centerDropLabel: {
@@ -210,6 +186,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   centerDropLabelActive: {
-    color: '#A855F7',
+    color: '#F97316',
   },
 });
