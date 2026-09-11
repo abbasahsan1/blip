@@ -44,6 +44,12 @@ async def upload_media(
     Streams file chunks directly to MinIO raw uploads bucket, records the upload in Postgres,
     and publishes an upload.received event to NATS JetStream.
     """
+    if upload_type == "smart_clip":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Smart clip uploads are not implemented"
+        )
+
     upload_id = uuid.uuid4()
     ext = os.path.splitext(file.filename or "")[1].lower() or ".mp3"
     storage_key = f"{current_user.user_id}/{upload_id}{ext}"

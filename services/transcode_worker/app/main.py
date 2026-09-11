@@ -140,6 +140,23 @@ async def process_message(js: JetStreamContext, msg) -> None:
             )
             logger.info(f"Published media.transcode.completed for upload {upload_id}")
 
+            if os.environ.get("BYPASS_COPYRIGHT_CHECK", "").lower() == "true":
+                try:
+                    mock_copyright_payload = {
+                        "upload_id": str(upload_id),
+                        "blipp_id": str(blipp_id),
+                        "status": "cleared",
+                        "notes": "auto-cleared via bypass"
+                    }
+                    await js.publish(
+                        subject="copyright.cleared",
+                        payload=json.dumps(mock_copyright_payload).encode("utf-8"),
+                    )
+                    logger.info(f"Published mocked copyright.cleared for upload {upload_id} (bypass active)")
+                except Exception as e:
+                    logger.warning(f"Failed to publish mocked copyright.cleared event: {e}")
+
+
             # Optional compatibility event for legacy consumers
             legacy_payload = {
                 "blipp_id": str(blipp_id),
