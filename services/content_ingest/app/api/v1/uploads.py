@@ -433,6 +433,16 @@ async def update_upload_status(
                 message=f"Blipp for upload/id '{upload_id}' not found",
             )
             
+        if req.status == "published":
+            await conn.execute(
+                """
+                UPDATE uploads
+                SET processing_status = 'done'
+                WHERE upload_id = $1
+                """,
+                upload_id
+            )
+            
     if req.status == "published":
         try:
             await event_bus.publish(
