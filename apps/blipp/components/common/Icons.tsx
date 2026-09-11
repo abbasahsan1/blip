@@ -251,4 +251,35 @@ export function MicMark({ size = 22, color = '#ffffff' }: IconProps) {
   );
 }
 
+/**
+ * 3-Dots Options Mark (More horizontal)
+ */
+export function MoreHorizontalMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="1.75" fill={color} />
+      <Circle cx="19" cy="12" r="1.75" fill={color} />
+      <Circle cx="5" cy="12" r="1.75" fill={color} />
+    </Svg>
+  );
+}
+
+/**
+ * Verified Badge Vector Mark (Tick)
+ */
+export function VerifiedMark({ size = 16, color = '#8B5CF6' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        stroke={color}
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+
 

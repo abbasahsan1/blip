@@ -375,6 +375,8 @@ export const api = {
   delete: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
 
+  login: apiLogin,
+  register: apiRegister,
   followUser,
   unfollowUser,
   saveBlipp,
@@ -396,16 +398,68 @@ export const api = {
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 
-interface LoginRequest {
+export interface LoginRequest {
   email?: string;
   username?: string;
   password: string;
 }
 
-interface RegisterRequest {
-  username: string;
+export interface RegisterRequest {
+  username?: string;
   email: string;
   password: string;
+  displayName?: string;
+}
+
+export async function apiLogin(
+  emailOrReq: string | LoginRequest,
+  maybePassword?: string,
+): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
+  const email = typeof emailOrReq === 'string' ? emailOrReq : emailOrReq.email;
+  const username = typeof emailOrReq === 'string' ? undefined : emailOrReq.username;
+  const password = typeof emailOrReq === 'string' ? maybePassword || '' : emailOrReq.password;
+
+  const res = await requestRaw<any>('/v1/auth/login', {
+    method: 'POST',
+    body: {
+      email,
+      username: username || (email && email.includes('@') ? email.split('@')[0] : email),
+      password,
+    },
+  });
+
+  const data = res.data;
+  const tokens: AuthTokens = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    expiresIn: data.expires_in || 3600,
+  };
+  const uname = data.username || username || (email && email.includes('@') ? email.split('@')[0] : 'user');
+  const user: User = {
+    id: data.user_id || 'user_local',
+    email: email || '',
+    username: uname,
+    displayName: uname,
+  };
+  return { tokens, user, access_token: data.access_token, refresh_token: data.refresh_token };
+}
+
+export async function apiRegister(req: {
+  email: string;
+  password: string;
+  username?: string;
+  displayName?: string;
+}): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
+  await requestRaw('/v1/auth/register', {
+    method: 'POST',
+    body: {
+      email: req.email,
+      password: req.password,
+      username: req.username || req.email.split('@')[0],
+      display_name: req.displayName || req.username,
+    },
+  });
+  return apiLogin(req.email, req.password);
 }
 
 interface LoginResponse {
@@ -480,34 +534,8 @@ export const authApi = {
     return { tokens, user: me };
   },
 
-  async login(req: LoginRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    const username = req.username || req.email || '';
-    const password = req.password;
-    const body = `client_id=blipp-app&grant_type=password&username=${encodeURIComponent(username)}&password=${password}`;
-
-    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body,
-    });
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      const msg = data?.error_description || data?.error || `Login failed: ${res.status}`;
-      throw new ApiError(msg, res.status, data);
-    }
-
-    const tokens = toTokens(data as LoginResponse);
-    const me = await authApi.me(tokens.accessToken);
-    return { tokens, user: me };
-  },
-
-  async register(req: RegisterRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    await request('/v1/auth/register', { method: 'POST', body: req });
-    return authApi.login({ email: req.email, password: req.password });
-  },
+  login: apiLogin,
+  register: (req: RegisterRequest) => apiRegister(req),
 
   async me(token: string): Promise<User> {
     const r = await request<MeResponse>('/v1/auth/me', { token });

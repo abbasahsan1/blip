@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
-  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -18,6 +18,8 @@ import { useFeedStore } from '@/lib/store/feedStore';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import type { AudioPost, FeedSort } from '@/lib/types';
+
+const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
 
 const SORTS: { value: FeedSort; label: string }[] = [
   { value: 'most_listened', label: 'Trending' },
@@ -37,7 +39,6 @@ export default function FeedScreen() {
 
   const userId = useSessionStore((s) => s.user?.id ?? null);
 
-  const [pageHeight, setPageHeight] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<FlatList<AudioPost>>(null);
 
@@ -45,17 +46,12 @@ export default function FeedScreen() {
     void refresh(userId);
   }, []);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    setPageHeight(e.nativeEvent.layout.height);
-  }, []);
-
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (pageHeight === 0) return;
-      const idx = Math.round(e.nativeEvent.contentOffset.y / pageHeight);
+      const idx = Math.round(e.nativeEvent.contentOffset.y / WINDOW_HEIGHT);
       setActiveIndex(idx);
     },
-    [pageHeight],
+    [],
   );
 
   const handleAutoSkip = useCallback(
@@ -72,14 +68,14 @@ export default function FeedScreen() {
       <AudioReel
         post={item}
         isActive={index === activeIndex}
-        height={pageHeight}
+        height={WINDOW_HEIGHT}
         onLike={() => toggleLike(item.id)}
         onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
       />
     ),
-    [activeIndex, handleAutoSkip, pageHeight, posts, toggleLike],
+    [activeIndex, handleAutoSkip, posts, toggleLike],
   );
 
   return (
@@ -134,19 +130,20 @@ export default function FeedScreen() {
           data={posts}
           keyExtractor={(p) => p.id}
           renderItem={renderItem}
-          onLayout={onLayout}
           onScroll={onScroll}
           scrollEventThrottle={16}
-          pagingEnabled
-          showsVerticalScrollIndicator={false}
-          snapToInterval={pageHeight || undefined}
+          pagingEnabled={true}
+          snapToInterval={WINDOW_HEIGHT}
+          snapToAlignment="start"
           decelerationRate="fast"
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => refresh(userId)}
-              tintColor={PALETTE.accent}
-              colors={[PALETTE.accent]}
+              tintColor="#8B5CF6"
+              colors={['#8B5CF6']}
+              progressViewOffset={insets.top + 60}
             />
           }
           ListEmptyComponent={
@@ -161,8 +158,8 @@ export default function FeedScreen() {
             </View>
           }
           getItemLayout={(_data, index) => ({
-            length: pageHeight,
-            offset: pageHeight * index,
+            length: WINDOW_HEIGHT,
+            offset: WINDOW_HEIGHT * index,
             index,
           })}
         />
@@ -174,24 +171,22 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#07080B',
   },
   headerContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
-    backgroundColor: PALETTE.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: PALETTE.borderSubtle,
+    zIndex: 20,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingBottom: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
   headerLogo: {
     fontFamily: 'Sora_700Bold',

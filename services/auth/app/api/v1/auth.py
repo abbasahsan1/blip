@@ -11,7 +11,7 @@ from blipp_common.security import get_current_user, AuthenticatedUser
 
 
 logger = logging.getLogger("auth-service.api.auth")
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])
 
 
 class RegisterRequest(BaseModel):

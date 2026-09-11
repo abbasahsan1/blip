@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Animated,
+  Dimensions,
   FlatList,
   Linking,
   Modal,
@@ -20,6 +21,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { PALETTE } from '@/lib/palette';
 import {
   PlayMark,
@@ -29,12 +31,16 @@ import {
   ShareMark,
   FlagMark,
   StatusCheckMark,
+  MoreHorizontalMark,
+  VerifiedMark,
 } from '@/components/common/Icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
+
+const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -267,42 +273,77 @@ export function AudioReel({
     await dispatchLike();
   };
 
-  // ── Dynamic Center Equalizer Visualizer ─────────────────────────────────────
-  // 5 animated heights that rhythmically pulse while isPlaying
+  // ── Dynamic Center Equalizer Visualizer (5 bars with random spring physics) ──
   const eqBars = useRef([
-    new Animated.Value(0.3),
-    new Animated.Value(0.6),
-    new Animated.Value(0.9),
-    new Animated.Value(0.5),
+    new Animated.Value(0.2),
+    new Animated.Value(0.2),
+    new Animated.Value(0.2),
+    new Animated.Value(0.2),
     new Animated.Value(0.2),
   ]).current;
-  const eqLoop = useRef<Animated.CompositeAnimation | null>(null);
 
   // Ambient radial glow animation
   const ambientGlowAnim = useRef(new Animated.Value(0.4)).current;
   const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
 
+  // Animated scrolling audio track tag
+  const trackTagAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null;
     if (isPlaying) {
-      const barAnims = eqBars.map((bar, i) =>
-        Animated.loop(
-          Animated.sequence([
-            Animated.delay(i * 55),
-            Animated.timing(bar, {
-              toValue: 0.3 + Math.random() * 0.7,
-              duration: 220 + Math.random() * 180,
-              useNativeDriver: false,
-            }),
-            Animated.timing(bar, {
-              toValue: 0.15 + Math.random() * 0.35,
-              duration: 200 + Math.random() * 160,
-              useNativeDriver: false,
-            }),
-          ]),
-        ),
+      loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(trackTagAnim, {
+            toValue: -80,
+            duration: 4500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(trackTagAnim, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
       );
-      eqLoop.current = Animated.parallel(barAnims);
-      eqLoop.current.start();
+      loop.start();
+    } else {
+      trackTagAnim.setValue(0);
+    }
+    return () => {
+      loop?.stop();
+    };
+  }, [isPlaying, trackTagAnim]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (isPlaying) {
+      const runSpringCycle = (bar: Animated.Value, initialDelay: number) => {
+        if (!isMounted) return;
+        Animated.sequence([
+          Animated.delay(initialDelay),
+          Animated.spring(bar, {
+            toValue: 0.35 + Math.random() * 0.65,
+            friction: 2.5 + Math.random() * 1.5,
+            tension: 45 + Math.random() * 25,
+            useNativeDriver: false,
+          }),
+          Animated.spring(bar, {
+            toValue: 0.12 + Math.random() * 0.22,
+            friction: 3,
+            tension: 50,
+            useNativeDriver: false,
+          }),
+        ]).start(() => {
+          if (isMounted && isPlaying) {
+            runSpringCycle(bar, Math.random() * 60);
+          }
+        });
+      };
+
+      eqBars.forEach((bar, idx) => {
+        runSpringCycle(bar, idx * 50);
+      });
 
       glowLoop.current = Animated.loop(
         Animated.sequence([
@@ -320,12 +361,12 @@ export function AudioReel({
       );
       glowLoop.current.start();
     } else {
-      eqLoop.current?.stop();
       glowLoop.current?.stop();
       eqBars.forEach((bar) => {
-        Animated.timing(bar, {
-          toValue: 0.25,
-          duration: 200,
+        Animated.spring(bar, {
+          toValue: 0.2,
+          friction: 4,
+          tension: 40,
           useNativeDriver: false,
         }).start();
       });
@@ -337,14 +378,14 @@ export function AudioReel({
     }
 
     return () => {
-      eqLoop.current?.stop();
+      isMounted = false;
       glowLoop.current?.stop();
     };
   }, [isPlaying, eqBars, ambientGlowAnim]);
 
   // Scrub bar interaction
   const handleScrub = (event: any) => {
-    const layoutWidth = event.nativeEvent.layout?.width || 280;
+    const layoutWidth = event.nativeEvent.layout?.width || WINDOW_WIDTH;
     const clickX = event.nativeEvent.locationX;
     const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
     const targetSeconds = Math.floor(ratio * (durationSeconds || 30));
@@ -353,10 +394,17 @@ export function AudioReel({
 
   const displayDuration = durationSeconds || item?.duration || 0;
 
+  const reelHeight = height || WINDOW_HEIGHT;
+
   return (
-    <View style={[styles.root, { height }]} testID="audio-reel-card">
-      {/* 1. Canvas: Edge-to-edge dark background with ambient radial glow */}
-      <View style={styles.canvasBackground} />
+    <View style={[styles.root, { height: reelHeight }]} testID="audio-reel-card">
+      {/* 1. Ambient Background: Dark vertical gradient canvas */}
+      <LinearGradient
+        colors={['#07080B', '#11131F', '#07080B']}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+      />
 
       {/* Ambient Pulsing Radial Glow responsive to playback */}
       <Animated.View
@@ -376,7 +424,7 @@ export function AudioReel({
         ]}
       />
 
-      {/* 2. Center Equalizer Visualizer with Tactile Tap Toggle */}
+      {/* 2. Sound Visualizer: 5 vertical animated bars centered on screen with random spring physics */}
       <Pressable
         style={styles.centerStage}
         onPress={togglePlayPause}
@@ -397,7 +445,7 @@ export function AudioReel({
                       inputRange: [0, 1],
                       outputRange: ['16%', '100%'],
                     }),
-                    backgroundColor: isPlaying ? PALETTE.accent : PALETTE.textMuted,
+                    backgroundColor: isPlaying ? '#8B5CF6' : 'rgba(255, 255, 255, 0.4)',
                   },
                 ]}
               />
@@ -407,128 +455,126 @@ export function AudioReel({
           {/* Center tactile play / pause status badge */}
           <View style={[styles.centerPlayBadge, isPlaying && styles.centerPlayBadgePlaying]}>
             {isPlaying ? (
-              <PauseMark size={26} color="#FFFFFF" />
+              <PauseMark size={24} color="#FFFFFF" />
             ) : (
-              <PlayMark size={28} color="#FFFFFF" />
+              <PlayMark size={26} color="#FFFFFF" />
             )}
           </View>
         </View>
       </Pressable>
 
-      {/* 3. Floating Action Dock (Right Side) */}
-      <View style={styles.floatingActionDock} testID="floating-action-dock">
+      {/* 3. Floating Thumb-Friendly Action Column (Right Side) */}
+      <View style={styles.floatingActionColumn} testID="floating-action-dock">
         {/* Like Button (Bouncing heart + count) */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.actionDockPill,
-            pressed && styles.dockPillPressed,
-          ]}
-          onPress={handleLike}
-          accessibilityRole="button"
-          accessibilityLabel={item?.isLiked ? 'Unlike broadcast' : 'Like broadcast'}
-          testID="like-blipp-button"
-        >
-          <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-            <HeartMark
-              size={24}
-              color={item?.isLiked ? PALETTE.magenta : PALETTE.primary}
-              filled={item?.isLiked}
-            />
-          </Animated.View>
+        <View style={styles.actionItemWrapper}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionFrostedBtn,
+              pressed && styles.frostedBtnPressed,
+            ]}
+            onPress={handleLike}
+            accessibilityRole="button"
+            accessibilityLabel={item?.isLiked ? 'Unlike broadcast' : 'Like broadcast'}
+            testID="like-blipp-button"
+          >
+            <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+              <HeartMark
+                size={24}
+                color={item?.isLiked ? '#EC4899' : '#FFFFFF'}
+                filled={item?.isLiked}
+              />
+            </Animated.View>
+          </Pressable>
           <Text
             style={[
-              styles.dockPillLabel,
-              item?.isLiked && { color: PALETTE.magenta },
+              styles.actionCounterText,
+              item?.isLiked && { color: '#EC4899' },
             ]}
           >
             {formatListens(item?.likeCount || 0)}
           </Text>
-        </Pressable>
+        </View>
 
         {/* Stash / Bookmark Button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.actionDockPill,
-            pressed && styles.dockPillPressed,
-          ]}
-          onPress={handleSaveToggle}
-          disabled={isSaveLoading}
-          accessibilityRole="button"
-          accessibilityLabel={isSaved ? 'Remove from stash' : 'Stash blipp'}
-          testID="save-blipp-button"
-        >
-          <BookmarkMark
-            size={23}
-            color={isSaved ? PALETTE.amber : PALETTE.primary}
-            filled={isSaved}
-          />
+        <View style={styles.actionItemWrapper}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionFrostedBtn,
+              pressed && styles.frostedBtnPressed,
+            ]}
+            onPress={handleSaveToggle}
+            disabled={isSaveLoading}
+            accessibilityRole="button"
+            accessibilityLabel={isSaved ? 'Remove from stash' : 'Stash blipp'}
+            testID="save-blipp-button"
+          >
+            <BookmarkMark
+              size={23}
+              color={isSaved ? '#F59E0B' : '#FFFFFF'}
+              filled={isSaved}
+            />
+          </Pressable>
           <Text
             style={[
-              styles.dockPillLabel,
-              isSaved && { color: PALETTE.amber },
+              styles.actionCounterText,
+              isSaved && { color: '#F59E0B' },
             ]}
           >
-            {isSaved ? 'Stashed' : 'Stash'}
+            {isSaved ? 'Saved' : 'Save'}
           </Text>
-        </Pressable>
+        </View>
 
         {/* Echo / DM Share Button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.actionDockPill,
-            pressed && styles.dockPillPressed,
-          ]}
-          onPress={openShareSheet}
-          accessibilityRole="button"
-          accessibilityLabel="Echo to direct message"
-          testID="share-blipp-button"
-        >
-          <ShareMark size={22} color={PALETTE.primary} />
-          <Text style={styles.dockPillLabel}>Echo</Text>
-        </Pressable>
+        <View style={styles.actionItemWrapper}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionFrostedBtn,
+              pressed && styles.frostedBtnPressed,
+            ]}
+            onPress={openShareSheet}
+            accessibilityRole="button"
+            accessibilityLabel="Echo to direct message"
+            testID="share-blipp-button"
+          >
+            <ShareMark size={22} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.actionCounterText}>Echo</Text>
+        </View>
 
-        {/* Report / Flag Button */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.actionDockPill,
-            styles.reportPill,
-            pressed && styles.dockPillPressed,
-          ]}
-          onPress={() => setIsReportModalOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Report broadcast"
-          testID="report-content-button"
-        >
-          <FlagMark size={19} color={PALETTE.textSecondary} />
-          <Text style={styles.dockPillLabelMuted}>Report</Text>
-        </Pressable>
+        {/* Options (3 dots) */}
+        <View style={styles.actionItemWrapper}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionFrostedBtn,
+              pressed && styles.frostedBtnPressed,
+            ]}
+            onPress={() => setIsReportModalOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Blipp options"
+            testID="report-content-button"
+          >
+            <MoreHorizontalMark size={22} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.actionCounterText}>More</Text>
+        </View>
       </View>
 
-      {/* 4. Bottom Overlay: Creator handle, Follow button, waveform scrub-bar & telemetry */}
-      <View style={styles.bottomOverlay} pointerEvents="box-none">
-        {/* Creator Attribution & Glowing Follow Button */}
-        <View style={styles.creatorRow}>
-          <View style={styles.creatorInfo}>
-            <View style={styles.avatarGradientCircle}>
-              <Text style={styles.avatarInitial}>
-                {creatorDisplayName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-            <View style={styles.creatorTextColumn}>
-              <Text style={styles.creatorName} numberOfLines={1}>
-                {creatorDisplayName}
-              </Text>
-              <Text style={styles.creatorHandle} numberOfLines={1}>
-                @{creatorHandle}
-              </Text>
-            </View>
+      {/* 4. Bottom Metadata Dock: Left-aligned at bottom: 100, left: 16, right: 80 */}
+      <View style={styles.bottomMetadataDock} pointerEvents="box-none">
+        {/* Creator handle with verified tick + sleek pill Follow button */}
+        <View style={styles.creatorHeaderRow}>
+          <View style={styles.creatorHandleContainer}>
+            <Text style={styles.creatorHandleText} numberOfLines={1}>
+              @{creatorHandle}
+            </Text>
+            <VerifiedMark size={16} color="#8B5CF6" />
           </View>
 
           {!isAd && creatorId && (
             <Pressable
               style={({ pressed }) => [
-                styles.followBtn,
-                isFollowing && styles.followingBtn,
+                styles.sleekPillFollowBtn,
+                isFollowing && styles.sleekPillFollowingBtn,
                 pressed && styles.followBtnPressed,
               ]}
               onPress={handleFollowToggle}
@@ -539,8 +585,8 @@ export function AudioReel({
             >
               <Text
                 style={[
-                  styles.followBtnText,
-                  isFollowing && styles.followingBtnText,
+                  styles.sleekPillFollowText,
+                  isFollowing && styles.sleekPillFollowingText,
                 ]}
               >
                 {isFollowing ? 'Following' : 'Follow'}
@@ -549,18 +595,18 @@ export function AudioReel({
           )}
         </View>
 
-        {/* Title & Description */}
-        <Text style={styles.trackTitle} numberOfLines={2} testID="blipp-title">
+        {/* Blipp Title */}
+        <Text style={styles.blippTitle} numberOfLines={2} testID="blipp-title">
           {item?.title}
         </Text>
 
         {item?.description ? (
-          <Text style={styles.trackDescription} numberOfLines={2}>
+          <Text style={styles.blippDescription} numberOfLines={1}>
             {item.description}
           </Text>
         ) : null}
 
-        {/* Sponsored CTA or Ad Fallback Card */}
+        {/* Sponsored Slot Indicator */}
         {isAd && (
           <View style={styles.sponsoredPillContainer}>
             <View style={styles.sponsoredPill}>
@@ -579,33 +625,36 @@ export function AudioReel({
           </View>
         )}
 
-        {/* Interactive Waveform Scrub-Bar with Live Timestamps */}
-        <View style={styles.scrubSection}>
-          <Pressable style={styles.scrubTrackArea} onPress={handleScrub}>
-            <View style={styles.scrubTrackBg}>
-              <View
-                style={[
-                  styles.scrubTrackProgress,
-                  { width: `${Math.max(0, Math.min(100, progress * 100))}%` },
-                ]}
-              />
-            </View>
-          </Pressable>
-
-          <View style={styles.timecodeRow}>
-            <Text style={styles.timecodeActive}>
-              {formatDuration(positionSeconds)}
+        {/* Animated scrolling audio track tag */}
+        <View style={styles.audioTrackTagRow}>
+          <Animated.View
+            style={[
+              styles.audioTrackTagInner,
+              { transform: [{ translateX: trackTagAnim }] },
+            ]}
+          >
+            <Text style={styles.audioTrackTagText} numberOfLines={1}>
+              🎵 Original Sound - @{creatorHandle}
             </Text>
-            <Text style={styles.timecodeDivider}>/</Text>
-            <Text style={styles.timecodeTotal}>
-              {formatDuration(displayDuration)}
-            </Text>
-            <Text style={styles.listenCountMeta}>
-              • {formatListens(item?.listenCount || 0)} plays
-            </Text>
-          </View>
+          </Animated.View>
         </View>
       </View>
+
+      {/* 5. Thin, unobtrusive scrubber bar pinned along the very bottom */}
+      <Pressable
+        style={styles.bottomScrubberContainer}
+        onPress={handleScrub}
+        testID="bottom-scrubber-bar"
+      >
+        <View style={styles.bottomScrubberTrack}>
+          <View
+            style={[
+              styles.bottomScrubberFill,
+              { width: `${Math.max(0, Math.min(100, progress * 100))}%` },
+            ]}
+          />
+        </View>
+      </Pressable>
 
       {/* Share / Direct Message Modal */}
       <Modal
@@ -756,27 +805,27 @@ export function AudioReel({
 
 const styles = StyleSheet.create({
   root: {
-    width: '100%',
+    width: WINDOW_WIDTH,
     position: 'relative',
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#07080B',
     overflow: 'hidden',
   },
   canvasBackground: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#07080B',
   },
   ambientRadialGlow: {
     position: 'absolute',
-    top: '32%',
-    left: '25%',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: PALETTE.accentGlow,
-    shadowColor: PALETTE.accent,
+    top: '30%',
+    left: '20%',
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
-    shadowRadius: 60,
+    shadowRadius: 80,
   },
   centerStage: {
     ...StyleSheet.absoluteFill,
@@ -794,177 +843,144 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 80,
-    gap: 7,
-    marginBottom: 12,
+    height: 72,
+    gap: 8,
+    marginBottom: 16,
   },
   eqBar: {
     width: 6,
     borderRadius: 3,
-    backgroundColor: PALETTE.accent,
   },
   centerPlayBadge: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: 'rgba(17, 19, 27, 0.75)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.5,
-    shadowRadius: 14,
+    shadowRadius: 12,
   },
   centerPlayBadgePlaying: {
-    borderColor: PALETTE.accentGlow,
-    backgroundColor: 'rgba(124, 58, 237, 0.25)',
+    borderColor: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
   },
 
-  // Floating Action Dock (Right Side)
-  floatingActionDock: {
+  // Floating Thumb-Friendly Action Column (Right Side)
+  floatingActionColumn: {
     position: 'absolute',
-    right: 14,
+    right: 16,
     bottom: 120,
     alignItems: 'center',
     gap: 16,
     zIndex: 10,
   },
-  actionDockPill: {
+  actionItemWrapper: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  actionFrostedBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: PALETTE.cardGlass,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.09)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
   },
-  dockPillPressed: {
+  frostedBtnPressed: {
     transform: [{ scale: 0.92 }],
-    backgroundColor: PALETTE.cardHover,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
-  dockPillLabel: {
+  actionCounterText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 10,
-    color: PALETTE.primary,
-    marginTop: 2,
-  },
-  dockPillLabelMuted: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 9,
-    color: PALETTE.textSecondary,
-    marginTop: 2,
-  },
-  reportPill: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(17, 19, 27, 0.65)',
+    fontSize: 11,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 
-  // Bottom Overlay
-  bottomOverlay: {
+  // Bottom Metadata Dock
+  bottomMetadataDock: {
     position: 'absolute',
-    left: 0,
-    right: 76,
-    bottom: 24,
-    paddingHorizontal: 20,
-    zIndex: 8,
+    bottom: 100,
+    left: 16,
+    right: 80,
+    zIndex: 10,
+    gap: 8,
   },
-  creatorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  creatorInfo: {
+  creatorHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    flex: 1,
   },
-  avatarGradientCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PALETTE.accent,
+  creatorHandleContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: PALETTE.borderGlass,
+    gap: 6,
   },
-  avatarInitial: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 16,
-    color: '#FFFFFF',
-  },
-  creatorTextColumn: {
-    flex: 1,
-  },
-  creatorName: {
-    fontFamily: 'Sora_700Bold',
+  creatorHandleText: {
+    fontFamily: 'PlusJakartaSans_700Bold',
     fontSize: 15,
-    color: PALETTE.primary,
-    letterSpacing: -0.3,
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(0, 0, 0, 0.65)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
-  creatorHandle: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 12,
-    color: PALETTE.textSecondary,
-  },
-  followBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 18,
-    backgroundColor: PALETTE.accent,
-    shadowColor: PALETTE.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
-  },
-  followingBtn: {
-    backgroundColor: 'transparent',
+  sleekPillFollowBtn: {
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
     borderWidth: 1,
-    borderColor: PALETTE.accent,
-    shadowOpacity: 0,
+    borderColor: '#8B5CF6',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  sleekPillFollowingBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   followBtnPressed: {
-    opacity: 0.8,
+    transform: [{ scale: 0.95 }],
   },
-  followBtnText: {
+  sleekPillFollowText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 12,
-    color: '#FFFFFF',
+    fontSize: 11,
+    color: '#A78BFA',
   },
-  followingBtnText: {
-    color: PALETTE.accent,
+  sleekPillFollowingText: {
+    color: 'rgba(255, 255, 255, 0.75)',
   },
-  trackTitle: {
+  blippTitle: {
     fontFamily: 'Sora_700Bold',
-    fontSize: 18,
-    color: PALETTE.primary,
-    lineHeight: 24,
-    marginBottom: 4,
-    letterSpacing: -0.4,
+    fontSize: 15,
+    color: '#FFFFFF',
+    lineHeight: 20,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
-  trackDescription: {
+  blippDescription: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
-    color: PALETTE.textSecondary,
-    lineHeight: 18,
-    marginBottom: 8,
+    color: 'rgba(255, 255, 255, 0.75)',
+    lineHeight: 17,
   },
   sponsoredPillContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 10,
+    marginVertical: 2,
   },
   sponsoredPill: {
     paddingHorizontal: 8,
@@ -984,60 +1000,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: PALETTE.surface,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     borderWidth: 1,
-    borderColor: PALETTE.border,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   sponsoredCtaText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 11,
-    color: PALETTE.primary,
+    color: '#FFFFFF',
   },
-
-  // Waveform Scrub-Bar
-  scrubSection: {
-    marginTop: 6,
-  },
-  scrubTrackArea: {
-    paddingVertical: 6,
-  },
-  scrubTrackBg: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    overflow: 'hidden',
-  },
-  scrubTrackProgress: {
-    height: '100%',
-    backgroundColor: PALETTE.accent,
-    borderRadius: 2,
-  },
-  timecodeRow: {
+  audioTrackTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    overflow: 'hidden',
+    maxWidth: '90%',
   },
-  timecodeActive: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 11,
-    color: PALETTE.accent,
+  audioTrackTagInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  timecodeDivider: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 11,
-    color: PALETTE.textMuted,
-    marginHorizontal: 3,
+  audioTrackTagText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.9)',
   },
-  timecodeTotal: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 11,
-    color: PALETTE.textMuted,
+
+  // Pinned Bottom Scrubber
+  bottomScrubberContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 12,
+    justifyContent: 'flex-end',
+    zIndex: 20,
   },
-  listenCountMeta: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 11,
-    color: PALETTE.textMuted,
-    marginLeft: 6,
+  bottomScrubberTrack: {
+    width: '100%',
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  bottomScrubberFill: {
+    height: '100%',
+    backgroundColor: '#8B5CF6',
+    borderRadius: 1.5,
   },
 
   // Modals & Bottom Sheets

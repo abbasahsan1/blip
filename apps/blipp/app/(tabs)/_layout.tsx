@@ -41,7 +41,7 @@ function CenterDropButton({ focused }: { focused: boolean }) {
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const bottomOffset = Math.max(insets.bottom, 12);
+  const barHeight = 56 + insets.bottom;
 
   return (
     <Tabs
@@ -49,9 +49,10 @@ export default function TabLayout() {
         headerShown: false,
         tabBarShowLabel: false,
         tabBarStyle: [
-          styles.floatingPillBar,
+          styles.frostedBottomBar,
           {
-            bottom: bottomOffset,
+            height: barHeight,
+            paddingBottom: insets.bottom,
           },
         ],
       }}
@@ -60,6 +61,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
             <FloatingTabItem label="Feed" emoji="🔥" focused={focused} />
           ),
@@ -71,6 +73,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="saved"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
             <FloatingTabItem label="Stash" emoji="🔖" focused={focused} />
           ),
@@ -78,10 +81,11 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 3. Drop Tab (Raised Prominent Center Mic Button) */}
+      {/* 3. Drop Tab (Elevated Center Mic Button with neon purple glow) */}
       <Tabs.Screen
         name="upload"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => <CenterDropButton focused={focused} />,
           tabBarAccessibilityLabel: 'Drop broadcast tab',
         }}
@@ -91,6 +95,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="vibes"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
             <FloatingTabItem label="Vibes" emoji="💬" focused={focused} />
           ),
@@ -102,6 +107,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="profile"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
             <FloatingTabItem label="Profile" emoji="👤" focused={focused} />
           ),
@@ -113,24 +119,21 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  floatingPillBar: {
+  frostedBottomBar: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(17, 19, 27, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    paddingBottom: 0,
-    paddingTop: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(7, 8, 11, 0.85)',
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'space-around',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55,
-    shadowRadius: 18,
-    elevation: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 20,
   },
   tabItemContainer: {
     alignItems: 'center',
@@ -142,7 +145,7 @@ const styles = StyleSheet.create({
     minWidth: 50,
   },
   tabItemContainerActive: {
-    backgroundColor: 'rgba(124, 58, 237, 0.16)',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
   tabEmoji: {
     fontSize: 16,
@@ -168,45 +171,45 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: PALETTE.accent,
-    shadowColor: PALETTE.accent,
+    backgroundColor: '#8B5CF6',
+    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
     shadowRadius: 4,
   },
 
-  // Raised Center Drop Mic Button
+  // Elevated Center Drop Mic Button with neon purple glow
   centerDropWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    top: -12,
+    top: -16,
   },
   centerDropButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: PALETTE.accent,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: PALETTE.bg,
-    shadowColor: PALETTE.accent,
+    borderColor: '#07080B',
+    shadowColor: '#8B5CF6',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.7,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.85,
+    shadowRadius: 14,
+    elevation: 10,
   },
   centerDropButtonActive: {
-    backgroundColor: PALETTE.magenta,
-    shadowColor: PALETTE.magenta,
+    backgroundColor: '#A855F7',
+    shadowOpacity: 1,
   },
   centerDropLabel: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 10,
-    color: PALETTE.primary,
+    color: '#FFFFFF',
     marginTop: 2,
   },
   centerDropLabelActive: {
-    color: PALETTE.magenta,
+    color: '#A855F7',
   },
 });

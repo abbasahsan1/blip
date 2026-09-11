@@ -367,9 +367,11 @@ async def docs_redirect():
     return RedirectResponse(url="/api/docs")
 
 
-# Mount routes under /api (legacy & SPA default) and /v1 (versioned standard)
-app.include_router(auth_router, prefix="/api")
-app.include_router(auth_router, prefix="/v1")
+# Mount routes under /v1/auth, /api/v1/auth, and fallback prefixes
+app.include_router(auth_router, prefix="/v1/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/auth/v1/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 
 @app.get("/healthz", tags=["Health"])
