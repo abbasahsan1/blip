@@ -72,24 +72,19 @@ export const getKeycloakUrl = (): string => {
   return getGatewayUrl();
 };
 
-export const resolvePublicAudioUrl = (url?: string | null): string => {
+export function resolveMediaUrl(url: string | null | undefined): string {
   if (!url) return '';
-  const gateway = getGatewayUrl();
+  const gateway = process.env.EXPO_PUBLIC_GATEWAY_URL || getGatewayUrl();
+  // Replace relative paths, localhost:9000, 127.0.0.1:9000, or minio:9000 with the single gateway URL
   if (url.startsWith('/')) {
-    return `${gateway}${url}`;
+    return `${gateway.replace(/\/+$/, '')}${url}`;
   }
-  const internalOrOldPatterns = [
-    'minio.blipp.svc.cluster.local:9000',
-    'minio:9000',
-    ':9000',
-  ];
-  for (const pattern of internalOrOldPatterns) {
-    if (url.includes(pattern)) {
-      return url.replace(/^https?:\/\/[^/]+(:9000)?/, gateway);
-    }
-  }
-  return url;
-};
+  return url
+    .replace(/^https?:\/\/(localhost|127\.0\.0\.1|minio|minio\.blipp\.svc\.cluster\.local):9000/, gateway.replace(/\/+$/, ''))
+    .replace(/^https?:\/\/[^/]+:9000/, gateway.replace(/\/+$/, ''));
+}
+
+export const resolvePublicAudioUrl = resolveMediaUrl;
 
 export interface ApiResponse<T = any> {
   data: T;
@@ -248,9 +243,12 @@ export async function getSavedBlipps(): Promise<BlippItem[]> {
 
 export async function getStories(): Promise<StoryItem[]> {
   const res = await requestRaw<StoryItem[] | { items: StoryItem[] }>('/v1/stories', { method: 'GET' });
-  if (Array.isArray(res.data)) return res.data;
-  if (res.data && Array.isArray((res.data as any).items)) return (res.data as any).items;
-  return [];
+  const rawList: StoryItem[] = Array.isArray(res.data) ? res.data : (res.data as any)?.items || [];
+  return rawList.map((story) => ({
+    ...story,
+    media_url: resolveMediaUrl((story as any).media_url || (story as any).audio_url),
+    audio_url: resolveMediaUrl((story as any).audio_url || (story as any).media_url),
+  }));
 }
 
 export async function uploadStory(formData: FormData): Promise<void> {
@@ -262,6 +260,10 @@ export async function uploadStory(formData: FormData): Promise<void> {
 export async function getThreads(limit = 20, offset = 0): Promise<DMThreadItem[]> {
   const res = await requestRaw<DMThreadItem[]>(`/v1/messages/threads?limit=${limit}&offset=${offset}`, { method: 'GET' });
   return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function getDMThreads(limit = 20, offset = 0): Promise<DMThreadItem[]> {
+  return getThreads(limit, offset);
 }
 
 export async function createThread(recipientId: string): Promise<DMThreadItem> {
@@ -303,12 +305,61 @@ export async function getProfileByUsername(username: string): Promise<UserProfil
   return res.data;
 }
 
+export async function searchProfiles(query: string): Promise<Array<{
+  user_id: string;
+  username: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+}>> {
+  const clean = query.trim().replace(/^@/, '');
+  if (!clean) return [];
+  try {
+    const profile = await getProfileByUsername(clean);
+    if (profile && profile.user_id) {
+      return [
+        {
+          user_id: profile.user_id,
+          username: profile.username,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url,
+        },
+      ];
+    }
+  } catch {
+    // Return empty on not found
+  }
+  return [];
+}
+
 export async function getUserFollowing(userId: string): Promise<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }> {
   const res = await requestRaw<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }>(
     `/v1/social/${userId}/following`,
     { method: 'GET' },
   );
   return res.data || { items: [] };
+}
+
+export async function getFeed(cursor?: string | null): Promise<FeedResponse> {
+  const path = cursor ? `/v1/feed?cursor=${encodeURIComponent(cursor)}` : '/v1/feed';
+  const res = await requestRaw<FeedResponse>(path, { method: 'GET' });
+  const rawItems = res.data?.items || [];
+  const normalizedItems = rawItems.map((item) => {
+    const rawStandard = item.audio_variants?.standard || item.audio_url || '';
+    const standardUrl = resolveMediaUrl(rawStandard);
+    return {
+      ...item,
+      audio_url: standardUrl,
+      audio_variants: {
+        standard: standardUrl,
+        low: resolveMediaUrl(item.audio_variants?.low || rawStandard),
+        high: resolveMediaUrl(item.audio_variants?.high || rawStandard),
+      },
+    };
+  });
+  return {
+    items: normalizedItems,
+    next_cursor: res.data?.next_cursor ?? null,
+  };
 }
 
 export const api = {
@@ -328,15 +379,19 @@ export const api = {
   unfollowUser,
   saveBlipp,
   unsaveBlipp,
+  getFeed,
   getSavedBlipps,
   getStories,
   uploadStory,
   getThreads,
+  getDMThreads,
+  searchProfiles,
   createThread,
   getThreadMessages,
   sendMessage,
   getProfileByUsername,
   getUserFollowing,
+  resolveMediaUrl,
 };
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
@@ -696,16 +751,8 @@ export const socialApi = {
 };
 
 export const blippApi = {
-  async getBlipps(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/feed');
-    return res.data;
-  },
-
-  async getFeed(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/feed');
-    return res.data;
-  },
-
+  getBlipps: getFeed,
+  getFeed: getFeed,
 
   async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
     const res = await requestRaw<BlippUploadResponse>('/v1/blipps/upload', {

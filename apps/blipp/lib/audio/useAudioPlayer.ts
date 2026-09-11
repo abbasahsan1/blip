@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { resolvePublicAudioUrl } from '@/lib/api';
+import { resolveMediaUrl, resolvePublicAudioUrl } from '@/lib/api';
 import { resetPlaybackSessionId } from '@/lib/audio/listenTracker';
 import type { Blipp } from '@/lib/types';
 
@@ -73,7 +73,7 @@ export function useAudioPlayer({
   const [progress, setProgress] = useState(0);
 
   // Variant selection: default to item.audio_variants?.standard || item.audio_url
-  const remoteUrl = resolvePublicAudioUrl(
+  const remoteUrl = resolveMediaUrl(
     item?.audio_variants?.standard || item?.audio_url,
   );
   // Pre-cached local file URI overrides remote URL for <500ms first-byte latency (§6.4)

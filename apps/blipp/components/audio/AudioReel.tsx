@@ -33,7 +33,7 @@ import {
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
-import { api } from '@/lib/api';
+import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -74,7 +74,18 @@ export function AudioReel({
   feedItems = [],
   activeIndex = 0,
 }: Props) {
-  const item = (post || propItem) as Blipp;
+  const rawItem = (post || propItem) as Blipp;
+  const item: Blipp = rawItem
+    ? {
+        ...rawItem,
+        audio_url: resolveMediaUrl(rawItem.audio_url),
+        audio_variants: {
+          standard: resolveMediaUrl(rawItem.audio_variants?.standard || rawItem.audio_url),
+          low: resolveMediaUrl(rawItem.audio_variants?.low || rawItem.audio_variants?.standard || rawItem.audio_url),
+          high: resolveMediaUrl(rawItem.audio_variants?.high || rawItem.audio_variants?.standard || rawItem.audio_url),
+        },
+      }
+    : rawItem;
   const isAd = Boolean(item?.is_ad || item?.is_sponsored);
   const blippId = item?.blipp_id || item?.id;
   const creatorId = item?.creator?.id || item?.creator_id || item?.authorId;
