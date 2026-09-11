@@ -1,19 +1,12 @@
 /**
  * AudioReel
  *
- * Vertically-scrollable audio card for the Blipp feed. Responsible strictly for:
- *   - Vertical swipe / scroll gesture surface (managed by parent FlatList)
- *   - Play/Pause tap toggle (delegated to useAudioPlayer)
- *   - Animated waveform visualization (reacts to isPlaying)
- *   - Progress track (driven by progress from useAudioPlayer)
- *   - Metadata rendering: title, creator, tags, sponsored CTA
- *   - Like interaction (delegated via onLike prop)
- *
- * All Audio.Sound imperative calls, setInterval telemetry timers, and direct
- * telemetry dispatches have been extracted into:
- *   - useAudioPlayer      — audio lifecycle, play/pause, skip/complete events
- *   - useEngagementTelemetry — periodic 5-second play_progress telemetry
- *   - useAudioPrefetch    — §6.4 speculative prefetch of upcoming audio
+ * Full-bleed, edge-to-edge dark audio card for the Blipp feed.
+ * Expressive social aesthetics:
+ *   - Deep obsidian canvas with ambient radial glow responsive to playback
+ *   - Center dynamic visualizer: 5 pulsing audio equalizer bars dancing while isPlaying
+ *   - Floating Action Dock (Right Side): High-contrast floating pill stack for Like, Stash, Echo, and Report
+ *   - Bottom Overlay: Bold creator handle, glowing Follow button, and an interactive waveform scrub-bar with live timestamps
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -34,6 +27,8 @@ import {
   HeartMark,
   BookmarkMark,
   ShareMark,
+  FlagMark,
+  StatusCheckMark,
 } from '@/components/common/Icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
@@ -63,16 +58,7 @@ interface Props {
   height: number;
   onLike: () => void;
   onAutoSkip?: () => void;
-  /**
-   * Full feed item array — passed to useAudioPrefetch so it can speculatively
-   * download upcoming audio before the user swipes to it (§6.4).
-   * Gracefully degrades (no prefetching) if omitted.
-   */
   feedItems?: Blipp[];
-  /**
-   * Index of this card within feedItems — used to determine which items to
-   * prefetch ahead. Omit if feedItems is not provided.
-   */
   activeIndex?: number;
 }
 
@@ -97,8 +83,13 @@ export function AudioReel({
     item?.creator?.username ||
     item?.author ||
     'Creator';
+  const creatorHandle =
+    item?.creator?.username ||
+    (item as any)?.author ||
+    (item as any)?.username ||
+    'creator';
 
-  // ── Engagement States (Save / Follow / Share) ────────────────────────────────
+  // ── Engagement States (Save / Follow / Share / Report) ───────────────────────
   const [isSaved, setIsSaved] = useState(Boolean(item?.is_saved));
   const [isSaveLoading, setIsSaveLoading] = useState(false);
 
@@ -175,7 +166,7 @@ export function AudioReel({
         blipp_id: blippId,
         body: item?.title || 'Shared Blipp broadcast',
       });
-      setShareFeedback(`Shared with ${name}!`);
+      setShareFeedback(`Echoed to ${name}!`);
       setTimeout(() => {
         setIsShareModalOpen(false);
         setShareFeedback(null);
@@ -187,8 +178,37 @@ export function AudioReel({
     }
   };
 
-  // ── §6.4 Speculative prefetch ──────────────────────────────────────────────
-  // Pre-download the next 2–3 upcoming audio tracks so playback starts instantly.
+  // Moderation Report Modal
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState<string>('inappropriate');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [reportSubmitted, setReportSubmitted] = useState(false);
+
+  const handleReportSubmit = async () => {
+    if (!blippId || isSubmittingReport) return;
+    setIsSubmittingReport(true);
+    try {
+      await api.post('/v1/reports', {
+        blipp_id: blippId,
+        reason: reportReason,
+      });
+      setReportSubmitted(true);
+      setTimeout(() => {
+        setIsReportModalOpen(false);
+        setReportSubmitted(false);
+      }, 1200);
+    } catch {
+      setReportSubmitted(true);
+      setTimeout(() => {
+        setIsReportModalOpen(false);
+        setReportSubmitted(false);
+      }, 1200);
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
+
+  // ── Speculative prefetch ───────────────────────────────────────────────────
   const { getCachedUri } = useAudioPrefetch({
     items: feedItems,
     activeIndex,
@@ -197,13 +217,13 @@ export function AudioReel({
   const localUri = blippId ? getCachedUri(blippId) : null;
 
   // ── Audio player ───────────────────────────────────────────────────────────
-  // Manages Web Audio lifecycle, active position, playback controls & ad resilience.
   const {
     isPlaying,
     positionSeconds,
     durationSeconds,
     progress,
     togglePlayPause,
+    seekTo,
     isAdFallback,
     adCountdown,
   } = useAudioPlayer({ item, isActive, localUri });
@@ -216,7 +236,6 @@ export function AudioReel({
   }, [isAdFallback, isActive, adCountdown, onAutoSkip]);
 
   // ── Engagement telemetry ───────────────────────────────────────────────────
-  // Emits periodic 5s play_progress, terminal play_complete (>=90%), and skip on navigate.
   const { dispatchLike } = useEngagementTelemetry({
     item,
     isPlaying,
@@ -225,102 +244,281 @@ export function AudioReel({
     isActive,
   });
 
+  // Like bouncing heart animation
+  const heartScale = useRef(new Animated.Value(1)).current;
+
   const handleLike = async () => {
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1.5, friction: 3, useNativeDriver: true }),
+      Animated.spring(heartScale, { toValue: 1, friction: 4, useNativeDriver: true }),
+    ]).start();
     onLike();
     await dispatchLike();
   };
 
-  // ── Animated waveform ──────────────────────────────────────────────────────
-  // 36 bars animated in a staggered loop while isPlaying; decay to rest when paused.
-  const bars = useRef(
-    Array.from({ length: 36 }, () => new Animated.Value(0.2)),
-  ).current;
-  const playAnim = useRef<Animated.CompositeAnimation | null>(null);
+  // ── Dynamic Center Equalizer Visualizer ─────────────────────────────────────
+  // 5 animated heights that rhythmically pulse while isPlaying
+  const eqBars = useRef([
+    new Animated.Value(0.3),
+    new Animated.Value(0.6),
+    new Animated.Value(0.9),
+    new Animated.Value(0.5),
+    new Animated.Value(0.2),
+  ]).current;
+  const eqLoop = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Ambient radial glow animation
+  const ambientGlowAnim = useRef(new Animated.Value(0.4)).current;
+  const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (isPlaying) {
-      const anims = bars.map((bar, i) =>
+      const barAnims = eqBars.map((bar, i) =>
         Animated.loop(
           Animated.sequence([
-            Animated.delay(i * 35),
+            Animated.delay(i * 55),
             Animated.timing(bar, {
-              toValue: 0.25 + Math.random() * 0.75,
-              duration: 250 + Math.random() * 250,
+              toValue: 0.3 + Math.random() * 0.7,
+              duration: 220 + Math.random() * 180,
               useNativeDriver: false,
             }),
             Animated.timing(bar, {
-              toValue: 0.12 + Math.random() * 0.25,
-              duration: 250 + Math.random() * 200,
+              toValue: 0.15 + Math.random() * 0.35,
+              duration: 200 + Math.random() * 160,
               useNativeDriver: false,
             }),
           ]),
         ),
       );
-      playAnim.current = Animated.parallel(anims);
-      playAnim.current.start();
-    } else {
-      playAnim.current?.stop();
-      bars.forEach((b) =>
-        Animated.timing(b, {
-          toValue: 0.2,
-          duration: 180,
-          useNativeDriver: false,
-        }).start(),
+      eqLoop.current = Animated.parallel(barAnims);
+      eqLoop.current.start();
+
+      glowLoop.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(ambientGlowAnim, {
+            toValue: 0.9,
+            duration: 1200,
+            useNativeDriver: false,
+          }),
+          Animated.timing(ambientGlowAnim, {
+            toValue: 0.4,
+            duration: 1200,
+            useNativeDriver: false,
+          }),
+        ]),
       );
+      glowLoop.current.start();
+    } else {
+      eqLoop.current?.stop();
+      glowLoop.current?.stop();
+      eqBars.forEach((bar) => {
+        Animated.timing(bar, {
+          toValue: 0.25,
+          duration: 200,
+          useNativeDriver: false,
+        }).start();
+      });
+      Animated.timing(ambientGlowAnim, {
+        toValue: 0.25,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
     }
 
     return () => {
-      playAnim.current?.stop();
+      eqLoop.current?.stop();
+      glowLoop.current?.stop();
     };
-  }, [isPlaying, bars]);
+  }, [isPlaying, eqBars, ambientGlowAnim]);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // Scrub bar interaction
+  const handleScrub = (event: any) => {
+    const layoutWidth = event.nativeEvent.layout?.width || 280;
+    const clickX = event.nativeEvent.locationX;
+    const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
+    const targetSeconds = Math.floor(ratio * (durationSeconds || 30));
+    seekTo(targetSeconds);
+  };
 
   const displayDuration = durationSeconds || item?.duration || 0;
 
   return (
     <View style={[styles.root, { height }]} testID="audio-reel-card">
-      {/* Studio console backdrop: solid, deadened acoustics */}
-      <View style={styles.consoleBackdrop} />
+      {/* 1. Canvas: Edge-to-edge dark background with ambient radial glow */}
+      <View style={styles.canvasBackground} />
 
-      {/* Main sound deck content */}
-      <View style={styles.content}>
-        {/* Header telemetry row: Source chip & Sponsored indicator */}
-        <View style={styles.headerRow}>
-          {item?.sourceName && (
-            <View style={styles.sourceChip}>
-              <Text style={styles.sourceText} numberOfLines={1}>
-                {item.sourceName}
+      {/* Ambient Pulsing Radial Glow responsive to playback */}
+      <Animated.View
+        style={[
+          styles.ambientRadialGlow,
+          {
+            opacity: ambientGlowAnim,
+            transform: [
+              {
+                scale: ambientGlowAnim.interpolate({
+                  inputRange: [0.2, 1],
+                  outputRange: [0.85, 1.25],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+
+      {/* 2. Center Equalizer Visualizer with Tactile Tap Toggle */}
+      <Pressable
+        style={styles.centerStage}
+        onPress={togglePlayPause}
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? 'Pause broadcast' : 'Play broadcast'}
+        testID="center-play-pause-trigger"
+      >
+        <View style={styles.centerVisualizerBox}>
+          {/* Dynamic pulsing audio equalizer bars */}
+          <View style={styles.eqCluster}>
+            {eqBars.map((bar, idx) => (
+              <Animated.View
+                key={idx}
+                style={[
+                  styles.eqBar,
+                  {
+                    height: bar.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['16%', '100%'],
+                    }),
+                    backgroundColor: isPlaying ? PALETTE.accent : PALETTE.textMuted,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          {/* Center tactile play / pause status badge */}
+          <View style={[styles.centerPlayBadge, isPlaying && styles.centerPlayBadgePlaying]}>
+            {isPlaying ? (
+              <PauseMark size={26} color="#FFFFFF" />
+            ) : (
+              <PlayMark size={28} color="#FFFFFF" />
+            )}
+          </View>
+        </View>
+      </Pressable>
+
+      {/* 3. Floating Action Dock (Right Side) */}
+      <View style={styles.floatingActionDock} testID="floating-action-dock">
+        {/* Like Button (Bouncing heart + count) */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.actionDockPill,
+            pressed && styles.dockPillPressed,
+          ]}
+          onPress={handleLike}
+          accessibilityRole="button"
+          accessibilityLabel={item?.isLiked ? 'Unlike broadcast' : 'Like broadcast'}
+          testID="like-blipp-button"
+        >
+          <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+            <HeartMark
+              size={24}
+              color={item?.isLiked ? PALETTE.magenta : PALETTE.primary}
+              filled={item?.isLiked}
+            />
+          </Animated.View>
+          <Text
+            style={[
+              styles.dockPillLabel,
+              item?.isLiked && { color: PALETTE.magenta },
+            ]}
+          >
+            {formatListens(item?.likeCount || 0)}
+          </Text>
+        </Pressable>
+
+        {/* Stash / Bookmark Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.actionDockPill,
+            pressed && styles.dockPillPressed,
+          ]}
+          onPress={handleSaveToggle}
+          disabled={isSaveLoading}
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? 'Remove from stash' : 'Stash blipp'}
+          testID="save-blipp-button"
+        >
+          <BookmarkMark
+            size={23}
+            color={isSaved ? PALETTE.amber : PALETTE.primary}
+            filled={isSaved}
+          />
+          <Text
+            style={[
+              styles.dockPillLabel,
+              isSaved && { color: PALETTE.amber },
+            ]}
+          >
+            {isSaved ? 'Stashed' : 'Stash'}
+          </Text>
+        </Pressable>
+
+        {/* Echo / DM Share Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.actionDockPill,
+            pressed && styles.dockPillPressed,
+          ]}
+          onPress={openShareSheet}
+          accessibilityRole="button"
+          accessibilityLabel="Echo to direct message"
+          testID="share-blipp-button"
+        >
+          <ShareMark size={22} color={PALETTE.primary} />
+          <Text style={styles.dockPillLabel}>Echo</Text>
+        </Pressable>
+
+        {/* Report / Flag Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.actionDockPill,
+            styles.reportPill,
+            pressed && styles.dockPillPressed,
+          ]}
+          onPress={() => setIsReportModalOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Report broadcast"
+          testID="report-content-button"
+        >
+          <FlagMark size={19} color={PALETTE.textSecondary} />
+          <Text style={styles.dockPillLabelMuted}>Report</Text>
+        </Pressable>
+      </View>
+
+      {/* 4. Bottom Overlay: Creator handle, Follow button, waveform scrub-bar & telemetry */}
+      <View style={styles.bottomOverlay} pointerEvents="box-none">
+        {/* Creator Attribution & Glowing Follow Button */}
+        <View style={styles.creatorRow}>
+          <View style={styles.creatorInfo}>
+            <View style={styles.avatarGradientCircle}>
+              <Text style={styles.avatarInitial}>
+                {creatorDisplayName.charAt(0).toUpperCase()}
               </Text>
             </View>
-          )}
-
-          {isAd && (
-            <View style={styles.sponsoredBadge} testID="sponsored-pill-badge">
-              <Text style={styles.sponsoredBadgeText}>Sponsored</Text>
+            <View style={styles.creatorTextColumn}>
+              <Text style={styles.creatorName} numberOfLines={1}>
+                {creatorDisplayName}
+              </Text>
+              <Text style={styles.creatorHandle} numberOfLines={1}>
+                @{creatorHandle}
+              </Text>
             </View>
-          )}
-        </View>
+          </View>
 
-        {/* Blipp Title: Sora Display Typography */}
-        <Text style={styles.title} numberOfLines={3} testID="blipp-title">
-          {item?.title}
-        </Text>
-
-        {/* Creator Attribution */}
-        <View style={styles.authorRow}>
-          <Text style={styles.author}>{creatorDisplayName}</Text>
-          {item?.sponsor?.tagline && (
-            <Text style={styles.sponsorTagline} numberOfLines={1}>
-              · {item.sponsor.tagline}
-            </Text>
-          )}
           {!isAd && creatorId && (
             <Pressable
               style={({ pressed }) => [
                 styles.followBtn,
                 isFollowing && styles.followingBtn,
-                pressed && styles.actionBtnPressed,
+                pressed && styles.followBtnPressed,
               ]}
               onPress={handleFollowToggle}
               disabled={isFollowLoading}
@@ -340,200 +538,62 @@ export function AudioReel({
           )}
         </View>
 
-        {/* Waveform Frequency Meters */}
-        <View style={styles.waveformContainer}>
-          <View style={styles.waveform}>
-            {bars.map((bar, i) => {
-              const barFraction = i / bars.length;
-              const hasPassed = barFraction <= progress;
-              return (
-                <Animated.View
-                  key={i}
-                  style={[
-                    styles.waveBar,
-                    {
-                      height: bar.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['8%', '100%'],
-                      }),
-                      backgroundColor: hasPassed ? PALETTE.accent : '#27272a',
-                      opacity: isPlaying ? 1 : 0.45,
-                    },
-                  ]}
-                />
-              );
-            })}
-          </View>
+        {/* Title & Description */}
+        <Text style={styles.trackTitle} numberOfLines={2} testID="blipp-title">
+          {item?.title}
+        </Text>
 
-          {/* Timecode Needle Track */}
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-          </View>
-        </View>
+        {item?.description ? (
+          <Text style={styles.trackDescription} numberOfLines={2}>
+            {item.description}
+          </Text>
+        ) : null}
 
-        {/* Tactile Controls Cluster */}
-        <View style={styles.controls} testID="audio-player-container">
-          <Pressable
-            style={({ pressed }) => [
-              styles.playBtn,
-              pressed && styles.playBtnPressed,
-            ]}
-            onPress={togglePlayPause}
-            accessibilityRole="button"
-            accessibilityLabel={isPlaying ? 'Pause audio' : 'Play audio'}
-            testID="audio-play-button"
-          >
-            {isPlaying ? (
-              <PauseMark size={20} color="#ffffff" />
-            ) : (
-              <PlayMark size={20} color="#ffffff" />
-            )}
-          </Pressable>
-
-          <View style={styles.meta}>
-            <Text style={styles.timecodeActive}>
-              {formatDuration(positionSeconds)}
-            </Text>
-            <Text style={styles.metaDivider}>/</Text>
-            <Text style={styles.timecodeTotal}>
-              {formatDuration(displayDuration)}
-            </Text>
-            <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaPlays}>
-              {formatListens(item?.listenCount || 0)} plays
-            </Text>
-          </View>
-
-          {/* Share / DM Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              pressed && styles.actionBtnPressed,
-            ]}
-            onPress={openShareSheet}
-            accessibilityRole="button"
-            accessibilityLabel="Share blipp to direct message"
-            testID="share-blipp-button"
-          >
-            <ShareMark size={20} color={PALETTE.textSecondary} />
-            <Text style={styles.actionBtnText}>Share</Text>
-          </Pressable>
-
-          {/* Save / Bookmark Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              pressed && styles.actionBtnPressed,
-            ]}
-            onPress={handleSaveToggle}
-            disabled={isSaveLoading}
-            accessibilityRole="button"
-            accessibilityLabel={isSaved ? 'Remove from saved' : 'Save blipp'}
-            testID="save-blipp-button"
-          >
-            <BookmarkMark
-              size={20}
-              color={isSaved ? PALETTE.accent : PALETTE.textSecondary}
-              filled={isSaved}
-            />
-            <Text
-              style={[
-                styles.actionBtnText,
-                isSaved && styles.actionBtnTextActive,
-              ]}
-            >
-              {isSaved ? 'Saved' : 'Save'}
-            </Text>
-          </Pressable>
-
-          {/* Like Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionBtn,
-              pressed && styles.actionBtnPressed,
-            ]}
-            onPress={handleLike}
-            accessibilityRole="button"
-            accessibilityLabel={item?.isLiked ? 'Unlike audio' : 'Like audio'}
-            testID="like-blipp-button"
-          >
-            <HeartMark
-              size={20}
-              color={item?.isLiked ? PALETTE.accent : PALETTE.textSecondary}
-              filled={item?.isLiked}
-            />
-            <Text
-              style={[
-                styles.actionBtnText,
-                item?.isLiked && styles.actionBtnTextActive,
-              ]}
-            >
-              {formatListens(item?.likeCount || 0)}
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Sponsored Promo Fallback Card (Visual Ad with 5s countdown when audio is unavailable) */}
-        {isAd && isAdFallback && (
-          <View style={styles.adPromoCard} testID="sponsored-promo-fallback-card">
-            <View style={styles.adPromoHeader}>
-              <View style={styles.adBadge}>
-                <Text style={styles.adBadgeText}>SPONSORED PROMOTION</Text>
-              </View>
-              <Pressable
-                style={styles.skipNowBtn}
-                onPress={() => onAutoSkip?.()}
-                accessibilityRole="button"
-                accessibilityLabel="Skip sponsored ad"
-                testID="skip-ad-button"
-              >
-                <Text style={styles.skipNowText}>Skip ({adCountdown}s)</Text>
-              </Pressable>
+        {/* Sponsored CTA or Ad Fallback Card */}
+        {isAd && (
+          <View style={styles.sponsoredPillContainer}>
+            <View style={styles.sponsoredPill}>
+              <Text style={styles.sponsoredPillText}>SPONSORED</Text>
             </View>
-            <Text style={styles.adPromoTagline}>
-              {item?.sponsor?.tagline || 'Experience partner highlights curated for your stream.'}
-            </Text>
-            {/* Auto-skip countdown progress bar */}
-            <View style={styles.adCountdownTrack}>
+            {item?.sponsor?.cta_url && (
+              <Pressable
+                style={styles.sponsoredCtaBtn}
+                onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
+              >
+                <Text style={styles.sponsoredCtaText}>
+                  {item.sponsor.cta_text || 'Learn More'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
+        {/* Interactive Waveform Scrub-Bar with Live Timestamps */}
+        <View style={styles.scrubSection}>
+          <Pressable style={styles.scrubTrackArea} onPress={handleScrub}>
+            <View style={styles.scrubTrackBg}>
               <View
                 style={[
-                  styles.adCountdownFill,
-                  { width: `${((5 - adCountdown) / 5) * 100}%` },
+                  styles.scrubTrackProgress,
+                  { width: `${Math.max(0, Math.min(100, progress * 100))}%` },
                 ]}
               />
             </View>
-          </View>
-        )}
-
-        {/* Sponsored Call To Action: Clean text trigger, no decorative arrows */}
-        {item?.is_sponsored && item?.sponsor && (
-          <Pressable
-            style={({ pressed }) => [
-              styles.ctaButton,
-              pressed && styles.ctaButtonPressed,
-            ]}
-            onPress={() =>
-              item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)
-            }
-            accessibilityRole="button"
-            accessibilityLabel={item.sponsor.cta_text || 'Learn more'}
-          >
-            <Text style={styles.ctaText}>
-              {item.sponsor.cta_text || 'Learn More'}
-            </Text>
           </Pressable>
-        )}
 
-        {/* Content Tags */}
-        {item?.tags && item.tags.length > 0 && !item.is_sponsored && (
-          <View style={styles.tags}>
-            {item.tags.map((tag) => (
-              <View key={tag} style={styles.tag}>
-                <Text style={styles.tagText}>#{tag}</Text>
-              </View>
-            ))}
+          <View style={styles.timecodeRow}>
+            <Text style={styles.timecodeActive}>
+              {formatDuration(positionSeconds)}
+            </Text>
+            <Text style={styles.timecodeDivider}>/</Text>
+            <Text style={styles.timecodeTotal}>
+              {formatDuration(displayDuration)}
+            </Text>
+            <Text style={styles.listenCountMeta}>
+              • {formatListens(item?.listenCount || 0)} plays
+            </Text>
           </View>
-        )}
+        </View>
       </View>
 
       {/* Share / Direct Message Modal */}
@@ -544,29 +604,29 @@ export function AudioReel({
         onRequestClose={() => setIsShareModalOpen(false)}
       >
         <Pressable
-          style={styles.shareOverlay}
+          style={styles.sheetOverlay}
           onPress={() => setIsShareModalOpen(false)}
         >
-          <Pressable style={styles.shareSheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.shareHandle} />
-            <Text style={styles.shareTitle}>Share Blipp to Direct Message</Text>
+          <Pressable style={styles.sheetContainer} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Echo Blipp to Conversation</Text>
             {shareFeedback && (
-              <Text style={styles.shareFeedbackText}>{shareFeedback}</Text>
+              <Text style={styles.sheetFeedbackText}>{shareFeedback}</Text>
             )}
             <FlatList
               data={shareThreads}
               keyExtractor={(t) => t.thread_id}
-              style={styles.shareList}
+              style={styles.sheetList}
               ListEmptyComponent={
-                <View style={styles.emptyThreads}>
-                  <Text style={styles.emptyThreadsText}>No recent DM conversations found</Text>
+                <View style={styles.emptyList}>
+                  <Text style={styles.emptyListText}>No recent DM vibes found</Text>
                 </View>
               }
               renderItem={({ item: thread }) => (
                 <Pressable
                   style={({ pressed }) => [
-                    styles.threadShareRow,
-                    pressed && styles.threadShareRowPressed,
+                    styles.threadRow,
+                    pressed && styles.threadRowPressed,
                   ]}
                   onPress={() =>
                     handleShareToThread(
@@ -597,18 +657,83 @@ export function AudioReel({
                       @{thread.other_participant?.username || 'user'}
                     </Text>
                   </View>
-                  <View style={styles.sendChip}>
-                    <Text style={styles.sendChipText}>Send</Text>
+                  <View style={styles.echoChip}>
+                    <Text style={styles.echoChipText}>Send</Text>
                   </View>
                 </Pressable>
               )}
             />
-            <Pressable
-              style={styles.closeShareBtn}
-              onPress={() => setIsShareModalOpen(false)}
-            >
-              <Text style={styles.closeShareText}>Cancel</Text>
-            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Moderation Report Modal */}
+      <Modal
+        visible={isReportModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsReportModalOpen(false)}
+      >
+        <Pressable
+          style={styles.sheetOverlay}
+          onPress={() => setIsReportModalOpen(false)}
+        >
+          <Pressable style={styles.reportModalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.reportHeading}>Report Broadcast</Text>
+            <Text style={styles.reportSubheading}>
+              Help keep the Blipp community safe. Why are you reporting this clip?
+            </Text>
+
+            {reportSubmitted ? (
+              <View style={styles.reportSuccessBox}>
+                <StatusCheckMark size={32} color={PALETTE.lime} />
+                <Text style={styles.reportSuccessText}>Thank you for your report.</Text>
+                <Text style={styles.reportSuccessSubtext}>Our moderation engine will review it promptly.</Text>
+              </View>
+            ) : (
+              <>
+                {[
+                  { id: 'inappropriate', label: 'Inappropriate or Explicit Content' },
+                  { id: 'harassment', label: 'Harassment or Hate Speech' },
+                  { id: 'spam', label: 'Spam, Scam, or Misleading' },
+                  { id: 'copyright', label: 'Copyright / IP Infringement' },
+                ].map((reason) => (
+                  <Pressable
+                    key={reason.id}
+                    style={[
+                      styles.reasonRow,
+                      reportReason === reason.id && styles.reasonRowActive,
+                    ]}
+                    onPress={() => setReportReason(reason.id)}
+                  >
+                    <View
+                      style={[
+                        styles.radioCircle,
+                        reportReason === reason.id && styles.radioCircleActive,
+                      ]}
+                    />
+                    <Text style={styles.reasonText}>{reason.label}</Text>
+                  </Pressable>
+                ))}
+
+                <View style={styles.reportActionRow}>
+                  <Pressable
+                    style={styles.cancelBtn}
+                    onPress={() => setIsReportModalOpen(false)}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.submitReportBtn, isSubmittingReport && { opacity: 0.6 }]}
+                    onPress={handleReportSubmit}
+                    disabled={isSubmittingReport}
+                  >
+                    <Text style={styles.submitReportText}>Submit Report</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -621,334 +746,307 @@ export function AudioReel({
 const styles = StyleSheet.create({
   root: {
     width: '100%',
+    position: 'relative',
     backgroundColor: PALETTE.bg,
     overflow: 'hidden',
-    position: 'relative',
   },
-  consoleBackdrop: {
+  canvasBackground: {
     ...StyleSheet.absoluteFill,
     backgroundColor: PALETTE.bg,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 24,
-    paddingBottom: 84,
-    paddingTop: 80,
-    gap: 14,
-    maxWidth: 640,
-    width: '100%',
-    alignSelf: 'center',
+  ambientRadialGlow: {
+    position: 'absolute',
+    top: '32%',
+    left: '25%',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: PALETTE.accentGlow,
+    shadowColor: PALETTE.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 60,
   },
-  headerRow: {
+  centerStage: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  centerVisualizerBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 170,
+    height: 170,
+  },
+  eqCluster: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    height: 80,
+    gap: 7,
+    marginBottom: 12,
   },
-  sourceChip: {
-    alignSelf: 'flex-start',
-    backgroundColor: PALETTE.card,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  eqBar: {
+    width: 6,
+    borderRadius: 3,
+    backgroundColor: PALETTE.accent,
+  },
+  centerPlayBadge: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: 'rgba(17, 19, 27, 0.75)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+  },
+  centerPlayBadgePlaying: {
+    borderColor: PALETTE.accentGlow,
+    backgroundColor: 'rgba(124, 58, 237, 0.25)',
+  },
+
+  // Floating Action Dock (Right Side)
+  floatingActionDock: {
+    position: 'absolute',
+    right: 14,
+    bottom: 120,
+    alignItems: 'center',
+    gap: 16,
+    zIndex: 10,
+  },
+  actionDockPill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: PALETTE.cardGlass,
     borderWidth: 1,
-    borderColor: PALETTE.border,
+    borderColor: 'rgba(255, 255, 255, 0.09)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
   },
-  sourceText: {
+  dockPillPressed: {
+    transform: [{ scale: 0.92 }],
+    backgroundColor: PALETTE.cardHover,
+  },
+  dockPillLabel: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 10,
+    color: PALETTE.primary,
+    marginTop: 2,
+  },
+  dockPillLabelMuted: {
     fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 12,
+    fontSize: 9,
     color: PALETTE.textSecondary,
-    letterSpacing: 0.2,
+    marginTop: 2,
   },
-  sponsoredBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+  reportPill: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(17, 19, 27, 0.65)',
   },
-  sponsoredBadgeText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 11,
-    color: '#fbbf24',
+
+  // Bottom Overlay
+  bottomOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 76,
+    bottom: 24,
+    paddingHorizontal: 20,
+    zIndex: 8,
   },
-  title: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 24,
-    color: PALETTE.text,
-    lineHeight: 32,
-    letterSpacing: -0.5,
-  },
-  authorRow: {
+  creatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  author: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
+  creatorInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  avatarGradientCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PALETTE.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: PALETTE.borderGlass,
+  },
+  avatarInitial: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 16,
+    color: '#FFFFFF',
+  },
+  creatorTextColumn: {
+    flex: 1,
+  },
+  creatorName: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 15,
+    color: PALETTE.primary,
+    letterSpacing: -0.3,
+  },
+  creatorHandle: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 12,
     color: PALETTE.textSecondary,
   },
   followBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 18,
     backgroundColor: PALETTE.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 6,
-    minHeight: 28,
+    shadowColor: PALETTE.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
   },
   followingBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: PALETTE.border,
+    borderColor: PALETTE.accent,
+    shadowOpacity: 0,
+  },
+  followBtnPressed: {
+    opacity: 0.8,
   },
   followBtnText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 12,
-    color: '#ffffff',
+    color: '#FFFFFF',
   },
   followingBtnText: {
-    color: PALETTE.textSecondary,
+    color: PALETTE.accent,
   },
-  sponsorTagline: {
+  trackTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 18,
+    color: PALETTE.primary,
+    lineHeight: 24,
+    marginBottom: 4,
+    letterSpacing: -0.4,
+  },
+  trackDescription: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
-    color: PALETTE.textMuted,
-    flex: 1,
+    color: PALETTE.textSecondary,
+    lineHeight: 18,
+    marginBottom: 8,
   },
-  waveformContainer: {
-    gap: 6,
-    marginVertical: 4,
-  },
-  waveform: {
+  sponsoredPillContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 48,
-    gap: 3,
+    gap: 8,
+    marginBottom: 10,
   },
-  waveBar: {
-    flex: 1,
-    borderRadius: 2,
-    minHeight: 4,
+  sponsoredPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderWidth: 1,
+    borderColor: PALETTE.amber,
   },
-  progressTrack: {
-    height: 2,
-    backgroundColor: PALETTE.border,
-    borderRadius: 1,
-    overflow: 'hidden',
+  sponsoredPillText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 10,
+    color: PALETTE.amber,
+    letterSpacing: 0.5,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: PALETTE.accent,
-    borderRadius: 1,
-  },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  playBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
+  sponsoredCtaBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
     backgroundColor: PALETTE.surface,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  playBtnPressed: {
-    backgroundColor: PALETTE.cardHover,
-    borderColor: PALETTE.accent,
+  sponsoredCtaText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 11,
+    color: PALETTE.primary,
   },
-  meta: {
-    flex: 1,
+
+  // Waveform Scrub-Bar
+  scrubSection: {
+    marginTop: 6,
+  },
+  scrubTrackArea: {
+    paddingVertical: 6,
+  },
+  scrubTrackBg: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    overflow: 'hidden',
+  },
+  scrubTrackProgress: {
+    height: '100%',
+    backgroundColor: PALETTE.accent,
+    borderRadius: 2,
+  },
+  timecodeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    marginTop: 4,
   },
   timecodeActive: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 13,
-    color: PALETTE.text,
-    fontVariant: ['tabular-nums'],
+    fontSize: 11,
+    color: PALETTE.accent,
   },
-  metaDivider: {
+  timecodeDivider: {
     fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 12,
+    fontSize: 11,
     color: PALETTE.textMuted,
+    marginHorizontal: 3,
   },
   timecodeTotal: {
     fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 13,
-    color: PALETTE.textMuted,
-    fontVariant: ['tabular-nums'],
-  },
-  metaDot: {
-    color: PALETTE.border,
-    marginHorizontal: 2,
-  },
-  metaPlays: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 12,
-    color: PALETTE.textMuted,
-    fontVariant: ['tabular-nums'],
-  },
-  actionBtn: {
-    alignItems: 'center',
-    gap: 3,
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  actionBtnPressed: {
-    opacity: 0.7,
-  },
-  actionBtnText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 11,
     color: PALETTE.textMuted,
-    fontVariant: ['tabular-nums'],
   },
-  actionBtnTextActive: {
-    color: PALETTE.accent,
-  },
-  likeBtn: {
-    alignItems: 'center',
-    gap: 3,
-    minWidth: 44,
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  likeBtnPressed: {
-    opacity: 0.7,
-  },
-  likeCount: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 11,
-    color: PALETTE.textMuted,
-    fontVariant: ['tabular-nums'],
-  },
-  likeCountActive: {
-    color: PALETTE.accent,
-  },
-  ctaButton: {
-    backgroundColor: PALETTE.accent,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  ctaButtonPressed: {
-    opacity: 0.85,
-  },
-  ctaText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
-    color: '#ffffff',
-  },
-  tags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tag: {
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 6,
-    backgroundColor: PALETTE.card,
-    borderWidth: 1,
-    borderColor: PALETTE.borderSubtle,
-  },
-  tagText: {
+  listenCountMeta: {
     fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 12,
-    color: PALETTE.textMuted,
-  },
-  // Sponsored Promo Fallback
-  adPromoCard: {
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.35)',
-    borderRadius: 12,
-    padding: 14,
-    gap: 10,
-    marginTop: 4,
-  },
-  adPromoHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  adBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  adBadgeText: {
-    fontFamily: 'PlusJakartaSans_700Bold',
-    fontSize: 10,
-    color: '#fbbf24',
-    letterSpacing: 0.5,
-  },
-  skipNowBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: PALETTE.card,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-  },
-  skipNowText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 11,
-    color: PALETTE.textSecondary,
+    color: PALETTE.textMuted,
+    marginLeft: 6,
   },
-  adPromoTagline: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 13,
-    color: PALETTE.text,
-    lineHeight: 18,
-  },
-  adCountdownTrack: {
-    height: 3,
-    backgroundColor: PALETTE.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  adCountdownFill: {
-    height: '100%',
-    backgroundColor: '#fbbf24',
-    borderRadius: 2,
-  },
-  // DM Share Sheet
-  shareOverlay: {
+
+  // Modals & Bottom Sheets
+  sheetOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'flex-end',
   },
-  shareSheet: {
+  sheetContainer: {
     backgroundColor: PALETTE.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingTop: 12,
     paddingBottom: 36,
     paddingHorizontal: 20,
     maxHeight: '65%',
-    borderTopWidth: 1,
+    borderWidth: 1,
     borderColor: PALETTE.border,
   },
-  shareHandle: {
+  sheetHandle: {
     width: 36,
     height: 4,
     borderRadius: 2,
@@ -956,40 +1054,39 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 16,
   },
-  shareTitle: {
-    fontFamily: 'Sora_600SemiBold',
-    fontSize: 18,
-    color: PALETTE.text,
+  sheetTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 17,
+    color: PALETTE.primary,
     marginBottom: 12,
   },
-  shareFeedbackText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+  sheetFeedbackText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 13,
-    color: PALETTE.accent,
+    color: PALETTE.lime,
     marginBottom: 10,
   },
-  shareList: {
-    maxHeight: 280,
+  sheetList: {
+    marginTop: 6,
   },
-  emptyThreads: {
-    paddingVertical: 24,
+  emptyList: {
+    paddingVertical: 32,
     alignItems: 'center',
   },
-  emptyThreadsText: {
+  emptyListText: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
     color: PALETTE.textMuted,
   },
-  threadShareRow: {
+  threadRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: PALETTE.borderSubtle,
-    gap: 12,
   },
-  threadShareRowPressed: {
-    opacity: 0.7,
+  threadRowPressed: {
+    backgroundColor: PALETTE.cardHover,
   },
   threadAvatar: {
     width: 40,
@@ -998,13 +1095,14 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.card,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
   threadAvatarText: {
-    fontFamily: 'Sora_600SemiBold',
+    fontFamily: 'Sora_700Bold',
     fontSize: 15,
-    color: PALETTE.accent,
+    color: PALETTE.primary,
   },
   threadInfo: {
     flex: 1,
@@ -1012,36 +1110,120 @@ const styles = StyleSheet.create({
   threadName: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 14,
-    color: PALETTE.text,
+    color: PALETTE.primary,
   },
   threadUsername: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 12,
-    color: PALETTE.textMuted,
+    color: PALETTE.textSecondary,
   },
-  sendChip: {
-    backgroundColor: PALETTE.accent,
+  echoChip: {
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 14,
+    backgroundColor: PALETTE.accent,
   },
-  sendChipText: {
+  echoChipText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 12,
-    color: '#ffffff',
+    color: '#FFFFFF',
   },
-  closeShareBtn: {
-    marginTop: 16,
-    paddingVertical: 12,
-    backgroundColor: PALETTE.card,
-    borderRadius: 8,
-    alignItems: 'center',
+
+  // Report Modal
+  reportModalCard: {
+    backgroundColor: PALETTE.surface,
+    borderRadius: 20,
+    marginHorizontal: 20,
+    marginBottom: 'auto',
+    marginTop: 'auto',
+    padding: 24,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
-  closeShareText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+  reportHeading: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 18,
+    color: PALETTE.primary,
+    marginBottom: 6,
+  },
+  reportSubheading: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: PALETTE.textSecondary,
+    marginBottom: 18,
+  },
+  reportSuccessBox: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  reportSuccessText: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 16,
+    color: PALETTE.primary,
+    marginTop: 12,
+  },
+  reportSuccessSubtext: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: PALETTE.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  reasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginBottom: 6,
+    backgroundColor: PALETTE.card,
+  },
+  reasonRowActive: {
+    backgroundColor: PALETTE.cardHover,
+    borderColor: PALETTE.accent,
+    borderWidth: 1,
+  },
+  radioCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: PALETTE.textMuted,
+    marginRight: 12,
+  },
+  radioCircleActive: {
+    borderColor: PALETTE.accent,
+    backgroundColor: PALETTE.accent,
+  },
+  reasonText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 13,
+    color: PALETTE.primary,
+  },
+  reportActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  cancelBtnText: {
+    fontFamily: 'PlusJakartaSans_500Medium',
     fontSize: 14,
     color: PALETTE.textSecondary,
+  },
+  submitReportBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: PALETTE.magenta,
+  },
+  submitReportText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 14,
+    color: '#FFFFFF',
   },
 });

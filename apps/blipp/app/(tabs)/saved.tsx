@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
+  ActivityIndicator,
+  Animated,
   FlatList,
   Modal,
   Pressable,
@@ -15,6 +17,7 @@ import {
   BookmarkMark,
   PlayMark,
   PauseMark,
+  AudioReelMark,
 } from '@/components/common/Icons';
 import { AudioReel } from '@/components/audio/AudioReel';
 import { api, resolvePublicAudioUrl } from '@/lib/api';
@@ -23,7 +26,7 @@ import type { BlippItem } from '@/lib/types';
 
 function formatDuration(secs: number): string {
   const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
+  const s = secs % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
@@ -38,7 +41,7 @@ export default function SavedScreen() {
 
   // Active playing item for inline preview
   const [activeInlineId, setActiveInlineId] = useState<string | null>(null);
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
+  const audioRef = useRef<any>(null);
 
   // Active item for full reel modal
   const [activeReelItem, setActiveReelItem] = useState<BlippItem | null>(null);
@@ -74,12 +77,10 @@ export default function SavedScreen() {
   };
 
   const handleUnsave = async (blippId: string) => {
-    // Optimistic removal
     setItems((prev) => prev.filter((it) => it.id !== blippId && it.blipp_id !== blippId));
     try {
       await api.unsaveBlipp(blippId);
     } catch {
-      // Reload on failure
       void loadSaved();
     }
   };
@@ -87,127 +88,163 @@ export default function SavedScreen() {
   const toggleInlinePlay = (item: BlippItem) => {
     const id = item.blipp_id || item.id;
     if (activeInlineId === id) {
-      audioEl?.pause();
+      if (audioRef.current) {
+        audioRef.current.pause?.();
+      }
       setActiveInlineId(null);
       return;
     }
 
-    if (audioEl) {
-      audioEl.pause();
-      audioEl.src = '';
+    if (audioRef.current) {
+      audioRef.current.pause?.();
+      audioRef.current = null;
     }
-
-    if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
 
     const url = resolvePublicAudioUrl(item.audio_variants?.standard || item.audio_url || item.audioUrl || '');
     if (!url) return;
 
-    const nextAudio = new Audio(url);
-    nextAudio.play().catch(() => {});
-    nextAudio.onended = () => setActiveInlineId(null);
-    setAudioEl(nextAudio);
-    setActiveInlineId(id);
+    if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+      try {
+        const nextAudio = new Audio(url);
+        nextAudio.play().catch(() => {});
+        nextAudio.onended = () => setActiveInlineId(null);
+        audioRef.current = nextAudio;
+        setActiveInlineId(id);
+      } catch {
+        setActiveInlineId(null);
+      }
+    } else {
+      // Toggle state preview indicator for native mobile
+      setActiveInlineId(id);
+    }
   };
 
-  // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      if (audioEl) {
-        audioEl.pause();
-        audioEl.src = '';
+      if (audioRef.current) {
+        audioRef.current.pause?.();
+        audioRef.current = null;
       }
     };
-  }, [audioEl]);
+  }, []);
 
-  const renderItem = ({ item }: { item: BlippItem }) => {
+  const renderItem = ({ item, index }: { item: BlippItem; index: number }) => {
     const id = item.blipp_id || item.id;
     const isPlayingInline = activeInlineId === id;
-    const gradient = item.coverGradient || ['#1e1b4b', '#312e81'];
+
+    // Generate static waveform bar heights for waveform snippet
+    const barHeights = [40, 75, 55, 90, 60, 85, 45, 95, 70, 50, 80, 65, 90, 45, 60];
 
     return (
       <Pressable
         style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
         onPress={() => {
-          if (audioEl) {
-            audioEl.pause();
+          if (audioRef.current) {
+            audioRef.current.pause?.();
             setActiveInlineId(null);
           }
           setActiveReelItem(item);
         }}
         accessibilityRole="button"
-        accessibilityLabel={`Saved blipp: ${item.title}`}
+        accessibilityLabel={`Stashed blipp: ${item.title}`}
         testID={`saved-item-${id}`}
       >
-        {/* Decorative Acoustic Accent Bar */}
-        <View style={[styles.cardAccent, { backgroundColor: gradient[0] }]} />
-
-        {/* Card Content Area */}
-        <View style={styles.cardBody}>
-          <View style={styles.cardHeaderRow}>
-            <View style={styles.creatorBadge}>
-              <View style={[styles.avatarCircle, { backgroundColor: gradient[1] }]}>
-                <Text style={styles.avatarInitial}>
-                  {(item.author || 'C').charAt(0).toUpperCase()}
-                </Text>
-              </View>
+        {/* Top Header: Creator Avatar & Unstash Ribbon */}
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.creatorBadge}>
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarInitial}>
+                {(item.author || 'C').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.creatorTextWrap}>
               <Text style={styles.creatorName} numberOfLines={1}>
                 {item.author || 'Creator'}
               </Text>
+              <Text style={styles.broadcastDate}>
+                {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Archived'}
+              </Text>
             </View>
-
-            {/* Unsave Bookmark Button */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.unsaveBtn,
-                pressed && styles.btnPressed,
-              ]}
-              onPress={() => handleUnsave(id)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityRole="button"
-              accessibilityLabel="Remove from saved"
-              testID={`unsave-button-${id}`}
-            >
-              <BookmarkMark size={18} color={PALETTE.accent} filled={true} />
-            </Pressable>
           </View>
 
-          {/* Title */}
-          <Text style={styles.cardTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
+          {/* Unstash Ribbon Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.unsaveBtn,
+              pressed && styles.btnPressed,
+            ]}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              handleUnsave(id);
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Remove from stash"
+            testID={`unsave-button-${id}`}
+          >
+            <BookmarkMark size={20} color={PALETTE.amber} filled={true} />
+          </Pressable>
+        </View>
 
-          {/* Bottom Telemetry & Quick Play Row */}
-          <View style={styles.cardFooter}>
-            <View style={styles.metaRow}>
-              <View style={styles.durationPill}>
-                <Text style={styles.durationText}>
-                  {formatDuration(item.duration_seconds || item.duration || 0)}
-                </Text>
-              </View>
-              <Text style={styles.tapToPlayHint}>Tap to view full reel</Text>
-            </View>
+        {/* Title */}
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {item.title}
+        </Text>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.inlinePlayBtn,
-                isPlayingInline && styles.inlinePlayBtnActive,
-                pressed && styles.btnPressed,
-              ]}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                toggleInlinePlay(item);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={isPlayingInline ? 'Pause audio' : 'Play audio preview'}
-              testID={`inline-play-${id}`}
-            >
-              {isPlayingInline ? (
-                <PauseMark size={16} color="#ffffff" />
-              ) : (
-                <PlayMark size={16} color="#ffffff" />
-              )}
-            </Pressable>
+        {/* Waveform Preview Snippet */}
+        <View style={styles.waveformSnippetContainer}>
+          <View style={styles.waveformBars}>
+            {barHeights.map((heightPercent, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.waveformSnippetBar,
+                  {
+                    height: `${heightPercent}%`,
+                    backgroundColor: isPlayingInline
+                      ? PALETTE.accent
+                      : idx < 6
+                      ? 'rgba(124, 58, 237, 0.6)'
+                      : 'rgba(255, 255, 255, 0.18)',
+                  },
+                ]}
+              />
+            ))}
           </View>
+        </View>
+
+        {/* Card Footer: Duration Pill & Instant Inline Playback */}
+        <View style={styles.cardFooter}>
+          <View style={styles.durationPill}>
+            <View style={styles.durationDot} />
+            <Text style={styles.durationText}>
+              {formatDuration(item.duration_seconds || item.duration || 0)}
+            </Text>
+          </View>
+
+          <Text style={styles.tapToPlayHint}>Tap to stream reel</Text>
+
+          {/* Instant Inline Playback Button */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.inlinePlayBtn,
+              isPlayingInline && styles.inlinePlayBtnActive,
+              pressed && styles.btnPressed,
+            ]}
+            onPress={(e) => {
+              e.stopPropagation?.();
+              toggleInlinePlay(item);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={isPlayingInline ? 'Pause preview' : 'Play audio preview'}
+            testID={`inline-play-${id}`}
+          >
+            {isPlayingInline ? (
+              <PauseMark size={16} color="#FFFFFF" />
+            ) : (
+              <PlayMark size={16} color="#FFFFFF" />
+            )}
+          </Pressable>
         </View>
       </Pressable>
     );
@@ -216,19 +253,19 @@ export default function SavedScreen() {
   if (!accessToken) {
     return (
       <View style={styles.root}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <Text style={styles.headerTitle}>Saved</Text>
+        <View style={[styles.header, { paddingTop: insets.top + 18 }]}>
+          <Text style={styles.headerTitle}>My Stash 🎧</Text>
           <Text style={styles.headerSubtitle}>
-            Archived audio broadcasts & saved moments
+            Your bookmarked frequencies and saved broadcast moments
           </Text>
         </View>
         <View style={styles.authGuardContainer}>
           <View style={styles.authGuardIconCircle}>
-            <BookmarkMark size={42} color={PALETTE.accent} filled />
+            <BookmarkMark size={44} color={PALETTE.amber} filled />
           </View>
-          <Text style={styles.authGuardHeading}>Sign in to view saved Blipps</Text>
+          <Text style={styles.authGuardHeading}>Sign in to access your Stash</Text>
           <Text style={styles.authGuardSubtext}>
-            Log in to your account to view bookmarked audio broadcasts and stream saved highlights.
+            Log in to stream bookmarked broadcasts and listen to your saved clips offline or on-demand.
           </Text>
           <Pressable
             style={({ pressed }) => [
@@ -240,7 +277,7 @@ export default function SavedScreen() {
             accessibilityLabel="Sign in to view saved Blipps"
             testID="saved-signin-button"
           >
-            <Text style={styles.authGuardBtnText}>Sign In</Text>
+            <Text style={styles.authGuardBtnText}>Sign In to Blipp</Text>
           </Pressable>
         </View>
       </View>
@@ -249,94 +286,96 @@ export default function SavedScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Studio Header Bar */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      {/* Header: Rebranded to My Stash 🎧 */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerTitleRow}>
-          <Text style={styles.headerTitle}>Saved</Text>
+          <Text style={styles.headerTitle}>My Stash 🎧</Text>
           {items.length > 0 && (
-            <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{items.length}</Text>
+            <View style={styles.stashCountBadge}>
+              <Text style={styles.stashCountText}>{items.length}</Text>
             </View>
           )}
         </View>
         <Text style={styles.headerSubtitle}>
-          Archived audio broadcasts & saved moments
+          Curated collection of your bookmarked audio reels
         </Text>
       </View>
 
-      {/* List / Empty State */}
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.blipp_id || item.id}
-        renderItem={renderItem}
-        contentContainerStyle={[
-          styles.listContent,
-          items.length === 0 && styles.listContentEmpty,
-        ]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={onRefresh}
-            tintColor={PALETTE.accent}
-            colors={[PALETTE.accent]}
-          />
-        }
-        ListEmptyComponent={
-          !isLoading ? (
-            <View style={styles.emptyWrap} testID="saved-empty-state">
-              <View style={styles.emptyIconCircle}>
-                <BookmarkMark size={36} color={PALETTE.textMuted} filled={false} />
-              </View>
-              <Text style={styles.emptyHeading}>No saved Blipps yet</Text>
-              <Text style={styles.emptySubtext}>
-                Tap the bookmark icon on any broadcast to archive it in your studio library.
-              </Text>
-            </View>
-          ) : null
-        }
-      />
-
-      {/* Full Screen Audio Reel Modal */}
-      {activeReelItem && (
-        <Modal
-          visible={Boolean(activeReelItem)}
-          animationType="slide"
-          presentationStyle="fullScreen"
-          onRequestClose={() => setActiveReelItem(null)}
-        >
-          <View style={styles.modalRoot}>
-            <View style={[styles.modalHeader, { paddingTop: insets.top + 10 }]}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalCloseBtn,
-                  pressed && styles.btnPressed,
-                ]}
-                onPress={() => setActiveReelItem(null)}
-                accessibilityRole="button"
-                accessibilityLabel="Close player"
-                testID="close-reel-modal-button"
-              >
-                <Text style={styles.modalCloseText}>✕ Done</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.modalReelContainer}>
-              <AudioReel
-                item={activeReelItem as any}
-                isActive={true}
-                height={600}
-                onLike={() => {}}
-                feedItems={activeReelItem ? [activeReelItem as any] : []}
-                activeIndex={0}
-              />
-            </View>
+      {isLoading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={PALETTE.accent} />
+          <Text style={styles.loadingText}>Fetching your stashed tracks...</Text>
+        </View>
+      ) : items.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconCircle}>
+            <AudioReelMark size={48} color={PALETTE.textMuted} />
           </View>
-        </Modal>
+          <Text style={styles.emptyHeading}>Your Stash is Empty</Text>
+          <Text style={styles.emptySubheading}>
+            Tap the bookmark ribbon on any broadcast in your feed to save it here for quick listening.
+          </Text>
+          <Pressable
+            style={styles.exploreBtn}
+            onPress={() => router.push('/' as any)}
+          >
+            <Text style={styles.exploreBtnText}>Explore Feed 🔥</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(it) => it.blipp_id || it.id}
+          renderItem={renderItem}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: insets.bottom + 90 },
+          ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={PALETTE.accent}
+              colors={[PALETTE.accent]}
+            />
+          }
+        />
       )}
+
+      {/* Full Audio Reel Modal for Selected Stashed Item */}
+      <Modal
+        visible={Boolean(activeReelItem)}
+        animationType="slide"
+        onRequestClose={() => setActiveReelItem(null)}
+      >
+        <View style={styles.reelModalContainer}>
+          {activeReelItem && (
+            <AudioReel
+              item={activeReelItem as any}
+              isActive={true}
+              height={760}
+              onLike={() => {
+                setActiveReelItem((prev) =>
+                  prev ? { ...prev, isLiked: !prev.isLiked } : null,
+                );
+              }}
+            />
+          )}
+          <Pressable
+            style={[styles.closeReelBtn, { top: insets.top + 12 }]}
+            onPress={() => setActiveReelItem(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Close broadcast reel"
+          >
+            <Text style={styles.closeReelBtnText}>✕ Close</Text>
+          </Pressable>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: {
@@ -345,7 +384,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingBottom: 14,
+    paddingBottom: 16,
     backgroundColor: PALETTE.surface,
     borderBottomWidth: 1,
     borderBottomColor: PALETTE.border,
@@ -353,23 +392,24 @@ const styles = StyleSheet.create({
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+    marginBottom: 4,
   },
   headerTitle: {
     fontFamily: 'Sora_700Bold',
     fontSize: 24,
-    color: PALETTE.text,
+    color: PALETTE.primary,
     letterSpacing: -0.5,
   },
-  countBadge: {
-    backgroundColor: PALETTE.accentDim,
+  stashCountBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: 12,
+    backgroundColor: PALETTE.accentDim,
     borderWidth: 1,
     borderColor: PALETTE.accent,
   },
-  countBadgeText: {
+  stashCountText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 12,
     color: PALETTE.accent,
@@ -377,104 +417,131 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontFamily: 'PlusJakartaSans_400Regular',
     fontSize: 13,
-    color: PALETTE.textMuted,
-    marginTop: 2,
+    color: PALETTE.textSecondary,
   },
+
+  // List & Cards
   listContent: {
     padding: 16,
-    gap: 12,
-    maxWidth: 640,
-    width: '100%',
-    alignSelf: 'center',
-  },
-  listContentEmpty: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    gap: 14,
   },
   card: {
     backgroundColor: PALETTE.card,
-    borderRadius: 12,
+    borderRadius: 18,
+    padding: 16,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    flexDirection: 'row',
-    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
   },
   cardPressed: {
     backgroundColor: PALETTE.cardHover,
-    borderColor: PALETTE.accent,
-  },
-  cardAccent: {
-    width: 6,
-  },
-  cardBody: {
-    flex: 1,
-    padding: 14,
-    gap: 8,
+    transform: [{ scale: 0.99 }],
   },
   cardHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 10,
   },
   creatorBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     flex: 1,
   },
   avatarCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: PALETTE.accent,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarInitial: {
     fontFamily: 'Sora_700Bold',
-    fontSize: 12,
-    color: '#ffffff',
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  creatorTextWrap: {
+    flex: 1,
   },
   creatorName: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 13,
-    color: PALETTE.textSecondary,
-    flex: 1,
+    fontSize: 14,
+    color: PALETTE.primary,
+  },
+  broadcastDate: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 11,
+    color: PALETTE.textMuted,
   },
   unsaveBtn: {
-    padding: 4,
-    borderRadius: 6,
+    padding: 6,
+  },
+  btnPressed: {
+    opacity: 0.7,
   },
   cardTitle: {
-    fontFamily: 'Sora_600SemiBold',
+    fontFamily: 'Sora_700Bold',
     fontSize: 16,
-    color: PALETTE.text,
+    color: PALETTE.primary,
     lineHeight: 22,
+    marginBottom: 12,
   },
+
+  // Waveform Preview Snippet
+  waveformSnippetContainer: {
+    height: 36,
+    backgroundColor: PALETTE.surface,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.borderSubtle,
+  },
+  waveformBars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: '100%',
+  },
+  waveformSnippetBar: {
+    width: 3.5,
+    borderRadius: 2,
+  },
+
+  // Footer & Inline Play
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 4,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
   },
   durationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
     backgroundColor: PALETTE.surface,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
+  durationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: PALETTE.lime,
+  },
   durationText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 11,
-    color: PALETTE.textMuted,
-    fontVariant: ['tabular-nums'],
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: PALETTE.primary,
   },
   tapToPlayHint: {
     fontFamily: 'PlusJakartaSans_400Regular',
@@ -484,102 +551,42 @@ const styles = StyleSheet.create({
   inlinePlayBtn: {
     width: 36,
     height: 36,
-    borderRadius: 8,
+    borderRadius: 18,
     backgroundColor: PALETTE.accent,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: PALETTE.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
   },
   inlinePlayBtnActive: {
-    backgroundColor: '#dc2626',
+    backgroundColor: PALETTE.magenta,
   },
-  btnPressed: {
-    opacity: 0.7,
-  },
-  // Empty State
-  emptyWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 12,
-  },
-  emptyIconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: PALETTE.surface,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  emptyHeading: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 18,
-    color: PALETTE.text,
-    textAlign: 'center',
-  },
-  emptySubtext: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 13,
-    color: PALETTE.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 280,
-  },
-  // Modal Full Reel
-  modalRoot: {
-    flex: 1,
-    backgroundColor: PALETTE.bg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-    backgroundColor: PALETTE.bg,
-    zIndex: 20,
-  },
-  modalCloseBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    backgroundColor: PALETTE.surface,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-  },
-  modalCloseText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 13,
-    color: PALETTE.text,
-  },
-  modalReelContainer: {
-    flex: 1,
-    justifyContent: 'center',
-  },
+
   // Auth Guard
   authGuardContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
-    gap: 12,
   },
   authGuardIconCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: PALETTE.surface,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    justifyContent: 'center',
+    backgroundColor: PALETTE.amberDim,
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: PALETTE.amber,
   },
   authGuardHeading: {
     fontFamily: 'Sora_700Bold',
     fontSize: 20,
-    color: PALETTE.text,
+    color: PALETTE.primary,
+    marginBottom: 8,
     textAlign: 'center',
   },
   authGuardSubtext: {
@@ -588,24 +595,100 @@ const styles = StyleSheet.create({
     color: PALETTE.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
-    maxWidth: 290,
-    marginBottom: 12,
+    marginBottom: 24,
   },
   authGuardBtn: {
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 24,
     backgroundColor: PALETTE.accent,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 160,
   },
   authGuardBtnPressed: {
-    opacity: 0.85,
+    opacity: 0.8,
   },
   authGuardBtnText: {
     fontFamily: 'PlusJakartaSans_600SemiBold',
     fontSize: 15,
-    color: '#ffffff',
+    color: '#FFFFFF',
+  },
+
+  // Empty State & Loading
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 14,
+    color: PALETTE.textSecondary,
+    marginTop: 12,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  emptyIconCircle: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: PALETTE.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  emptyHeading: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 19,
+    color: PALETTE.primary,
+    marginBottom: 8,
+  },
+  emptySubheading: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: PALETTE.textSecondary,
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 20,
+  },
+  exploreBtn: {
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: PALETTE.surface,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  exploreBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
+    color: PALETTE.primary,
+  },
+
+  // Reel Modal
+  reelModalContainer: {
+    flex: 1,
+    backgroundColor: PALETTE.bg,
+  },
+  closeReelBtn: {
+    position: 'absolute',
+    right: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: 'rgba(17, 19, 27, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    zIndex: 20,
+  },
+  closeReelBtnText: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 13,
+    color: '#FFFFFF',
   },
 });

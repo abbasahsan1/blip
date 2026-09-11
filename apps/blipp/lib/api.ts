@@ -35,99 +35,57 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Base URL Configuration ───────────────────────────────────────────────────
+// ─── Base URL & Traefik Gateway Configuration ────────────────────────────────
 
-export const getApiBaseUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+export const getGatewayUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_GATEWAY_URL) {
+    return process.env.EXPO_PUBLIC_GATEWAY_URL.replace(/\/+$/, '');
   }
-  // In production browser environments where /v1 and /api are reverse-proxied via ingress
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    const raw = process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+    if (raw.includes(':8000')) {
+      return raw.replace(':8000', ':8419').replace(/\/v1$/, '');
+    }
+    return raw.replace(/\/v1$/, '');
+  }
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      return '';
+      return window.location.origin;
     }
   }
-  return 'http://localhost:8000/v1';
+  return 'http://localhost:8419';
 };
+
+export const getApiBaseUrl = (): string => getGatewayUrl();
+export const getContentIngestUrl = (): string => getGatewayUrl();
+export const getFeedServiceUrl = (): string => getGatewayUrl();
+export const getSocialGraphUrl = (): string => getGatewayUrl();
+export const getMessagingUrl = (): string => getGatewayUrl();
+export const getModerationUrl = (): string => getGatewayUrl();
+export const getMinioPublicUrl = (): string => getGatewayUrl();
 
 export const getKeycloakUrl = (): string => {
   if (process.env.EXPO_PUBLIC_KEYCLOAK_URL) {
     const raw = process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
-    return raw.endsWith('/keycloak') ? raw : `${raw}/keycloak`;
+    if (!raw.includes(':8080')) return raw;
   }
-  // In production browser environments where /keycloak is reverse-proxied via ingress
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      return '/keycloak';
-    }
-  }
-  return 'http://localhost:8080/keycloak';
-};
-export const getContentIngestUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_CONTENT_INGEST_URL) {
-    return process.env.EXPO_PUBLIC_CONTENT_INGEST_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8001');
-  }
-  return base;
-};
-
-export const getFeedServiceUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_FEED_URL) {
-    return process.env.EXPO_PUBLIC_FEED_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8002');
-  }
-  return base;
-};
-
-export const getSocialGraphUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL) {
-    return process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8003');
-  }
-  return base;
-};
-
-export const getMessagingUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_MESSAGING_URL) {
-    return process.env.EXPO_PUBLIC_MESSAGING_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8004');
-  }
-  return base;
-};
-
-export const getMinioPublicUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_MINIO_URL) {
-    return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
-  }
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    const host = window.location.hostname;
-    return `http://${host}:9000`;
-  }
-  return 'http://localhost:9000';
+  return getGatewayUrl();
 };
 
 export const resolvePublicAudioUrl = (url?: string | null): string => {
   if (!url) return '';
-  const internalPatterns = [
+  const gateway = getGatewayUrl();
+  if (url.startsWith('/')) {
+    return `${gateway}${url}`;
+  }
+  const internalOrOldPatterns = [
     'minio.blipp.svc.cluster.local:9000',
     'minio:9000',
+    ':9000',
   ];
-  for (const pattern of internalPatterns) {
+  for (const pattern of internalOrOldPatterns) {
     if (url.includes(pattern)) {
-      const publicBase = getMinioPublicUrl();
-      return url.replace(/^https?:\/\/[^/]+(:9000)?/, publicBase);
+      return url.replace(/^https?:\/\/[^/]+(:9000)?/, gateway);
     }
   }
   return url;
@@ -178,56 +136,9 @@ export async function requestRaw<T = any>(
     headers['Authorization'] = `Bearer ${activeToken}`;
   }
 
-  let baseUrl = getApiBaseUrl();
-  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
-
-  if (
-    normalizedPath === '/v1/uploads' ||
-    normalizedPath.startsWith('/v1/uploads/') ||
-    normalizedPath === '/uploads' ||
-    normalizedPath.startsWith('/uploads/') ||
-    normalizedPath === '/v1/blipps/saved' ||
-    normalizedPath === '/blipps/saved' ||
-    normalizedPath.endsWith('/save')
-  ) {
-    baseUrl = getContentIngestUrl();
-  } else if (
-    normalizedPath === '/v1/feed' ||
-    normalizedPath.startsWith('/v1/feed/') ||
-    normalizedPath === '/feed' ||
-    normalizedPath.startsWith('/feed/') ||
-    normalizedPath === '/v1/blipps' ||
-    normalizedPath.startsWith('/v1/blipps/')
-  ) {
-    baseUrl = getFeedServiceUrl();
-  } else if (
-    normalizedPath === '/v1/profiles' ||
-    normalizedPath.startsWith('/v1/profiles/') ||
-    normalizedPath === '/profiles' ||
-    normalizedPath.startsWith('/profiles/') ||
-    normalizedPath === '/v1/social' ||
-    normalizedPath.startsWith('/v1/social/') ||
-    normalizedPath === '/social' ||
-    normalizedPath.startsWith('/social/')
-  ) {
-    baseUrl = getSocialGraphUrl();
-  } else if (
-    normalizedPath === '/v1/messages' ||
-    normalizedPath.startsWith('/v1/messages/') ||
-    normalizedPath === '/v1/stories' ||
-    normalizedPath.startsWith('/v1/stories/') ||
-    normalizedPath === '/messages' ||
-    normalizedPath.startsWith('/messages/') ||
-    normalizedPath === '/stories' ||
-    normalizedPath.startsWith('/stories/')
-  ) {
-    baseUrl = getMessagingUrl();
-  }
-
-  if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
-    normalizedPath = normalizedPath.slice(3);
-  }
-  const endpointUrl = baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+  const gateway = getGatewayUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const endpointUrl = `${gateway}${normalizedPath}`;
 
   const response = await fetch(endpointUrl, {
     ...rest,

@@ -216,3 +216,39 @@ export function PlusMark({ size = 20, color = '#ffffff' }: IconProps) {
   );
 }
 
+/**
+ * Moderation / Report Flag Vector Mark
+ */
+export function FlagMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1v19"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Raised Microphone Vector Mark (for "Drop" tab)
+ */
+export function MicMark({ size = 22, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="9" y="3" width="6" height="11" rx="3" fill={color} />
+      <Path
+        d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+
