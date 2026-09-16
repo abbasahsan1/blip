@@ -6,16 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Ensure /usr/bin/python3 exists in builder so /opt/venv/bin/python resolves
-RUN ln -sf /usr/local/bin/python3 /usr/bin/python3
-
-# Copy pre-installed virtual environment from auth service
-COPY --from=blipp-auth-service:latest /opt/venv /opt/venv
-
-# Install redis and async-timeout (dependencies not present in auth service) and shared core library
-RUN /opt/venv/bin/pip install --no-cache-dir redis async-timeout
+# Build this service's virtual environment from its own lockfile.
+RUN python -m venv /opt/venv
 COPY libs/common /libs/common
-RUN /opt/venv/bin/pip install --no-cache-dir --no-build-isolation --no-deps /libs/common
+COPY services/feed/requirements.txt ./requirements.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    sed '/^-e /d' requirements.txt > /tmp/requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir /libs/common
 
 # Re-point the symlink so /opt/venv/bin/python resolves correctly in distroless
 RUN ln -sf /usr/bin/python3 /opt/venv/bin/python && \

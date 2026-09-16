@@ -195,22 +195,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"}
         )
 
-    token = credentials.credentials
-    if token.startswith("dev-token-"):
-        uid_str = token.replace("dev-token-", "")
-        try:
-            user_uuid = uuid.UUID(uid_str)
-            return AuthenticatedUser(
-                user_id=user_uuid,
-                id=str(user_uuid),
-                username=f"user_{str(user_uuid)[:8]}",
-                email=f"user_{str(user_uuid)[:8]}@blipp.local",
-                roles=["user"],
-            )
-        except Exception:
-            pass
-
-    payload = await verify_token(token)
+    payload = await verify_token(credentials.credentials)
 
     sub = payload.get("sub")
     if not sub:

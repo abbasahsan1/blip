@@ -21,7 +21,9 @@ from blipp_common.exceptions import (
 )
 from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
 from blipp_common.redis import get_redis_client, close_redis
+from blipp_common.events import event_bus
 from app.api.v1.feed import router as feed_router
+from app.api.v1.events import router as events_router
 from app.models.schemas import HealthResponse
 
 logging.basicConfig(
@@ -42,11 +44,16 @@ async def lifespan(app: FastAPI):
         await get_redis_client()
     except Exception as e:
         logger.error(f"Redis startup error: {e}")
+    try:
+        await event_bus.connect(client_name="feed-service")
+    except Exception as e:
+        logger.error(f"NATS startup error: {e}")
     yield
     try:
         await close_redis()
     except Exception as e:
         logger.error(f"Redis shutdown error: {e}")
+    await event_bus.close()
     try:
         await close_db_pool()
     except Exception as e:
@@ -228,6 +235,7 @@ async def docs_redirect():
 # Mount routes under /v1/feed and /feed
 app.include_router(feed_router, prefix="/v1/feed")
 app.include_router(feed_router, prefix="/feed")
+app.include_router(events_router, prefix="/v1")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

@@ -253,19 +253,6 @@ export function AudioReel({
     await onLike();
   };
 
-  // ── Dynamic Center Equalizer Visualizer (5 bars with random spring physics) ──
-  const eqBars = useRef([
-    new Animated.Value(0.2),
-    new Animated.Value(0.2),
-    new Animated.Value(0.2),
-    new Animated.Value(0.2),
-    new Animated.Value(0.2),
-  ]).current;
-
-  // Ambient radial glow animation
-  const ambientGlowAnim = useRef(new Animated.Value(0.4)).current;
-  const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
-
   // Animated scrolling audio track tag
   const trackTagAnim = useRef(new Animated.Value(0)).current;
 
@@ -294,74 +281,6 @@ export function AudioReel({
       loop?.stop();
     };
   }, [isPlaying, trackTagAnim]);
-
-  useEffect(() => {
-    let isMounted = true;
-    if (isPlaying) {
-      const runSpringCycle = (bar: Animated.Value, initialDelay: number) => {
-        if (!isMounted) return;
-        Animated.sequence([
-          Animated.delay(initialDelay),
-          Animated.spring(bar, {
-            toValue: 0.35 + Math.random() * 0.65,
-            friction: 2.5 + Math.random() * 1.5,
-            tension: 45 + Math.random() * 25,
-            useNativeDriver: false,
-          }),
-          Animated.spring(bar, {
-            toValue: 0.12 + Math.random() * 0.22,
-            friction: 3,
-            tension: 50,
-            useNativeDriver: false,
-          }),
-        ]).start(() => {
-          if (isMounted && isPlaying) {
-            runSpringCycle(bar, Math.random() * 60);
-          }
-        });
-      };
-
-      eqBars.forEach((bar, idx) => {
-        runSpringCycle(bar, idx * 50);
-      });
-
-      glowLoop.current = Animated.loop(
-        Animated.sequence([
-          Animated.timing(ambientGlowAnim, {
-            toValue: 0.9,
-            duration: 1200,
-            useNativeDriver: false,
-          }),
-          Animated.timing(ambientGlowAnim, {
-            toValue: 0.4,
-            duration: 1200,
-            useNativeDriver: false,
-          }),
-        ]),
-      );
-      glowLoop.current.start();
-    } else {
-      glowLoop.current?.stop();
-      eqBars.forEach((bar) => {
-        Animated.spring(bar, {
-          toValue: 0.2,
-          friction: 4,
-          tension: 40,
-          useNativeDriver: false,
-        }).start();
-      });
-      Animated.timing(ambientGlowAnim, {
-        toValue: 0.25,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    }
-
-    return () => {
-      isMounted = false;
-      glowLoop.current?.stop();
-    };
-  }, [isPlaying, eqBars, ambientGlowAnim]);
 
   // Scrub bar interaction
   const handleScrub = (event: any) => {
