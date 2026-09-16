@@ -132,12 +132,11 @@ async def get_feed(
                         b.audio_variants, 
                         b.duration_seconds,
                         b.created_at,
-                        u.username,
-                        COALESCE(u.display_name, u.username, 'Creator') AS display_name,
-                        u.avatar_url
-                    FROM blipps b
-                    LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                    WHERE b.blipp_id = ANY($1::uuid[]) AND b.status = 'published'
+                        b.author_username as username,
+                        b.author_display_name as display_name,
+                        b.author_avatar_url as avatar_url
+                    FROM feed_items b
+                    WHERE b.blipp_id = ANY($1::uuid[])
                       AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
                     ORDER BY b.created_at DESC, b.blipp_id DESC
                     LIMIT $4;
@@ -161,13 +160,11 @@ async def get_feed(
                             b.audio_variants, 
                             b.duration_seconds,
                             b.created_at,
-                            u.username,
-                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
-                            u.avatar_url
-                        FROM blipps b
-                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                        WHERE b.status = 'published'
-                          AND NOT (b.blipp_id = ANY($1::uuid[]))
+                            b.author_username as username,
+                            b.author_display_name as display_name,
+                            b.author_avatar_url as avatar_url
+                        FROM feed_items b
+                        WHERE NOT (b.blipp_id = ANY($1::uuid[]))
                           AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
                         ORDER BY b.created_at DESC, b.blipp_id DESC
                         LIMIT $4;
@@ -189,13 +186,11 @@ async def get_feed(
                             b.audio_variants, 
                             b.duration_seconds,
                             b.created_at,
-                            u.username,
-                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
-                            u.avatar_url
-                        FROM blipps b
-                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                        WHERE b.status = 'published'
-                          AND ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
+                            b.author_username as username,
+                            b.author_display_name as display_name,
+                            b.author_avatar_url as avatar_url
+                        FROM feed_items b
+                        WHERE ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
                         ORDER BY b.created_at DESC, b.blipp_id DESC
                         LIMIT $3;
                     """,

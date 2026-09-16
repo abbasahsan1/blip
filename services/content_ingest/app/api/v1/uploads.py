@@ -62,7 +62,7 @@ async def upload_media(
             await conn.execute(
                 """
                 INSERT INTO uploads (upload_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at)
-                VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
+                VALUES ($1, $2, $3, $4, 'created', $5, $6, $7)
                 """,
                 upload_id, current_user.user_id, raw_file_url, upload_type, title, description, now,
             )

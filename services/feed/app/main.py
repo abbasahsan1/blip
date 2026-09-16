@@ -25,6 +25,8 @@ from blipp_common.events import event_bus
 from app.api.v1.feed import router as feed_router
 from app.api.v1.events import router as events_router
 from app.models.schemas import HealthResponse
+from app.event_handlers import run_event_consumer, stop_event_handlers
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,9 +48,11 @@ async def lifespan(app: FastAPI):
         logger.error(f"Redis startup error: {e}")
     try:
         await event_bus.connect(client_name="feed-service")
+        asyncio.create_task(run_event_consumer())
     except Exception as e:
         logger.error(f"NATS startup error: {e}")
     yield
+    stop_event_handlers()
     try:
         await close_redis()
     except Exception as e:

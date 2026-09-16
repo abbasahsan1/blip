@@ -46,7 +46,7 @@ export interface AdMetadata {
   click_url?: string;
 }
 
-export type UploadStatus = 'idle' | 'uploading' | 'transcoding' | 'completed' | 'failed';
+export type UploadStatus = 'idle' | 'created' | 'uploading' | 'processing' | 'transcoding' | 'copyright_check' | 'moderation' | 'completed' | 'published' | 'failed' | 'rejected';
 
 export interface Blipp {
   id: string;

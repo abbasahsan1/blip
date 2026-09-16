@@ -24,7 +24,7 @@ export const useUploadStore = create<UploadStore>((set) => ({
   setStatus: (status: UploadStatus) =>
     set({
       status,
-      isUploading: status === 'uploading' || status === 'transcoding',
+      isUploading: ['created', 'uploading', 'processing', 'transcoding', 'copyright_check', 'moderation'].includes(status),
     }),
   setProgress: (percentage: number) =>
     set({ progress: Math.max(0, Math.min(100, Math.round(percentage))) }),

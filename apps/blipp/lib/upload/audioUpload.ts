@@ -64,16 +64,18 @@ export async function pollUploadStatus(
       const currentStatus = statusRes.processing_status;
 
       // Note: We deliberately only inspect processing_status and avoid any GET fetch on raw_file_url
-      if (currentStatus === 'done') {
+      if (currentStatus === 'published' || currentStatus === 'completed') {
         return statusRes;
       }
 
-      if (currentStatus === 'failed') {
-        throw new Error(`Upload processing failed on the server for upload ${uploadId}.`);
+      if (currentStatus === 'failed' || currentStatus === 'rejected') {
+        throw new Error(`Upload processing failed or was rejected on the server for upload ${uploadId}.`);
       }
 
-      // Live processing/transcoding state
-      useUploadStore.getState().setStatus('transcoding');
+      // Live processing/transcoding states
+      if (['created', 'processing', 'transcoding', 'copyright_check', 'moderation'].includes(currentStatus)) {
+        useUploadStore.getState().setStatus(currentStatus as any);
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.message.includes('failed on the server')) {
         throw err;
@@ -159,13 +161,13 @@ export async function uploadAudio(params: UploadAudioParams): Promise<UploadStat
     uploadStore.setUploadId(uploadId);
     uploadStore.setProgress(60);
 
-    // 2. Poll status until transcoding is finished
-    uploadStore.setStatus('transcoding');
+    // 2. Poll status until transcoding/copyright/publishing is finished
+    uploadStore.setStatus('created');
     uploadStore.setProgress(75);
 
     const completed = await pollUploadStatus(uploadId);
     uploadStore.setProgress(100);
-    uploadStore.setStatus('completed');
+    uploadStore.setStatus('published');
 
     return completed;
   } catch (err: unknown) {

@@ -102,9 +102,10 @@ async def handle_transcode_completed(data: Dict[str, Any]) -> None:
         await conn.execute(
             """
             UPDATE uploads
-            SET processing_status = 'done'
-            WHERE upload_id = $1
+            SET processing_status = $1
+            WHERE upload_id = $2
             """,
+            blipp_status,
             upload_id,
         )
 

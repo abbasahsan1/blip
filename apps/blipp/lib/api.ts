@@ -622,7 +622,7 @@ export interface UploadStatusResponse {
   creator_id: string;
   raw_file_url: string;
   upload_type: string;
-  processing_status: 'queued' | 'transcoding' | 'done' | 'failed';
+  processing_status: 'created' | 'uploading' | 'processing' | 'transcoding' | 'copyright_check' | 'moderation' | 'completed' | 'published' | 'failed' | 'rejected' | string;
   title?: string | null;
   description?: string | null;
   created_at?: string | null;

@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     creator_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
     raw_file_url VARCHAR(1024) NOT NULL,
     upload_type VARCHAR(50) NOT NULL DEFAULT 'audio',
-    processing_status VARCHAR(50) NOT NULL DEFAULT 'queued',
+    processing_status VARCHAR(50) NOT NULL DEFAULT 'created',
     title VARCHAR(255),
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -260,6 +260,22 @@ CREATE TABLE IF NOT EXISTS likes (
 
 CREATE INDEX IF NOT EXISTS idx_likes_blipp_id ON likes (blipp_id);
 CREATE INDEX IF NOT EXISTS idx_likes_created_at ON likes (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS feed_items (
+    blipp_id UUID PRIMARY KEY,
+    creator_id UUID NOT NULL,
+    title VARCHAR(255),
+    description TEXT,
+    audio_url TEXT NOT NULL,
+    audio_variants JSONB NOT NULL DEFAULT '{}'::jsonb,
+    duration_seconds DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    author_username VARCHAR(255),
+    author_display_name VARCHAR(255),
+    author_avatar_url TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_feed_items_created_at ON feed_items (created_at DESC, blipp_id DESC);
 
 CREATE TABLE IF NOT EXISTS listening_session_agg (
     session_id UUID PRIMARY KEY,

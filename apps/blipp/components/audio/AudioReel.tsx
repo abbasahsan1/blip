@@ -285,7 +285,7 @@ export function AudioReel({
     const layoutWidth = event.nativeEvent.layout?.width || Dimensions.get('window').width;
     const clickX = event.nativeEvent.locationX;
     const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
-    const targetSeconds = Math.floor(ratio * (durationSeconds || 30));
+    const targetSeconds = Math.floor(ratio * (durationSeconds || item?.duration || 0));
     seekTo(targetSeconds);
   };
 
