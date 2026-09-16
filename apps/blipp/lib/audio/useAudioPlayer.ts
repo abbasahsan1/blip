@@ -21,7 +21,11 @@ import type { Blipp } from '@/lib/types';
 
 // ─── Public surface ───────────────────────────────────────────────────────────
 
+export type AudioState = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'seeking' | 'ended' | 'error';
+
 export interface AudioPlayerControls {
+  /** The explicit lifecycle state of the audio element */
+  audioState: AudioState;
   /** Whether audio is currently playing (not paused, not ended). */
   isPlaying: boolean;
   /** True while the browser is buffering / waiting for data. */
@@ -55,6 +59,10 @@ export interface UseAudioPlayerOptions {
    * When provided it overrides the remote URL, enabling instant load.
    */
   localUri?: string | null;
+  /**
+   * Only true for active or immediately adjacent items to prevent eager network fetches.
+   */
+  shouldLoad?: boolean;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -63,14 +71,17 @@ export function useAudioPlayer({
   item,
   isActive,
   localUri,
+  shouldLoad = true,
 }: UseAudioPlayerOptions): AudioPlayerControls {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [audioState, setAudioState] = useState<AudioState>('idle');
   const [positionSeconds, setPositionSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [progress, setProgress] = useState(0);
+
+  const isPlaying = audioState === 'playing';
+  const isLoading = audioState === 'loading';
 
   // Variant selection: default to item.audio_variants?.standard || item.audio_url
   const remoteUrl = resolveMediaUrl(
@@ -90,8 +101,7 @@ export function useAudioPlayer({
   useEffect(() => {
     if (isAd && isInternalUrl) {
       setIsAdFallback(true);
-      setIsLoading(false);
-      setIsPlaying(false);
+      setAudioState('idle');
     } else {
       setIsAdFallback(false);
       setAdCountdown(5);
@@ -120,6 +130,7 @@ export function useAudioPlayer({
     if (isAd && isInternalUrl) return;
     if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
     if (!audioUri) return;
+    if (!shouldLoad) return;
 
     // Clean up any existing audio element before instantiating a new one
     if (audioRef.current) {
@@ -140,23 +151,27 @@ export function useAudioPlayer({
     audioRef.current = audio;
 
     // Reset state for new track
-    setIsPlaying(false);
-    setIsLoading(true);
+    setAudioState('loading');
     setPositionSeconds(0);
     setDurationSeconds(0);
     setProgress(0);
 
     // ── Event handlers ────────────────────────────────────────────────────────
 
-    const handleCanPlay = () => setIsLoading(false);
-    const handleWaiting = () => setIsLoading(true);
+    const handleCanPlay = () => setAudioState(prev => prev === 'playing' ? 'playing' : 'ready');
+    const handleWaiting = () => setAudioState('loading');
 
     const handlePlaying = () => {
-      setIsLoading(false);
-      setIsPlaying(true);
+      setAudioState('playing');
     };
 
-    const handlePause = () => setIsPlaying(false);
+    const handlePause = () => {
+      // Don't override 'ended' or 'seeking' if they just fired
+      setAudioState(prev => prev === 'ended' || prev === 'seeking' ? prev : 'paused');
+    };
+
+    const handleSeeking = () => setAudioState('seeking');
+    const handleSeeked = () => setAudioState(prev => audioRef.current && !audioRef.current.paused ? 'playing' : 'ready');
 
     const handleTimeUpdate = () => {
       const dur = audio.duration && isFinite(audio.duration) ? audio.duration : 0;
@@ -168,7 +183,7 @@ export function useAudioPlayer({
     };
 
     const handleEnded = () => {
-      setIsPlaying(false);
+      setAudioState('ended');
       setProgress(1);
       setTimeout(() => {
         setProgress(0);
@@ -177,8 +192,7 @@ export function useAudioPlayer({
     };
 
     const handleError = () => {
-      setIsLoading(false);
-      setIsPlaying(false);
+      setAudioState('error');
       console.warn('[useAudioPlayer] Audio load error for URI:', audioUri);
       if (isAd) {
         setIsAdFallback(true);
@@ -189,6 +203,8 @@ export function useAudioPlayer({
     audio.addEventListener('waiting', handleWaiting);
     audio.addEventListener('playing', handlePlaying);
     audio.addEventListener('pause', handlePause);
+    audio.addEventListener('seeking', handleSeeking);
+    audio.addEventListener('seeked', handleSeeked);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('error', handleError);
@@ -199,6 +215,8 @@ export function useAudioPlayer({
       audio.removeEventListener('waiting', handleWaiting);
       audio.removeEventListener('playing', handlePlaying);
       audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('seeking', handleSeeking);
+      audio.removeEventListener('seeked', handleSeeked);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('error', handleError);
@@ -213,12 +231,20 @@ export function useAudioPlayer({
     };
   // Re-run whenever the resolved URI changes (item switch or cache hit arrives)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioUri, item?.blipp_id, item?.id, isAd, isInternalUrl]);
+  }, [audioUri, item?.blipp_id, item?.id, isAd, isInternalUrl, shouldLoad]);
 
-  // ── Pause playback when navigating away from reel ──────────────────────────
+  // ── Handle Play/Pause when navigating between reels ─────────────────────────
   useEffect(() => {
-    if (!isActive && audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (!isActive && !audio.paused) {
+      audio.pause();
+    } else if (isActive && audio.paused) {
+      audio.play().catch((err) => {
+        // Autoplay may be blocked by browser policy until first interaction
+        console.warn('[useAudioPlayer] Auto-play blocked or rejected:', err);
+      });
     }
   }, [isActive]);
 
@@ -244,6 +270,7 @@ export function useAudioPlayer({
   }, []);
 
   return {
+    audioState,
     isPlaying,
     isLoading,
     positionSeconds,

@@ -9,6 +9,7 @@ from blipp_common.database import get_db_pool
 from blipp_common.exceptions import AppException
 from blipp_common.pagination import decode_cursor, encode_cursor
 from blipp_common.security import AuthenticatedUser, get_current_user
+from blipp_common.events import event_bus
 from app.models.messaging import (
     DMMessageResponse,
     DMThreadResponse,
@@ -258,6 +259,21 @@ async def send_message(
         )
 
         logger.info(f"Message {message_id} sent by {current_user.user_id} in thread {thread_id}")
+
+        if body.message_type == "blipp_share" and body.blipp_id:
+            event_payload = {
+                "event_id": str(uuid.uuid4()),
+                "event_type": "share",
+                "user_id": str(current_user.user_id),
+                "blipp_id": str(body.blipp_id),
+                "session_id": str(uuid.uuid4()),
+                "occurred_at": now.isoformat(),
+                "position_seconds": 0.0,
+            }
+            try:
+                await event_bus.publish("engagement.share", event_payload)
+            except Exception as e:
+                logger.warning(f"Failed to publish engagement.share event to NATS: {e}")
 
         return DMMessageResponse(
             message_id=message_id,

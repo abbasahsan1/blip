@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Text,
   View,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioReel } from '@/components/audio/AudioReel';
@@ -16,7 +17,7 @@ import { StoriesTray } from '@/components/stories/StoriesTray';
 import { AcousticDeckMark } from '@/components/common/Icons';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { useSessionStore } from '@/lib/store/sessionStore';
-import { PALETTE } from '@/lib/palette';
+import { theme } from '@/lib/theme';
 import type { AudioPost, FeedSort } from '@/lib/types';
 
 const SORTS: { value: FeedSort; label: string }[] = [
@@ -32,10 +33,13 @@ export default function FeedScreen() {
   const sort = useFeedStore((s) => s.sort);
   const isLoading = useFeedStore((s) => s.isLoading);
   const isRefreshing = useFeedStore((s) => s.isRefreshing);
+  const error = useFeedStore((s) => s.error);
   const setSort = useFeedStore((s) => s.setSort);
   const fetchFeed = useFeedStore((s) => s.fetchFeed);
   const refresh = useFeedStore((s) => s.refresh);
   const toggleLike = useFeedStore((s) => s.toggleLike);
+  const toggleSave = useFeedStore((s) => s.toggleSave);
+  const toggleFollow = useFeedStore((s) => s.toggleFollow);
 
   const userId = useSessionStore((s) => s.user?.id ?? null);
 
@@ -67,10 +71,10 @@ export default function FeedScreen() {
   );
 
   const loadMore = useCallback(() => {
-    if (cursor && !isLoading) {
+    if (cursor && !isLoading && !error) {
       void fetchFeed(cursor);
     }
-  }, [cursor, fetchFeed, isLoading]);
+  }, [cursor, fetchFeed, isLoading, error]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: AudioPost; index: number }) => (
@@ -79,21 +83,35 @@ export default function FeedScreen() {
         isActive={index === activeIndex}
         height={feedHeight}
         onLike={() => toggleLike(item.id)}
+        onSave={() => toggleSave(item.id)}
+        onFollow={() => { if (item.creator_id) toggleFollow(item.creator_id); }}
         onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
+        shouldLoad={Math.abs(index - activeIndex) <= 1}
       />
     ),
     [activeIndex, handleAutoSkip, posts, toggleLike, feedHeight],
   );
 
+  if (error && posts.length === 0) {
+    return (
+      <View style={[styles.root, styles.centerContent]}>
+        <Text style={styles.errorText}>{error}</Text>
+        <Pressable style={styles.retryButton} onPress={() => refresh(userId)}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root} onLayout={(e) => setFeedHeight(e.nativeEvent.layout.height)}>
-      {/* Studio Header Bar & Stories Tray */}
+      {/* Quiet Header */}
       <View
         style={[
           styles.headerContainer,
-          { paddingTop: insets.top + 10 },
+          { paddingTop: insets.top },
         ]}
       >
         <View style={styles.header}>
@@ -114,24 +132,12 @@ export default function FeedScreen() {
             ))}
           </View>
         </View>
-        <StoriesTray />
       </View>
 
-      {/* Structured Acoustic Loading Skeletons */}
       {isLoading && posts.length === 0 ? (
-        <View style={styles.loadingState}>
-          {[0, 1].map((i) => (
-            <View key={i} style={styles.skeletonDeck}>
-              <View style={styles.skeletonTag} />
-              <View style={styles.skeletonTitle} />
-              <View style={styles.skeletonAuthor} />
-              <View style={styles.skeletonWaveform} />
-              <View style={styles.skeletonControls}>
-                <View style={styles.skeletonBtn} />
-                <View style={styles.skeletonMeta} />
-              </View>
-            </View>
-          ))}
+        <View style={[styles.root, styles.centerContent]}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading broadcasts...</Text>
         </View>
       ) : (
         <FlatList
@@ -152,20 +158,23 @@ export default function FeedScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => refresh(userId)}
-              tintColor="#F97316"
-              colors={['#F97316']}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
               progressViewOffset={insets.top + 60}
             />
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <View style={styles.emptyIconWrap}>
-                <AcousticDeckMark size={48} color={PALETTE.textMuted} />
+                <AcousticDeckMark size={48} color={theme.colors.textMuted} />
               </View>
               <Text style={styles.emptyHeading}>No broadcasts available</Text>
               <Text style={styles.emptySub}>
-                The frequency is quiet. Switch tabs to upload an audio track or pull to refresh.
+                The frequency is quiet. Why not upload a track or pull to refresh?
               </Text>
+              <Pressable style={styles.retryButton} onPress={() => refresh(userId)}>
+                <Text style={styles.retryButtonText}>Refresh</Text>
+              </Pressable>
             </View>
           }
           getItemLayout={(_data, index) => ({
@@ -182,7 +191,12 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: theme.colors.background,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.xxl,
   },
   headerContainer: {
     position: 'absolute',
@@ -190,122 +204,83 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(10, 10, 10, 0.4)', // subtle gradient equivalent
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.md,
   },
   headerLogo: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 22,
-    color: PALETTE.text,
+    ...theme.typography.display,
+    color: theme.colors.text,
     letterSpacing: -1,
   },
   sortChips: {
     flexDirection: 'row',
-    gap: 8,
+    gap: theme.spacing.sm,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    minHeight: 30,
-    justifyContent: 'center',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
   },
   chipActive: {
     borderBottomWidth: 2,
-    borderBottomColor: '#F97316',
+    borderBottomColor: theme.colors.primary,
   },
   chipText: {
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 12,
-    color: PALETTE.textMuted,
+    ...theme.typography.metadata,
+    color: theme.colors.textMuted,
   },
   chipTextActive: {
-    fontFamily: 'Outfit_600SemiBold',
-    color: '#F97316',
+    ...theme.typography.metadata,
+    color: theme.colors.primary,
   },
-  loadingState: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 140,
-    gap: 32,
-    maxWidth: 640,
-    width: '100%',
-    alignSelf: 'center',
+  loadingText: {
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
+    marginTop: theme.spacing.lg,
   },
-  skeletonDeck: {
-    gap: 12,
-    paddingVertical: 16,
+  errorText: {
+    ...theme.typography.body,
+    color: theme.colors.error,
+    textAlign: 'center',
+    marginBottom: theme.spacing.lg,
   },
-  skeletonTag: {
-    width: 90,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: PALETTE.surface,
+  retryButton: {
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginTop: theme.spacing.lg,
   },
-  skeletonTitle: {
-    width: '80%',
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: PALETTE.surface,
-  },
-  skeletonAuthor: {
-    width: 140,
-    height: 16,
-    borderRadius: 4,
-    backgroundColor: PALETTE.surface,
-    opacity: 0.7,
-  },
-  skeletonWaveform: {
-    height: 36,
-    borderRadius: 4,
-    backgroundColor: PALETTE.surface,
-    opacity: 0.5,
-  },
-  skeletonControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  skeletonBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    backgroundColor: PALETTE.surface,
-  },
-  skeletonMeta: {
-    width: 120,
-    height: 16,
-    borderRadius: 4,
-    backgroundColor: PALETTE.surface,
+  retryButtonText: {
+    ...theme.typography.button,
+    color: theme.colors.text,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: theme.spacing.xxxl,
     paddingTop: 200,
   },
   emptyIconWrap: {
-    marginBottom: 20,
+    marginBottom: theme.spacing.xl,
     opacity: 0.6,
   },
   emptyHeading: {
-    fontFamily: 'Sora_600SemiBold',
-    fontSize: 18,
-    color: PALETTE.text,
-    marginBottom: 8,
+    ...theme.typography.title,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
     textAlign: 'center',
   },
   emptySub: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 14,
-    color: PALETTE.textMuted,
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
     textAlign: 'center',
-    lineHeight: 22,
-    maxWidth: 340,
   },
 });

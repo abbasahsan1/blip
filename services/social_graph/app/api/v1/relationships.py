@@ -95,11 +95,14 @@ async def follow_user(
     # 4. If newly inserted, publish event to NATS JetStream ENGAGEMENT stream (§5.8)
     if insert_res == "INSERT 0 1":
         event_payload = {
+            "event_id": str(uuid.uuid4()),
             "event_type": "follow",
             "user_id": str(current_user.user_id),
             "blipp_id": None,
+            "session_id": str(uuid.uuid4()),
             "target_user_id": str(user_id),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "position_seconds": 0.0,
         }
         try:
             await event_bus.publish("engagement.follow", event_payload)
@@ -132,11 +135,27 @@ async def unfollow_user(
         )
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        res = await conn.execute(
             "DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2",
             current_user.user_id,
             user_id,
         )
+
+    if res == "DELETE 1":
+        event_payload = {
+            "event_id": str(uuid.uuid4()),
+            "event_type": "unfollow",
+            "user_id": str(current_user.user_id),
+            "blipp_id": None,
+            "session_id": str(uuid.uuid4()),
+            "target_user_id": str(user_id),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "position_seconds": 0.0,
+        }
+        try:
+            await event_bus.publish("engagement.unfollow", event_payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish engagement.unfollow event to NATS: {e}")
 
     return FollowActionResponse(
         success=True,

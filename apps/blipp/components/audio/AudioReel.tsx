@@ -2,16 +2,16 @@
  * AudioReel
  *
  * Full-bleed, edge-to-edge dark audio card for the Blipp feed.
- * Expressive social aesthetics:
- *   - Deep obsidian canvas with ambient radial glow responsive to playback
- *   - Center dynamic visualizer: 5 pulsing audio equalizer bars dancing while isPlaying
- *   - Floating Action Dock (Right Side): High-contrast floating pill stack for Like, Stash, Echo, and Report
- *   - Bottom Overlay: Bold creator handle, glowing Follow button, and an interactive waveform scrub-bar with live timestamps
+ * Restrained product design:
+ *   - Minimal dark canvas
+ *   - Simple center play/pause indicator
+ *   - Clean action column (no floating glass effects)
+ *   - Left-aligned metadata
+ *   - Unobtrusive scrubber
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -22,21 +22,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { PALETTE } from '@/lib/palette';
 import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
+import { theme } from '@/lib/theme';
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-
-function formatDuration(secs: number): string {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
 
 function formatListens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -51,9 +44,12 @@ interface Props {
   isActive: boolean;
   height: number;
   onLike: () => Promise<void>;
+  onSave?: () => Promise<void> | void;
+  onFollow?: () => Promise<void> | void;
   onAutoSkip?: () => void;
   feedItems?: Blipp[];
   activeIndex?: number;
+  shouldLoad?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -64,9 +60,12 @@ export function AudioReel({
   isActive,
   height,
   onLike,
+  onSave,
+  onFollow,
   onAutoSkip,
   feedItems = [],
   activeIndex = 0,
+  shouldLoad = true,
 }: Props) {
   const rawItem = (post || propItem) as Blipp;
   const item: Blipp = rawItem
@@ -94,55 +93,15 @@ export function AudioReel({
     (item as any)?.username ||
     'creator';
 
-  // ── Engagement States (Save / Follow / Share / Report) ───────────────────────
-  const [isSaved, setIsSaved] = useState(Boolean(item?.is_saved));
-  const [isSaveLoading, setIsSaveLoading] = useState(false);
-
-  useEffect(() => {
-    setIsSaved(Boolean(item?.is_saved));
-  }, [item?.is_saved]);
+  const isSaved = Boolean(item?.is_saved);
+  const isFollowing = Boolean(item?.is_following);
 
   const handleSaveToggle = async () => {
-    if (!blippId || isSaveLoading) return;
-    setIsSaveLoading(true);
-    const nextState = !isSaved;
-    setIsSaved(nextState);
-    try {
-      if (nextState) {
-        await api.saveBlipp(blippId);
-      } else {
-        await api.unsaveBlipp(blippId);
-      }
-    } catch {
-      setIsSaved(!nextState);
-    } finally {
-      setIsSaveLoading(false);
-    }
+    if (onSave) await onSave();
   };
 
-  const [isFollowing, setIsFollowing] = useState(Boolean(item?.is_following));
-  const [isFollowLoading, setIsFollowLoading] = useState(false);
-
-  useEffect(() => {
-    setIsFollowing(Boolean(item?.is_following));
-  }, [item?.is_following]);
-
   const handleFollowToggle = async () => {
-    if (!creatorId || isFollowLoading) return;
-    setIsFollowLoading(true);
-    const nextState = !isFollowing;
-    setIsFollowing(nextState);
-    try {
-      if (nextState) {
-        await api.followUser(creatorId);
-      } else {
-        await api.unfollowUser(creatorId);
-      }
-    } catch {
-      setIsFollowing(!nextState);
-    } finally {
-      setIsFollowLoading(false);
-    }
+    if (onFollow) await onFollow();
   };
 
   // Direct Messaging Share Sheet
@@ -171,7 +130,7 @@ export function AudioReel({
         blipp_id: blippId,
         body: item?.title || 'Shared Blipp broadcast',
       });
-      setShareFeedback(`Echoed to ${name}!`);
+      setShareFeedback(`Shared to ${name}!`);
       setTimeout(() => {
         setIsShareModalOpen(false);
         setShareFeedback(null);
@@ -213,7 +172,6 @@ export function AudioReel({
     }
   };
 
-  // ── Speculative prefetch ───────────────────────────────────────────────────
   const { getCachedUri } = useAudioPrefetch({
     items: feedItems,
     activeIndex,
@@ -221,117 +179,64 @@ export function AudioReel({
   });
   const localUri = blippId ? getCachedUri(blippId) : null;
 
-  // ── Audio player ───────────────────────────────────────────────────────────
   const {
     isPlaying,
-    positionSeconds,
     durationSeconds,
     progress,
     togglePlayPause,
     seekTo,
     isAdFallback,
     adCountdown,
-  } = useAudioPlayer({ item, isActive, localUri });
+  } = useAudioPlayer({ item, isActive, localUri, shouldLoad });
 
-  // Auto-skip sponsored slot on countdown expiration
   useEffect(() => {
     if (isAdFallback && isActive && adCountdown <= 0) {
       onAutoSkip?.();
     }
   }, [isAdFallback, isActive, adCountdown, onAutoSkip]);
 
-  // Like bouncing heart animation
-  const heartScale = useRef(new Animated.Value(1)).current;
-
   const handleLike = async () => {
-    Animated.sequence([
-      Animated.spring(heartScale, { toValue: 1.5, friction: 3, useNativeDriver: true }),
-      Animated.spring(heartScale, { toValue: 1, friction: 4, useNativeDriver: true }),
-    ]).start();
     await onLike();
   };
 
-  // Animated scrolling audio track tag
-  const trackTagAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    let loop: Animated.CompositeAnimation | null = null;
-    if (isPlaying) {
-      loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(trackTagAnim, {
-            toValue: -80,
-            duration: 4500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(trackTagAnim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
-        ]),
-      );
-      loop.start();
-    } else {
-      trackTagAnim.setValue(0);
-    }
-    return () => {
-      loop?.stop();
-    };
-  }, [isPlaying, trackTagAnim]);
-
-  // Scrub bar interaction
   const handleScrub = (event: any) => {
     const layoutWidth = event.nativeEvent.layout?.width || Dimensions.get('window').width;
     const clickX = event.nativeEvent.locationX;
     const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
-    const targetSeconds = Math.floor(ratio * (durationSeconds || item?.duration || 0));
+    const targetSeconds = Math.floor(ratio * (durationSeconds || 1));
     seekTo(targetSeconds);
   };
-
-  const displayDuration = durationSeconds || item?.duration || 0;
 
   const reelHeight = height || Dimensions.get('window').height;
 
   return (
     <View style={[styles.root, { height: reelHeight }]} testID="audio-reel-card">
-      {/* 1. Edge-to-edge dark/orange canvas */}
-      <LinearGradient
-        colors={['#000000', '#090A0F', '#000000']}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-      />
+      <View style={styles.canvasBackground} />
 
-      {/* 2. Center Stage with tactile play/pause (Moved lower for one-handed use) */}
       <Pressable
         style={styles.centerStage}
         onPress={togglePlayPause}
         accessibilityRole="button"
-        accessibilityLabel={isPlaying ? 'Pause broadcast' : 'Play broadcast'}
+        accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
         testID="center-play-pause-trigger"
       >
-        <View style={styles.centerVisualizerBox}>
-
-          {/* Center tactile play / pause status badge */}
-          <View style={[styles.centerPlayBadge, isPlaying && styles.centerPlayBadgePlaying]}>
-            {isPlaying ? (
-              <Feather name="pause" size={24} color="#FFFFFF" />
-            ) : (
-              <Feather name="play" size={26} color="#FFFFFF" />
-            )}
-          </View>
+        <View style={styles.centerPlayBadge}>
+          {isPlaying ? (
+            <Feather name="pause" size={32} color={theme.colors.text} />
+          ) : (
+            <Feather name="play" size={32} color={theme.colors.text} style={{ marginLeft: 4 }} />
+          )}
         </View>
       </Pressable>
 
-      {/* 3. Floating Thumb-Friendly Action Column (Right Side) */}
-      <View style={styles.floatingActionColumn} testID="floating-action-dock">
+      {/* Right Column Actions */}
+      <View style={styles.actionColumn} testID="floating-action-dock">
         <View style={styles.profileItem}>
           {item?.creator?.avatar_url || (item as any)?.avatar_url ? (
             <Image
               source={{ uri: item?.creator?.avatar_url || (item as any)?.avatar_url }}
               style={styles.profilePicture}
-              accessibilityLabel={`${creatorDisplayName}'s profile picture`}
+              accessibilityLabel={`${creatorDisplayName}'s profile`}
             />
           ) : (
             <View style={styles.profileFallback}>
@@ -339,253 +244,137 @@ export function AudioReel({
             </View>
           )}
         </View>
-        {/* Like Button (Bouncing heart + count) */}
-        <View style={styles.actionItemWrapper}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionFrostedBtn,
-              pressed && styles.frostedBtnPressed,
-            ]}
-            onPress={handleLike}
-            accessibilityRole="button"
-            accessibilityLabel={item?.isLiked ? 'Unlike broadcast' : 'Like broadcast'}
-            testID="like-blipp-button"
-          >
-            <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-              <Feather name="heart" size={24} color={item?.isLiked ? "#F97316" : "#FFFFFF"} />
-            </Animated.View>
-          </Pressable>
-          <Text
-            style={[
-              styles.actionCounterText,
-              item?.isLiked && { color: '#F97316' },
-            ]}
-          >
+
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+          onPress={handleLike}
+          accessibilityRole="button"
+          accessibilityLabel={item?.isLiked ? 'Unlike' : 'Like'}
+          testID="like-blipp-button"
+        >
+          <Feather name="heart" size={28} color={item?.isLiked ? theme.colors.error : theme.colors.text} />
+          <Text style={[styles.actionText, item?.isLiked && { color: theme.colors.error }]}>
             {formatListens(item?.likeCount || 0)}
           </Text>
-        </View>
+        </Pressable>
 
-        {/* Stash / Bookmark Button */}
-        <View style={styles.actionItemWrapper}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionFrostedBtn,
-              pressed && styles.frostedBtnPressed,
-            ]}
-            onPress={handleSaveToggle}
-            disabled={isSaveLoading}
-            accessibilityRole="button"
-            accessibilityLabel={isSaved ? 'Remove from stash' : 'Stash blipp'}
-            testID="save-blipp-button"
-          >
-            <Feather name="bookmark" size={23} color={isSaved ? "#F59E0B" : "#FFFFFF"} />
-          </Pressable>
-          <Text
-            style={[
-              styles.actionCounterText,
-              isSaved && { color: '#F59E0B' },
-            ]}
-          >
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+          onPress={handleSaveToggle}
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? 'Unsave' : 'Save'}
+          testID="save-blipp-button"
+        >
+          <Feather name="bookmark" size={28} color={isSaved ? theme.colors.primary : theme.colors.text} />
+          <Text style={[styles.actionText, isSaved && { color: theme.colors.primary }]}>
             {isSaved ? 'Saved' : 'Save'}
           </Text>
-        </View>
+        </Pressable>
 
-        {/* Echo / DM Share Button */}
-        <View style={styles.actionItemWrapper}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionFrostedBtn,
-              pressed && styles.frostedBtnPressed,
-            ]}
-            onPress={openShareSheet}
-            accessibilityRole="button"
-            accessibilityLabel="Echo to direct message"
-            testID="share-blipp-button"
-          >
-            <Feather name="send" size={22} color="#FFFFFF" />
-          </Pressable>
-          <Text style={styles.actionCounterText}>Echo</Text>
-        </View>
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+          onPress={openShareSheet}
+          accessibilityRole="button"
+          accessibilityLabel="Share"
+          testID="share-blipp-button"
+        >
+          <Feather name="send" size={28} color={theme.colors.text} />
+          <Text style={styles.actionText}>Share</Text>
+        </Pressable>
 
-        {/* Options (3 dots) */}
-        <View style={styles.actionItemWrapper}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionFrostedBtn,
-              pressed && styles.frostedBtnPressed,
-            ]}
-            onPress={() => setIsReportModalOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Blipp options"
-            testID="report-content-button"
-          >
-            <Feather name="more-horizontal" size={22} color="#FFFFFF" />
-          </Pressable>
-          <Text style={styles.actionCounterText}>More</Text>
-        </View>
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+          onPress={() => setIsReportModalOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Options"
+          testID="report-content-button"
+        >
+          <Feather name="more-horizontal" size={28} color={theme.colors.text} />
+        </Pressable>
       </View>
 
-      {/* 4. Bottom Metadata Dock: Left-aligned at bottom: 100, left: 16, right: 80 */}
-      <View style={styles.bottomMetadataDock} pointerEvents="box-none">
-        {/* Creator handle with verified tick + sleek pill Follow button */}
-        <View style={styles.creatorHeaderRow}>
-          <View style={styles.creatorHandleContainer}>
-            <Text style={styles.creatorHandleText} numberOfLines={1}>
-              @{creatorHandle}
-            </Text>
-            <Feather name="check-circle" size={16} color="#F97316" />
-          </View>
-
+      {/* Bottom Metadata */}
+      <View style={styles.metadataDock} pointerEvents="box-none">
+        <View style={styles.creatorRow}>
+          <Text style={styles.creatorHandle} numberOfLines={1}>
+            @{creatorHandle}
+          </Text>
+          <Feather name="check-circle" size={14} color={theme.colors.primary} />
+          
           {!isAd && creatorId && (
             <Pressable
-              style={({ pressed }) => [
-                styles.sleekPillFollowBtn,
-                isFollowing && styles.sleekPillFollowingBtn,
-                pressed && styles.followBtnPressed,
-              ]}
+              style={styles.followButton}
               onPress={handleFollowToggle}
-              disabled={isFollowLoading}
               accessibilityRole="button"
-              accessibilityLabel={isFollowing ? 'Unfollow creator' : 'Follow creator'}
+              accessibilityLabel={isFollowing ? 'Unfollow' : 'Follow'}
               testID="follow-creator-button"
             >
-              <Text
-                style={[
-                  styles.sleekPillFollowText,
-                  isFollowing && styles.sleekPillFollowingText,
-                ]}
-              >
+              <Text style={styles.followButtonText}>
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
             </Pressable>
           )}
         </View>
 
-        {/* Blipp Title */}
-        <Text style={styles.blippTitle} numberOfLines={2} testID="blipp-title">
+        <Text style={styles.title} numberOfLines={2} testID="blipp-title">
           {item?.title}
         </Text>
 
         {item?.description ? (
-          <Text style={styles.blippDescription} numberOfLines={1}>
+          <Text style={styles.description} numberOfLines={2}>
             {item.description}
           </Text>
         ) : null}
 
-        {/* Sponsored Slot Indicator */}
         {isAd && (
-          <View style={styles.sponsoredPillContainer}>
-            <View style={styles.sponsoredPill}>
-              <Text style={styles.sponsoredPillText}>SPONSORED</Text>
-            </View>
+          <View style={styles.adPill}>
+            <Text style={styles.adPillText}>SPONSORED</Text>
             {item?.sponsor?.cta_url && (
               <Pressable
-                style={styles.sponsoredCtaBtn}
+                style={styles.adCta}
                 onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
               >
-                <Text style={styles.sponsoredCtaText}>
-                  {item.sponsor.cta_text || 'Learn More'}
-                </Text>
+                <Text style={styles.adCtaText}>{item.sponsor.cta_text || 'Learn More'}</Text>
               </Pressable>
             )}
           </View>
         )}
-
-        {/* Animated scrolling audio track tag */}
-        <View style={styles.audioTrackTagRow}>
-          <Animated.View
-            style={[
-              styles.audioTrackTagInner,
-              { transform: [{ translateX: trackTagAnim }] },
-            ]}
-          >
-            <Text style={styles.audioTrackTagText} numberOfLines={1}>
-              🎵 Original Sound - @{creatorHandle}
-            </Text>
-          </Animated.View>
-        </View>
       </View>
 
-      {/* 5. Thin, unobtrusive scrubber bar pinned along the very bottom */}
+      {/* Scrubber */}
       <Pressable
-        style={styles.bottomScrubberContainer}
+        style={styles.scrubberContainer}
         onPress={handleScrub}
         testID="bottom-scrubber-bar"
       >
-        <View style={styles.bottomScrubberTrack}>
+        <View style={styles.scrubberTrack}>
           <View
             style={[
-              styles.bottomScrubberFill,
+              styles.scrubberFill,
               { width: `${Math.max(0, Math.min(100, progress * 100))}%` },
             ]}
           />
         </View>
       </Pressable>
 
-      {/* Share / Direct Message Modal */}
-      <Modal
-        visible={isShareModalOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setIsShareModalOpen(false)}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => setIsShareModalOpen(false)}
-        >
-          <Pressable style={styles.sheetContainer} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Echo Blipp to Conversation</Text>
-            {shareFeedback && (
-              <Text style={styles.sheetFeedbackText}>{shareFeedback}</Text>
-            )}
+      {/* Modals omitted for brevity but keeping their basic structure intact */}
+      <Modal visible={isShareModalOpen} transparent animationType="slide" onRequestClose={() => setIsShareModalOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsShareModalOpen(false)}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Share Blipp</Text>
+            {shareFeedback && <Text style={styles.feedbackText}>{shareFeedback}</Text>}
             <FlatList
               data={shareThreads}
               keyExtractor={(t) => t.thread_id}
-              style={styles.sheetList}
-              ListEmptyComponent={
-                <View style={styles.emptyList}>
-                  <Text style={styles.emptyListText}>No recent DM vibes found</Text>
-                </View>
-              }
+              ListEmptyComponent={<Text style={styles.emptyText}>No recent conversations</Text>}
               renderItem={({ item: thread }) => (
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.threadRow,
-                    pressed && styles.threadRowPressed,
-                  ]}
-                  onPress={() =>
-                    handleShareToThread(
-                      thread.thread_id,
-                      thread.other_participant?.display_name ||
-                        thread.other_participant?.username ||
-                        'user'
-                    )
-                  }
+                  style={styles.threadRow}
+                  onPress={() => handleShareToThread(thread.thread_id, thread.other_participant?.username || 'user')}
                   disabled={isSharing}
                 >
-                  <View style={styles.threadAvatar}>
-                    <Text style={styles.threadAvatarText}>
-                      {(
-                        thread.other_participant?.display_name ||
-                        thread.other_participant?.username ||
-                        'U'
-                      )[0].toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.threadInfo}>
-                    <Text style={styles.threadName}>
-                      {thread.other_participant?.display_name ||
-                        thread.other_participant?.username ||
-                        'Conversation'}
-                    </Text>
-                    <Text style={styles.threadUsername}>
-                      @{thread.other_participant?.username || 'user'}
-                    </Text>
-                  </View>
-                  <View style={styles.echoChip}>
-                    <Text style={styles.echoChipText}>Send</Text>
-                  </View>
+                  <Text style={styles.threadText}>@{thread.other_participant?.username}</Text>
+                  <Text style={styles.sendText}>Send</Text>
                 </Pressable>
               )}
             />
@@ -593,71 +382,27 @@ export function AudioReel({
         </Pressable>
       </Modal>
 
-      {/* Moderation Report Modal */}
-      <Modal
-        visible={isReportModalOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setIsReportModalOpen(false)}
-      >
-        <Pressable
-          style={styles.sheetOverlay}
-          onPress={() => setIsReportModalOpen(false)}
-        >
-          <Pressable style={styles.reportModalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.reportHeading}>Report Broadcast</Text>
-            <Text style={styles.reportSubheading}>
-              Help keep the Blipp community safe. Why are you reporting this clip?
-            </Text>
-
+      <Modal visible={isReportModalOpen} transparent animationType="fade" onRequestClose={() => setIsReportModalOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setIsReportModalOpen(false)}>
+          <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Report Content</Text>
             {reportSubmitted ? (
-              <View style={styles.reportSuccessBox}>
-                <Feather name="check-circle" size={32} color={PALETTE.lime} />
-                <Text style={styles.reportSuccessText}>Thank you for your report.</Text>
-                <Text style={styles.reportSuccessSubtext}>Our moderation engine will review it promptly.</Text>
-              </View>
+              <Text style={styles.feedbackText}>Thank you for your report.</Text>
             ) : (
               <>
-                {[
-                  { id: 'inappropriate', label: 'Inappropriate or Explicit Content' },
-                  { id: 'harassment', label: 'Harassment or Hate Speech' },
-                  { id: 'spam', label: 'Spam, Scam, or Misleading' },
-                  { id: 'copyright', label: 'Copyright / IP Infringement' },
-                ].map((reason) => (
+                {['inappropriate', 'harassment', 'spam', 'copyright'].map((reason) => (
                   <Pressable
-                    key={reason.id}
-                    style={[
-                      styles.reasonRow,
-                      reportReason === reason.id && styles.reasonRowActive,
-                    ]}
-                    onPress={() => setReportReason(reason.id)}
+                    key={reason}
+                    style={styles.reasonRow}
+                    onPress={() => setReportReason(reason)}
                   >
-                    <View
-                      style={[
-                        styles.radioCircle,
-                        reportReason === reason.id && styles.radioCircleActive,
-                      ]}
-                    />
-                    <Text style={styles.reasonText}>{reason.label}</Text>
+                    <Feather name={reportReason === reason ? 'check-circle' : 'circle'} size={20} color={theme.colors.text} />
+                    <Text style={styles.reasonText}>{reason}</Text>
                   </Pressable>
                 ))}
-
-                <View style={styles.reportActionRow}>
-                  <Pressable
-                    style={styles.cancelBtn}
-                    onPress={() => setIsReportModalOpen(false)}
-                  >
-                    <Text style={styles.cancelBtnText}>Cancel</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[styles.submitReportBtn, isSubmittingReport && { opacity: 0.6 }]}
-                    onPress={handleReportSubmit}
-                    disabled={isSubmittingReport}
-                  >
-                    <Text style={styles.submitReportText}>Submit Report</Text>
-                  </Pressable>
-                </View>
+                <Pressable style={styles.submitButton} onPress={handleReportSubmit} disabled={isSubmittingReport}>
+                  <Text style={styles.submitButtonText}>Submit Report</Text>
+                </Pressable>
               </>
             )}
           </Pressable>
@@ -667,477 +412,212 @@ export function AudioReel({
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     width: '100%',
     position: 'relative',
-    backgroundColor: '#000000',
+    backgroundColor: theme.colors.background,
     overflow: 'hidden',
   },
   canvasBackground: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#000000',
-  },
-  ambientRadialGlow: {
-    position: 'absolute',
-    top: '30%',
-    left: '20%',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: 'rgba(249, 115, 22, 0.18)',
-    shadowColor: '#F97316',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 80,
+    backgroundColor: theme.colors.background,
   },
   centerStage: {
     ...StyleSheet.absoluteFill,
-    justifyContent: 'flex-end',
-    paddingBottom: '40%', // Moves it to lower portion of screen
+    justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
   },
-  centerVisualizerBox: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 170,
-    height: 170,
-  },
-  eqCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 72,
-    gap: 8,
-    marginBottom: 16,
-  },
-  eqBar: {
-    width: 6,
-    borderRadius: 3,
-  },
   centerPlayBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(17, 19, 27, 0.75)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    width: 80,
+    height: 80,
+    borderRadius: theme.radius.full,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
   },
-  centerPlayBadgePlaying: {
-    borderColor: '#F97316',
-    backgroundColor: 'rgba(234, 88, 12, 0.3)',
-  },
-
-  // Floating Thumb-Friendly Action Column (Right Side)
-  floatingActionColumn: {
+  actionColumn: {
     position: 'absolute',
-    right: 16,
-    bottom: 100,
+    right: theme.spacing.lg,
+    bottom: 80,
     alignItems: 'center',
-    gap: 16,
+    gap: theme.spacing.xl,
     zIndex: 10,
   },
-  actionItemWrapper: {
-    alignItems: 'center',
-    gap: 4,
-  },
   profileItem: {
-    marginBottom: 2,
+    marginBottom: theme.spacing.sm,
   },
   profilePicture: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: '#F97316',
+    borderRadius: theme.radius.full,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   profileFallback: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#090A0F',
-    borderWidth: 2,
-    borderColor: '#F97316',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   profileInitial: {
-    color: '#FFFFFF',
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 18,
+    ...theme.typography.title,
+    color: theme.colors.text,
   },
-  actionFrostedBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+  actionButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
+    gap: theme.spacing.xs,
   },
-  frostedBtnPressed: {
-    transform: [{ scale: 0.92 }],
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  actionButtonPressed: {
+    opacity: 0.6,
   },
-  actionCounterText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 11,
-    color: '#FFFFFF',
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+  actionText: {
+    ...theme.typography.metadata,
+    color: theme.colors.text,
   },
-
-  bottomMetadataDock: {
+  metadataDock: {
     position: 'absolute',
-    bottom: 20,
-    left: 16,
+    bottom: 24,
+    left: theme.spacing.lg,
     right: 80,
     zIndex: 10,
-    gap: 8,
+    gap: theme.spacing.sm,
   },
-  creatorHeaderRow: {
+  creatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: theme.spacing.sm,
   },
-  creatorHandleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  creatorHandle: {
+    ...theme.typography.bodySemibold,
+    color: theme.colors.text,
   },
-  creatorHandleText: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 18,
-    color: '#FFFFFF',
-    letterSpacing: 0.2,
-    textShadowColor: 'rgba(0, 0, 0, 0.65)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  sleekPillFollowBtn: {
-    backgroundColor: 'rgba(249, 115, 22, 0.20)',
+  followButton: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: '#F97316',
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    borderColor: theme.colors.border,
+    marginLeft: theme.spacing.xs,
   },
-  sleekPillFollowingBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+  followButtonText: {
+    ...theme.typography.metadata,
+    color: theme.colors.text,
   },
-  followBtnPressed: {
-    transform: [{ scale: 0.95 }],
+  title: {
+    ...theme.typography.title,
+    color: theme.colors.text,
   },
-  sleekPillFollowText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 11,
-    color: '#F97316',
+  description: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
   },
-  sleekPillFollowingText: {
-    color: 'rgba(255, 255, 255, 0.75)',
-  },
-  blippTitle: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 20,
-    color: '#FFFFFF',
-    lineHeight: 20,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  blippDescription: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.75)',
-    lineHeight: 17,
-  },
-  sponsoredPillContainer: {
+  adPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginVertical: 2,
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
   },
-  sponsoredPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    borderWidth: 1,
-    borderColor: PALETTE.amber,
+  adPillText: {
+    ...theme.typography.metadata,
+    color: theme.colors.primary,
   },
-  sponsoredPillText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 10,
-    color: PALETTE.amber,
-    letterSpacing: 0.5,
+  adCta: {
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.radius.sm,
   },
-  sponsoredCtaBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+  adCtaText: {
+    ...theme.typography.captionSemibold,
+    color: theme.colors.text,
   },
-  sponsoredCtaText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 11,
-    color: '#FFFFFF',
-  },
-  audioTrackTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    overflow: 'hidden',
-    maxWidth: '90%',
-  },
-  audioTrackTagInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  audioTrackTagText: {
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
-
-  // Pinned Bottom Scrubber
-  bottomScrubberContainer: {
+  scrubberContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 48, // Generous Fitts's Law touch target
+    height: 16,
     justifyContent: 'flex-end',
     zIndex: 20,
   },
-  bottomScrubberTrack: {
+  scrubberTrack: {
+    height: 2,
+    backgroundColor: theme.colors.surface,
     width: '100%',
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
-  bottomScrubberFill: {
+  scrubberFill: {
     height: '100%',
-    backgroundColor: '#F97316',
-    borderRadius: 1.5,
+    backgroundColor: theme.colors.primary,
   },
-
-  // Modals & Bottom Sheets
-  sheetOverlay: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
-  sheetContainer: {
-    backgroundColor: PALETTE.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 12,
-    paddingBottom: 36,
-    paddingHorizontal: 20,
-    maxHeight: '65%',
-    borderWidth: 1,
-    borderColor: PALETTE.border,
+  modalContent: {
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: theme.radius.md,
+    borderTopRightRadius: theme.radius.md,
+    padding: theme.spacing.xxl,
+    minHeight: 300,
   },
-  sheetHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: PALETTE.border,
-    alignSelf: 'center',
-    marginBottom: 16,
+  modalTitle: {
+    ...theme.typography.title,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.lg,
   },
-  sheetTitle: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 17,
-    color: PALETTE.primary,
-    marginBottom: 12,
+  feedbackText: {
+    ...theme.typography.body,
+    color: theme.colors.primary,
+    marginBottom: theme.spacing.lg,
   },
-  sheetFeedbackText: {
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 13,
-    color: PALETTE.lime,
-    marginBottom: 10,
-  },
-  sheetList: {
-    marginTop: 6,
-  },
-  emptyList: {
-    paddingVertical: 32,
-    alignItems: 'center',
-  },
-  emptyListText: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 13,
-    color: PALETTE.textMuted,
+  emptyText: {
+    ...theme.typography.body,
+    color: theme.colors.textMuted,
   },
   threadRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'space-between',
+    paddingVertical: theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: PALETTE.borderSubtle,
+    borderBottomColor: theme.colors.border,
   },
-  threadRowPressed: {
-    backgroundColor: PALETTE.cardHover,
+  threadText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
   },
-  threadAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PALETTE.card,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  threadAvatarText: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 15,
-    color: PALETTE.primary,
-  },
-  threadInfo: {
-    flex: 1,
-  },
-  threadName: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 14,
-    color: PALETTE.primary,
-  },
-  threadUsername: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 12,
-    color: PALETTE.textSecondary,
-  },
-  echoChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: PALETTE.accent,
-  },
-  echoChipText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 12,
-    color: '#FFFFFF',
-  },
-
-  // Report Modal
-  reportModalCard: {
-    backgroundColor: PALETTE.surface,
-    borderRadius: 20,
-    marginHorizontal: 20,
-    marginBottom: 'auto',
-    marginTop: 'auto',
-    padding: 24,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-  },
-  reportHeading: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 18,
-    color: PALETTE.primary,
-    marginBottom: 6,
-  },
-  reportSubheading: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 13,
-    color: PALETTE.textSecondary,
-    marginBottom: 18,
-  },
-  reportSuccessBox: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  reportSuccessText: {
-    fontFamily: 'Outfit_700Bold',
-    fontSize: 16,
-    color: PALETTE.primary,
-    marginTop: 12,
-  },
-  reportSuccessSubtext: {
-    fontFamily: 'Outfit_400Regular',
-    fontSize: 13,
-    color: PALETTE.textSecondary,
-    marginTop: 4,
-    textAlign: 'center',
+  sendText: {
+    ...theme.typography.button,
+    color: theme.colors.primary,
   },
   reasonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginBottom: 6,
-    backgroundColor: PALETTE.card,
-  },
-  reasonRowActive: {
-    backgroundColor: PALETTE.cardHover,
-    borderColor: PALETTE.accent,
-    borderWidth: 1,
-  },
-  radioCircle: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: PALETTE.textMuted,
-    marginRight: 12,
-  },
-  radioCircleActive: {
-    borderColor: PALETTE.accent,
-    backgroundColor: PALETTE.accent,
+    gap: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
   },
   reasonText: {
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 13,
-    color: PALETTE.primary,
+    ...theme.typography.body,
+    color: theme.colors.text,
   },
-  reportActionRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 20,
+  submitButton: {
+    backgroundColor: theme.colors.primary,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    alignItems: 'center',
+    marginTop: theme.spacing.lg,
   },
-  cancelBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  cancelBtnText: {
-    fontFamily: 'Outfit_500Medium',
-    fontSize: 14,
-    color: PALETTE.textSecondary,
-  },
-  submitReportBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: PALETTE.magenta,
-  },
-  submitReportText: {
-    fontFamily: 'Outfit_600SemiBold',
-    fontSize: 14,
-    color: '#FFFFFF',
+  submitButtonText: {
+    ...theme.typography.button,
+    color: theme.colors.background,
   },
 });

@@ -12,14 +12,17 @@ _EVENT_TYPE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class EngagementEvent(BaseModel):
+    event_id: str | None = None
     event_type: str = Field(min_length=1, max_length=64)
-    blipp_id: str
-    session_id: str
+    blipp_id: str | None = None
+    session_id: str | None = None
     position_seconds: float = 0
     duration_seconds: float = 0
     device_signal: str | None = None
-    timestamp: str | None = None
+    occurred_at: str | None = None
 
+
+import uuid
 
 async def publish_events(events: List[EngagementEvent], user_id: str) -> None:
     for event in events:
@@ -27,6 +30,8 @@ async def publish_events(events: List[EngagementEvent], user_id: str) -> None:
             continue
         payload = event.model_dump()
         payload["user_id"] = user_id
+        if not payload.get("event_id"):
+            payload["event_id"] = str(uuid.uuid4())
         await event_bus.publish(f"engagement.{event.event_type}", payload)
 
 

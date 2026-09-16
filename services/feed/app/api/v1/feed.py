@@ -251,37 +251,7 @@ async def get_feed(
             )
         )
 
-    # Stage 5: Server-side ad interleaving (Section 6.4)
-    # Interleave ad slots every 5 organic items (index % 5 == 4)
-    final_feed_items: List[FeedItemResponse] = []
-    for idx, item in enumerate(items):
-        final_feed_items.append(item)
-        if idx % 5 == 4:
-            ad_id = f"ad-{uuid.uuid4()}"
-            final_feed_items.append(
-                FeedItemResponse(
-                    item_type="ad",
-                    id=ad_id,
-                    blipp_id=ad_id,
-                    provider="internal",
-                    title="Sponsored Announcement",
-                    description="Featured partner broadcast",
-                    audio_url="https://cdn.blipps.internal/ads/sample-ad.aac",
-                    duration_seconds=15.0,
-                    creator={
-                        "username": "sponsor",
-                        "display_name": "Sponsor Spotlight",
-                        "avatar_url": None,
-                    },
-                    audio_variants={
-                        "standard": "https://cdn.blipps.internal/ads/sample-ad.aac",
-                    },
-                    author="Sponsor Spotlight",
-                    username="sponsor",
-                    display_name="Sponsor Spotlight",
-                    avatar_url=None,
-                )
-            )
+    final_feed_items = items
 
     next_cursor = (
         encode_cursor(final_rows[-1]["created_at"], str(final_rows[-1]["blipp_id"]))

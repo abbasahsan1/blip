@@ -10,8 +10,9 @@ export interface PlayProgressEvent {
   session_id: string;
   position_seconds: number;
   duration_seconds: number;
+  event_id: string;
   device_signal: 'screen_on' | 'screen_off' | 'bluetooth_connected' | 'app_backgrounded';
-  timestamp: string;
+  occurred_at: string;
 }
 
 let activeSessionId: string = '';
@@ -105,8 +106,9 @@ export async function recordPlayProgress(params: {
     session_id: sessionId,
     position_seconds: Math.max(0, Math.round(params.position_seconds)),
     duration_seconds: Math.max(0, Math.round(params.duration_seconds)),
+    event_id: generateUUID(),
     device_signal: deviceSignal,
-    timestamp: new Date().toISOString(),
+    occurred_at: new Date().toISOString(),
   };
 
   eventBuffer.push(payload);
@@ -126,9 +128,10 @@ export async function recordLikeEvent(params: { blipp_id: string }): Promise<voi
     event_type: 'like',
     user_id: userId,
     blipp_id: params.blipp_id,
+    event_id: generateUUID(),
     session_id: sessionId,
     device_signal: deviceSignal,
-    timestamp: new Date().toISOString(),
+    occurred_at: new Date().toISOString(),
   };
 
   try {

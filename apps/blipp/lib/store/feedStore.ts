@@ -1,15 +1,6 @@
 import { create } from 'zustand';
-import { blippApi, likeBlipp, resolvePublicAudioUrl } from '../api';
+import { blippApi, likeBlipp, unlikeBlipp, saveBlipp, unsaveBlipp, followUser, unfollowUser, resolvePublicAudioUrl } from '../api';
 import type { Blipp, FeedSort } from '../types';
-
-const GRADIENTS: [string, string][] = [
-  ['#2563eb', '#8b5cf6'],
-  ['#6366f1', '#a855f7'],
-  ['#0f172a', '#1e3a5f'],
-  ['#064e3b', '#065f46'],
-  ['#78350f', '#92400e'],
-  ['#1e1b4b', '#312e81'],
-];
 
 export interface FeedState {
   items: Blipp[];
@@ -27,6 +18,8 @@ export interface FeedState {
   loadFeed: (viewerId?: string | null) => Promise<void>;
   refresh: (viewerId?: string | null) => Promise<void>;
   toggleLike: (postId: string) => Promise<void>;
+  toggleSave: (postId: string) => Promise<void>;
+  toggleFollow: (creatorId: string) => Promise<void>;
 }
 
 export const useFeedStore = create<FeedState>((set, get) => ({
@@ -60,8 +53,8 @@ export const useFeedStore = create<FeedState>((set, get) => ({
           author: item.display_name || item.author || (item.username ? `@${item.username}` : 'Creator'),
           authorId: item.creator_id,
           creator_id: item.creator_id,
-          duration: item.duration_seconds || 30,
-          duration_seconds: item.duration_seconds || 30,
+          duration: item.duration_seconds || 0,
+          duration_seconds: item.duration_seconds || 0,
           audio_url: standardUrl,
           audio_variants: {
             standard: standardUrl,
@@ -69,7 +62,6 @@ export const useFeedStore = create<FeedState>((set, get) => ({
             high: highUrl,
           },
           audioUrl: standardUrl,
-          coverGradient: GRADIENTS[idx % GRADIENTS.length],
           listenCount: item.listens_count || item.listenCount || 0,
           likeCount: item.likes_count || item.likeCount || 0,
           isLiked: Boolean(item.isLiked || item.is_liked),
@@ -86,7 +78,12 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       });
 
       set((state) => {
-        const updated = cursor ? [...state.items, ...mapped] : mapped;
+        // Prevent appending duplicates by filtering out items already present
+        const newMapped = cursor 
+          ? mapped.filter((m) => !state.items.some((existing) => existing.id === m.id))
+          : mapped;
+          
+        const updated = cursor ? [...state.items, ...newMapped] : newMapped;
         return {
           items: updated,
           posts: updated,
@@ -122,26 +119,99 @@ export const useFeedStore = create<FeedState>((set, get) => ({
 
   async toggleLike(postId: string) {
     const post = get().items.find((item) => item.id === postId);
-    if (!post || post.isLiked) return;
+    if (!post) return;
 
-    // Optimistically show the active orange heart, then restore the exact
-    // server-facing state if persistence fails.
+    const isCurrentlyLiked = post.isLiked;
+
     set((state) => {
       const updated = state.items.map((item) =>
         item.id === postId
-          ? { ...item, isLiked: true, likeCount: item.likeCount + 1 }
+          ? { ...item, isLiked: !isCurrentlyLiked, likeCount: isCurrentlyLiked ? Math.max(0, item.likeCount - 1) : item.likeCount + 1 }
           : item,
       );
       return { items: updated, posts: updated };
     });
 
     try {
-      await likeBlipp(postId);
+      if (isCurrentlyLiked) {
+        await unlikeBlipp(postId);
+      } else {
+        await likeBlipp(postId);
+      }
     } catch {
+      // rollback
       set((state) => {
         const updated = state.items.map((item) =>
           item.id === postId
-            ? { ...item, isLiked: false, likeCount: Math.max(0, item.likeCount - 1) }
+            ? { ...item, isLiked: isCurrentlyLiked, likeCount: post.likeCount }
+            : item,
+        );
+        return { items: updated, posts: updated };
+      });
+    }
+  },
+
+  async toggleSave(postId: string) {
+    const post = get().items.find((item) => item.id === postId);
+    if (!post) return;
+
+    const isCurrentlySaved = post.is_saved;
+
+    set((state) => {
+      const updated = state.items.map((item) =>
+        item.id === postId
+          ? { ...item, is_saved: !isCurrentlySaved }
+          : item,
+      );
+      return { items: updated, posts: updated };
+    });
+
+    try {
+      if (isCurrentlySaved) {
+        await unsaveBlipp(postId);
+      } else {
+        await saveBlipp(postId);
+      }
+    } catch {
+      // rollback
+      set((state) => {
+        const updated = state.items.map((item) =>
+          item.id === postId
+            ? { ...item, is_saved: isCurrentlySaved }
+            : item,
+        );
+        return { items: updated, posts: updated };
+      });
+    }
+  },
+
+  async toggleFollow(creatorId: string) {
+    const firstPost = get().items.find((item) => item.creator_id === creatorId);
+    if (!firstPost) return;
+
+    const isCurrentlyFollowing = firstPost.is_following;
+
+    set((state) => {
+      const updated = state.items.map((item) =>
+        item.creator_id === creatorId
+          ? { ...item, is_following: !isCurrentlyFollowing }
+          : item,
+      );
+      return { items: updated, posts: updated };
+    });
+
+    try {
+      if (isCurrentlyFollowing) {
+        await unfollowUser(creatorId);
+      } else {
+        await followUser(creatorId);
+      }
+    } catch {
+      // rollback
+      set((state) => {
+        const updated = state.items.map((item) =>
+          item.creator_id === creatorId
+            ? { ...item, is_following: isCurrentlyFollowing }
             : item,
         );
         return { items: updated, posts: updated };

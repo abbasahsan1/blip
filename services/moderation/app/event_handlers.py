@@ -59,6 +59,43 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Unexpected error calling content-ingest for upload {upload_id}: {e}")
 
+async def handle_copyright_scan_requested(data: Dict[str, Any]) -> None:
+    """
+    Handles copyright.scan.requested event by performing a copyright scan.
+    If cleared, publishes copyright.cleared event.
+    """
+    upload_id = data.get("upload_id")
+    blipp_id = data.get("blipp_id")
+    audio_url = data.get("audio_url", "")
+    duration_seconds = float(data.get("duration_seconds", 0.0))
+
+    if not upload_id or not blipp_id:
+        logger.warning(f"Missing upload_id or blipp_id in copyright.scan.requested event: {data}")
+        return
+
+    logger.info(f"Processing copyright scan request for upload {upload_id}, blipp {blipp_id}")
+
+    from app.services.copyright import get_copyright_scanner
+    scanner = get_copyright_scanner()
+    
+    try:
+        is_cleared = await scanner.scan_audio(audio_url, duration_seconds)
+        if is_cleared:
+            await event_bus.publish(
+                subject="copyright.cleared",
+                payload={
+                    "upload_id": upload_id,
+                    "blipp_id": blipp_id,
+                }
+            )
+            logger.info(f"Copyright scan cleared. Published copyright.cleared for blipp {blipp_id}")
+        else:
+            logger.warning(f"Copyright scan failed (infringement detected) for blipp {blipp_id}")
+    except NotImplementedError:
+        logger.error(f"Cannot process copyright scan for blipp {blipp_id} due to missing production service.")
+    except Exception as e:
+        logger.exception(f"Unexpected error during copyright scan for blipp {blipp_id}: {e}")
+
 
 async def run_copyright_consumer() -> None:
     global _running
@@ -73,11 +110,11 @@ async def run_copyright_consumer() -> None:
         js = event_bus.js
         try:
             psub = await js.pull_subscribe(
-                subject="copyright.cleared",
+                subject="copyright.>",
                 durable=CONSUMER_NAME,
                 stream=settings.NATS_STREAM_UPLOADS,
             )
-            logger.info(f"Durable pull consumer '{CONSUMER_NAME}' subscribed to 'copyright.cleared'")
+            logger.info(f"Durable pull consumer '{CONSUMER_NAME}' subscribed to 'copyright.>'")
 
             while _running:
                 try:
@@ -85,7 +122,10 @@ async def run_copyright_consumer() -> None:
                     for msg in msgs:
                         try:
                             payload = json.loads(msg.data.decode("utf-8"))
-                            await handle_copyright_cleared(payload)
+                            if msg.subject == "copyright.cleared":
+                                await handle_copyright_cleared(payload)
+                            elif msg.subject == "copyright.scan.requested":
+                                await handle_copyright_scan_requested(payload)
                             await msg.ack()
                         except Exception as msg_err:
                             logger.exception(f"Error handling message on {msg.subject}: {msg_err}")

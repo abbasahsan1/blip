@@ -45,9 +45,10 @@ async def get_http_client() -> httpx.AsyncClient:
 
 
 async def record_playback_engagement(
-    session_id: uuid.UUID,
+    event_id: Optional[uuid.UUID],
+    session_id: Optional[uuid.UUID],
     user_id: uuid.UUID,
-    blipp_id: uuid.UUID,
+    blipp_id: Optional[uuid.UUID],
     position_seconds: float,
     duration_seconds: float,
     event_type: str,
@@ -77,16 +78,33 @@ async def record_playback_engagement(
             # 1. Guarantee user profile row exists to satisfy foreign key
             await conn.execute(
                 """
-                INSERT INTO users_profile (user_id, username, display_name)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (user_id) DO NOTHING
-                """,
-                user_id,
-                str(user_id),
-                "Listener",
             )
 
+            # Idempotency check via processed_events table
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS processed_events (
+                    event_id UUID PRIMARY KEY,
+                    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+                """
+            )
+
+            if event_id:
+                try:
+                    await conn.execute(
+                        "INSERT INTO processed_events (event_id) VALUES ($1)",
+                        event_id,
+                    )
+                except Exception:
+                    # Unique violation -> already processed
+                    return None
+
             # 2. Lookup blipp details (creator_id, official duration)
+            if not blipp_id:
+                # E.g. follow events do not have a blipp_id
+                return {"user_id": user_id, "event_type": event_type}
+
             blipp_row = await conn.fetchrow(
                 """
                 SELECT creator_id, duration_seconds
@@ -104,15 +122,26 @@ async def record_playback_engagement(
             effective_duration = float(blipp_row["duration_seconds"]) if blipp_row["duration_seconds"] else float(duration_seconds)
             effective_duration = max(effective_duration, 1.0)
 
+            # If it's a non-playback event, we don't aggregate seconds.
+            if event_type in ("like", "unlike", "save", "unsave", "share"):
+                return {
+                    "user_id": user_id,
+                    "blipp_id": blipp_id,
+                    "event_type": event_type,
+                    "creator_id": creator_id,
+                }
+
             # 3. Lookup existing session
-            existing_session = await conn.fetchrow(
-                """
-                SELECT total_seconds_listened, completed, drop_off_position_seconds
-                FROM listening_session_agg
-                WHERE session_id = $1
-                """,
-                session_id,
-            )
+            existing_session = None
+            if session_id:
+                existing_session = await conn.fetchrow(
+                    """
+                    SELECT total_seconds_listened, completed, drop_off_position_seconds
+                    FROM listening_session_agg
+                    WHERE session_id = $1
+                    """,
+                    session_id,
+                )
 
             prev_seconds = float(existing_session["total_seconds_listened"]) if existing_session else 0.0
             was_completed = bool(existing_session["completed"]) if existing_session else False
@@ -136,25 +165,26 @@ async def record_playback_engagement(
             delta_seconds = max(0.0, new_seconds - prev_seconds)
 
             # 4. Upsert ListeningSessionAgg
-            await conn.execute(
-                """
-                INSERT INTO listening_session_agg (
-                    session_id, user_id, blipp_id, total_seconds_listened, completed, drop_off_position_seconds, session_date
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (session_id) DO UPDATE SET
-                    total_seconds_listened = EXCLUDED.total_seconds_listened,
-                    completed = listening_session_agg.completed OR EXCLUDED.completed,
-                    drop_off_position_seconds = EXCLUDED.drop_off_position_seconds,
-                    session_date = EXCLUDED.session_date
-                """,
-                session_id,
-                user_id,
-                blipp_id,
-                new_seconds,
-                is_completed,
-                drop_off,
-                session_date,
-            )
+            if session_id:
+                await conn.execute(
+                    """
+                    INSERT INTO listening_session_agg (
+                        session_id, user_id, blipp_id, total_seconds_listened, completed, drop_off_position_seconds, session_date
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (session_id) DO UPDATE SET
+                        total_seconds_listened = EXCLUDED.total_seconds_listened,
+                        completed = listening_session_agg.completed OR EXCLUDED.completed,
+                        drop_off_position_seconds = EXCLUDED.drop_off_position_seconds,
+                        session_date = EXCLUDED.session_date
+                    """,
+                    session_id,
+                    user_id,
+                    blipp_id,
+                    new_seconds,
+                    is_completed,
+                    drop_off,
+                    session_date,
+                )
 
             # 5. Upsert CreatorMinutesAgg if incremental seconds > 0 and creator known
             delta_minutes = delta_seconds / 60.0
@@ -191,7 +221,7 @@ async def record_playback_engagement(
 
 
 async def push_gorse_feedback(
-    user_id: str, blipp_id: str, timestamp_str: Optional[str] = None
+    user_id: str, blipp_id: str, timestamp_str: Optional[str] = None, feedback_type: str = "listen"
 ) -> None:
     """
     Sends positive engagement feedback to the Gorse REST API (POST /api/feedback).
@@ -204,7 +234,7 @@ async def push_gorse_feedback(
         ts = timestamp_str or datetime.now(timezone.utc).isoformat()
         payload = [
             {
-                "FeedbackType": "listen",
+                "FeedbackType": feedback_type,
                 "UserId": user_id,
                 "ItemId": blipp_id,
                 "Timestamp": ts,
@@ -260,6 +290,7 @@ async def process_message(js: JetStreamContext, msg) -> None:
         return
 
     try:
+        event_id_str = data.get("event_id")
         user_id_str = data.get("user_id")
         blipp_id_str = data.get("blipp_id")
         session_id_str = data.get("session_id")
@@ -267,19 +298,21 @@ async def process_message(js: JetStreamContext, msg) -> None:
         device_signal = data.get("device_signal", "screen_on")
         position_seconds = float(data.get("position_seconds", 0.0))
         duration_seconds = float(data.get("duration_seconds", 0.0))
-        timestamp = data.get("timestamp")
+        timestamp = data.get("occurred_at") or data.get("timestamp")
 
-        if not user_id_str or not blipp_id_str or not session_id_str:
-            logger.warning(f"Missing required UUID fields in engagement event: {data}")
+        if not user_id_str:
+            logger.warning(f"Missing user_id in engagement event: {data}")
             await msg.ack()
             return
 
+        event_id = uuid.UUID(event_id_str) if event_id_str else None
         user_id = uuid.UUID(user_id_str)
-        blipp_id = uuid.UUID(blipp_id_str)
-        session_id = uuid.UUID(session_id_str)
+        blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else None
+        session_id = uuid.UUID(session_id_str) if session_id_str else None
 
         # Section 6.5: Aggregate session & creator analytics
         res = await record_playback_engagement(
+            event_id=event_id,
             session_id=session_id,
             user_id=user_id,
             blipp_id=blipp_id,
@@ -292,27 +325,34 @@ async def process_message(js: JetStreamContext, msg) -> None:
 
         if res:
             logger.info(
-                f"Aggregated session {session_id} (blipp={blipp_id}): "
-                f"seconds={res['total_seconds_listened']:.1f}, "
-                f"delta_mins={res['delta_minutes']:.3f}, "
-                f"completed={res['completed']}"
+                f"Processed event {event_type} for user {user_id_str}. "
+                f"Stats: completed={res.get('completed', False)}"
             )
 
-            # Section 6.5: Positive engagement threshold for Gorse recommender
-            # (Completed listening session, listened >= 30s continuous, or >= 90% of duration)
-            is_positive = (
-                bool(res.get("completed", False)) or
-                float(res.get("total_seconds_listened", 0.0)) >= 30.0 or
-                (duration_seconds > 0 and float(res.get("total_seconds_listened", 0.0)) >= 0.9 * duration_seconds)
-            )
+            is_positive = False
+            feedback_type = "listen"
 
-            if is_positive:
-                # Dispatch feedback asynchronously to not block the JetStream ack loop
+            if event_type in ("like", "save", "share"):
+                is_positive = True
+                feedback_type = event_type
+            elif event_type in ("unlike", "unsave"):
+                # We could delete feedback in Gorse, but for now we'll just skip sending positive
+                pass
+            else:
+                # Playback threshold
+                is_positive = (
+                    bool(res.get("completed", False)) or
+                    float(res.get("total_seconds_listened", 0.0)) >= 30.0 or
+                    (duration_seconds > 0 and float(res.get("total_seconds_listened", 0.0)) >= 0.9 * duration_seconds)
+                )
+
+            if is_positive and blipp_id_str:
                 asyncio.create_task(
                     push_gorse_feedback(
                         user_id=str(user_id),
                         blipp_id=str(blipp_id),
                         timestamp_str=timestamp,
+                        feedback_type=feedback_type,
                     )
                 )
 

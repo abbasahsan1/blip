@@ -187,14 +187,18 @@ async def save_blipp(
 
     # Publish engagement event to NATS JetStream ENGAGEMENT stream (§5.8)
     try:
+        event_payload = {
+            "event_id": str(uuid.uuid4()),
+            "event_type": "save",
+            "user_id": str(current_user.user_id),
+            "blipp_id": str(blipp_id),
+            "session_id": str(uuid.uuid4()),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "position_seconds": 0.0,
+        }
         await event_bus.publish(
             subject="engagement.save",
-            payload={
-                "event_type": "save",
-                "user_id": str(current_user.user_id),
-                "blipp_id": str(blipp_id),
-                "timestamp": now.isoformat(),
-            },
+            payload=event_payload,
         )
         logger.info(f"Published engagement.save: user {current_user.user_id} saved blipp {blipp_id}")
     except Exception as e:
@@ -220,11 +224,26 @@ async def unsave_blipp(
         )
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        res = await conn.execute(
             "DELETE FROM saves WHERE user_id = $1 AND blipp_id = $2",
             current_user.user_id,
             blipp_id,
         )
+
+    if res == "DELETE 1":
+        event_payload = {
+            "event_id": str(uuid.uuid4()),
+            "event_type": "unsave",
+            "user_id": str(current_user.user_id),
+            "blipp_id": str(blipp_id),
+            "session_id": str(uuid.uuid4()),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "position_seconds": 0.0,
+        }
+        try:
+            await event_bus.publish("engagement.unsave", event_payload)
+        except Exception as e:
+            logger.warning(f"Failed to publish engagement.unsave event to NATS: {e}")
 
     logger.info(f"Removed saved blipp {blipp_id} for user {current_user.user_id}")
     return SaveActionResponse(status="unsaved", blipp_id=blipp_id)

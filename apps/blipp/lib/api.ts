@@ -246,6 +246,11 @@ export async function likeBlipp(blippId: string): Promise<LikeActionResponse> {
   return res.data;
 }
 
+export async function unlikeBlipp(blippId: string): Promise<LikeActionResponse> {
+  const res = await requestRaw<LikeActionResponse>(`/v1/likes/${blippId}`, { method: 'DELETE' });
+  return res.data;
+}
+
 export async function saveBlipp(blippId: string): Promise<void> {
   await requestRaw<void>(`/v1/blipps/${blippId}/save`, { method: 'POST' });
 }
@@ -432,6 +437,7 @@ export const api = {
   followUser,
   unfollowUser,
   likeBlipp,
+  unlikeBlipp,
   saveBlipp,
   unsaveBlipp,
   getFeed,
@@ -772,6 +778,10 @@ export const profileApi = {
 export const socialApi = {
   async like(blippId: string): Promise<LikeActionResponse> {
     return likeBlipp(blippId);
+  },
+
+  async unlike(blippId: string): Promise<LikeActionResponse> {
+    return unlikeBlipp(blippId);
   },
 
   async follow(userId: string): Promise<FollowActionResponse> {

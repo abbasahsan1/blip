@@ -29,7 +29,7 @@ data:
     cache_size = 100
 
     [recommend.data_source]
-    positive_feedback_types = ["listen"]
+    positive_feedback_types = ["listen", "like", "save", "share"]
     read_feedback_types = ["read"]
 
     [recommend.collaborative]
