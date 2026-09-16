@@ -1,14 +1,13 @@
 import { useFonts } from 'expo-font';
 import {
-  Sora_600SemiBold,
   Sora_700Bold,
 } from '@expo-google-fonts/sora';
 import {
-  PlusJakartaSans_400Regular,
-  PlusJakartaSans_500Medium,
-  PlusJakartaSans_600SemiBold,
-  PlusJakartaSans_700Bold,
-} from '@expo-google-fonts/plus-jakarta-sans';
+  Outfit_400Regular,
+  Outfit_500Medium,
+  Outfit_600SemiBold,
+  Outfit_700Bold,
+} from '@expo-google-fonts/outfit';
 import { SplashScreen, Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
@@ -48,6 +47,7 @@ function RootNavigator() {
     >
       <Stack.Screen name="auth" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="messages" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="+not-found" />
     </Stack>
   );
@@ -55,12 +55,11 @@ function RootNavigator() {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Sora_600SemiBold,
     Sora_700Bold,
-    PlusJakartaSans_400Regular,
-    PlusJakartaSans_500Medium,
-    PlusJakartaSans_600SemiBold,
-    PlusJakartaSans_700Bold,
+    Outfit_400Regular,
+    Outfit_500Medium,
+    Outfit_600SemiBold,
+    Outfit_700Bold,
   });
 
   const status = useSessionStore((s) => s.status);
@@ -92,7 +91,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style="light" backgroundColor={PALETTE.bg} />
+        <StatusBar style="light" />
         <RootNavigator />
       </SafeAreaProvider>
     </GestureHandlerRootView>

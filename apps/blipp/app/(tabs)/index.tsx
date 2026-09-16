@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Dimensions,
   FlatList,
-  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
@@ -12,11 +12,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioReel } from '@/components/audio/AudioReel';
+import { StoriesTray } from '@/components/stories/StoriesTray';
 import { AcousticDeckMark } from '@/components/common/Icons';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import type { AudioPost, FeedSort } from '@/lib/types';
+
+const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
 
 const SORTS: { value: FeedSort; label: string }[] = [
   { value: 'most_listened', label: 'Trending' },
@@ -27,16 +30,17 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
 
   const posts = useFeedStore((s) => s.posts);
+  const cursor = useFeedStore((s) => s.cursor);
   const sort = useFeedStore((s) => s.sort);
   const isLoading = useFeedStore((s) => s.isLoading);
   const isRefreshing = useFeedStore((s) => s.isRefreshing);
   const setSort = useFeedStore((s) => s.setSort);
+  const fetchFeed = useFeedStore((s) => s.fetchFeed);
   const refresh = useFeedStore((s) => s.refresh);
   const toggleLike = useFeedStore((s) => s.toggleLike);
 
   const userId = useSessionStore((s) => s.user?.id ?? null);
 
-  const [pageHeight, setPageHeight] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<FlatList<AudioPost>>(null);
 
@@ -44,58 +48,72 @@ export default function FeedScreen() {
     void refresh(userId);
   }, []);
 
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    setPageHeight(e.nativeEvent.layout.height);
-  }, []);
-
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (pageHeight === 0) return;
-      const idx = Math.round(e.nativeEvent.contentOffset.y / pageHeight);
+      const idx = Math.round(e.nativeEvent.contentOffset.y / WINDOW_HEIGHT);
       setActiveIndex(idx);
     },
-    [pageHeight],
+    [],
   );
+
+  const handleAutoSkip = useCallback(
+    (index: number) => {
+      if (index < posts.length - 1) {
+        listRef.current?.scrollToIndex({ index: index + 1, animated: true });
+      }
+    },
+    [posts.length],
+  );
+
+  const loadMore = useCallback(() => {
+    if (cursor && !isLoading) {
+      void fetchFeed(cursor);
+    }
+  }, [cursor, fetchFeed, isLoading]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: AudioPost; index: number }) => (
       <AudioReel
         post={item}
         isActive={index === activeIndex}
-        height={pageHeight}
+        height={WINDOW_HEIGHT}
         onLike={() => toggleLike(item.id)}
+        onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
       />
     ),
-    [activeIndex, pageHeight, posts, toggleLike],
+    [activeIndex, handleAutoSkip, posts, toggleLike],
   );
 
   return (
     <View style={styles.root}>
-      {/* Studio Header Bar */}
+      {/* Studio Header Bar & Stories Tray */}
       <View
         style={[
-          styles.header,
+          styles.headerContainer,
           { paddingTop: insets.top + 10 },
         ]}
       >
-        <Text style={styles.headerLogo}>blipp</Text>
-        <View style={styles.sortChips}>
-          {SORTS.map((s) => (
-            <Pressable
-              key={s.value}
-              style={[styles.chip, sort === s.value && styles.chipActive]}
-              onPress={() => setSort(s.value)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: sort === s.value }}
-            >
-              <Text style={[styles.chipText, sort === s.value && styles.chipTextActive]}>
-                {s.label}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={styles.header}>
+          <Text style={styles.headerLogo}>blipp</Text>
+          <View style={styles.sortChips}>
+            {SORTS.map((s) => (
+              <Pressable
+                key={s.value}
+                style={[styles.chip, sort === s.value && styles.chipActive]}
+                onPress={() => setSort(s.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: sort === s.value }}
+              >
+                <Text style={[styles.chipText, sort === s.value && styles.chipTextActive]}>
+                  {s.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
+        <StoriesTray />
       </View>
 
       {/* Structured Acoustic Loading Skeletons */}
@@ -120,19 +138,22 @@ export default function FeedScreen() {
           data={posts}
           keyExtractor={(p) => p.id}
           renderItem={renderItem}
-          onLayout={onLayout}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.7}
           onScroll={onScroll}
           scrollEventThrottle={16}
-          pagingEnabled
-          showsVerticalScrollIndicator={false}
-          snapToInterval={pageHeight || undefined}
+          pagingEnabled={true}
+          snapToInterval={WINDOW_HEIGHT}
+          snapToAlignment="start"
           decelerationRate="fast"
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => refresh(userId)}
-              tintColor={PALETTE.accent}
-              colors={[PALETTE.accent]}
+              tintColor="#F97316"
+              colors={['#F97316']}
+              progressViewOffset={insets.top + 60}
             />
           }
           ListEmptyComponent={
@@ -147,8 +168,8 @@ export default function FeedScreen() {
             </View>
           }
           getItemLayout={(_data, index) => ({
-            length: pageHeight,
-            offset: pageHeight * index,
+            length: WINDOW_HEIGHT,
+            offset: WINDOW_HEIGHT * index,
             index,
           })}
         />
@@ -160,22 +181,22 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#000000',
+  },
+  headerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingBottom: 14,
-    backgroundColor: PALETTE.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: PALETTE.borderSubtle,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
   },
   headerLogo: {
     fontFamily: 'Sora_700Bold',
@@ -190,25 +211,21 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    backgroundColor: PALETTE.surface,
     minHeight: 30,
     justifyContent: 'center',
   },
   chipActive: {
-    backgroundColor: PALETTE.accentDim,
-    borderColor: PALETTE.accent,
+    borderBottomWidth: 2,
+    borderBottomColor: '#F97316',
   },
   chipText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 12,
     color: PALETTE.textMuted,
   },
   chipTextActive: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    color: PALETTE.accent,
+    fontFamily: 'Outfit_600SemiBold',
+    color: '#F97316',
   },
   loadingState: {
     flex: 1,
@@ -283,7 +300,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptySub: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 14,
     color: PALETTE.textMuted,
     textAlign: 'center',

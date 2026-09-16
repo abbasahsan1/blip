@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { resolvePublicAudioUrl } from '@/lib/api';
+import { resolveMediaUrl, resolvePublicAudioUrl } from '@/lib/api';
 import { resetPlaybackSessionId } from '@/lib/audio/listenTracker';
 import type { Blipp } from '@/lib/types';
 
@@ -36,6 +36,10 @@ export interface AudioPlayerControls {
   togglePlayPause: () => void;
   /** Seek to an absolute position in seconds. */
   seekTo: (seconds: number) => void;
+  /** True when a sponsored slot has an unreachable or *.internal audio URL. */
+  isAdFallback: boolean;
+  /** 5-second countdown timer for sponsored promo fallback. */
+  adCountdown: number;
 }
 
 export interface UseAudioPlayerOptions {
@@ -69,15 +73,51 @@ export function useAudioPlayer({
   const [progress, setProgress] = useState(0);
 
   // Variant selection: default to item.audio_variants?.standard || item.audio_url
-  const remoteUrl = resolvePublicAudioUrl(
+  const remoteUrl = resolveMediaUrl(
     item?.audio_variants?.standard || item?.audio_url,
   );
   // Pre-cached local file URI overrides remote URL for <500ms first-byte latency (§6.4)
   const audioUri = localUri || remoteUrl;
 
+  // ── Sponsored Ad Resilience (§6.4) ──────────────────────────────────────────
+  const isAd = Boolean(item?.is_ad || item?.is_sponsored);
+  const rawAudioUrl = item?.audio_variants?.standard || item?.audio_url || '';
+  const isInternalUrl = Boolean(rawAudioUrl && (rawAudioUrl.includes('.internal') || rawAudioUrl.includes('cdn.blipps.internal')));
+
+  const [isAdFallback, setIsAdFallback] = useState(false);
+  const [adCountdown, setAdCountdown] = useState(5);
+
+  useEffect(() => {
+    if (isAd && isInternalUrl) {
+      setIsAdFallback(true);
+      setIsLoading(false);
+      setIsPlaying(false);
+    } else {
+      setIsAdFallback(false);
+      setAdCountdown(5);
+    }
+  }, [isAd, isInternalUrl, item?.blipp_id, item?.id]);
+
+  useEffect(() => {
+    if (!isAdFallback || !isActive) return;
+    setAdCountdown(5);
+    const timer = setInterval(() => {
+      setAdCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isAdFallback, isActive]);
+
   // ── Audio element lifecycle ─────────────────────────────────────────────────
   useEffect(() => {
-    // Guard: Web Audio API is unavailable in SSR / native environments without Web Audio
+    // Guard: If ad fallback is active or Web Audio API is unavailable, do not attempt to load audio
+    if (isAd && isInternalUrl) return;
     if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
     if (!audioUri) return;
 
@@ -140,6 +180,9 @@ export function useAudioPlayer({
       setIsLoading(false);
       setIsPlaying(false);
       console.warn('[useAudioPlayer] Audio load error for URI:', audioUri);
+      if (isAd) {
+        setIsAdFallback(true);
+      }
     };
 
     audio.addEventListener('canplay', handleCanPlay);
@@ -170,7 +213,7 @@ export function useAudioPlayer({
     };
   // Re-run whenever the resolved URI changes (item switch or cache hit arrives)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioUri, item?.blipp_id, item?.id]);
+  }, [audioUri, item?.blipp_id, item?.id, isAd, isInternalUrl]);
 
   // ── Pause playback when navigating away from reel ──────────────────────────
   useEffect(() => {
@@ -208,5 +251,7 @@ export function useAudioPlayer({
     progress,
     togglePlayPause,
     seekTo,
+    isAdFallback,
+    adCountdown,
   };
 }

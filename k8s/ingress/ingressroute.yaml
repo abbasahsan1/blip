@@ -11,11 +11,90 @@ spec:
     average: 100
     burst: 50
 
+
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-ingest
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /ingest
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-feed
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /feed
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-social
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /social
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-messages
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /messages
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-moderation
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /moderation
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-minio
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /minio
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-keycloak
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /keycloak
+
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
-  name: blipp-ingressroute
+  name: blipp-ingress
   namespace: blipp
   labels:
     app.kubernetes.io/name: blipp-ingress
@@ -24,164 +103,102 @@ spec:
   entryPoints:
     - web
   routes:
-    # Keycloak Identity Provider & Admin UI
+
+
+    # 2. Content Ingest Service (/ingest, /v1/uploads, /v1/blipps)
+    - match: PathPrefix(`/ingest`)
+      kind: Rule
+      middlewares:
+        - name: strip-ingest
+      services:
+        - name: content-ingest-service
+          port: 8001
+    - match: PathPrefix(`/v1/uploads`) || PathPrefix(`/v1/blipps`)
+      kind: Rule
+      services:
+        - name: content-ingest-service
+          port: 8001
+
+    # 3. Feed Service (/feed, /v1/feed, /v1/events)
+    - match: PathPrefix(`/feed`)
+      kind: Rule
+      middlewares:
+        - name: strip-feed
+      services:
+        - name: feed-service
+          port: 8002
+    - match: PathPrefix(`/v1/feed`) || PathPrefix(`/v1/events`)
+      kind: Rule
+      services:
+        - name: feed-service
+          port: 8002
+
+    # 4. Social Graph Service (/social, /v1/profiles, /v1/social, /v1/likes)
+    - match: PathPrefix(`/social`)
+      kind: Rule
+      middlewares:
+        - name: strip-social
+      services:
+        - name: social-graph-service
+          port: 8003
+    - match: PathPrefix(`/v1/profiles`) || PathPrefix(`/v1/social`) || PathPrefix(`/v1/likes`)
+      kind: Rule
+      services:
+        - name: social-graph-service
+          port: 8003
+
+    # 5. Messaging Service (/messages, /v1/messages, /v1/stories)
+    - match: PathPrefix(`/messages`)
+      kind: Rule
+      middlewares:
+        - name: strip-messages
+      services:
+        - name: messaging-service
+          port: 8004
+    - match: PathPrefix(`/v1/messages`) || PathPrefix(`/v1/stories`)
+      kind: Rule
+      services:
+        - name: messaging-service
+          port: 8004
+
+    # 6. Moderation Service (/moderation, /v1/reports, /v1/moderation)
+    - match: PathPrefix(`/moderation`)
+      kind: Rule
+      middlewares:
+        - name: strip-moderation
+      services:
+        - name: moderation-service
+          port: 8005
+    - match: PathPrefix(`/v1/reports`) || PathPrefix(`/v1/moderation`)
+      kind: Rule
+      services:
+        - name: moderation-service
+          port: 8005
+
+    # 7. MinIO S3 Storage (/minio, /blipp-uploads, /blipp-variants, /blipp-stories)
+    - match: PathPrefix(`/minio`)
+      kind: Rule
+      middlewares:
+        - name: strip-minio
+      services:
+        - name: minio
+          port: 9000
+    - match: PathPrefix(`/blipp-uploads`) || PathPrefix(`/blipp-variants`) || PathPrefix(`/blipp-stories`)
+      kind: Rule
+      services:
+        - name: minio
+          port: 9000
+
+    # 8. Keycloak Identity Provider (/keycloak, /realms, /resources, /js)
     - match: PathPrefix(`/keycloak`)
+      kind: Rule
+      middlewares:
+        - name: strip-keycloak
+      services:
+        - name: keycloak
+          port: 8080
+    - match: PathPrefix(`/realms`) || PathPrefix(`/resources`) || PathPrefix(`/js`)
       kind: Rule
       services:
         - name: keycloak
           port: 8080
-
-    # Authentication Route (/v1/auth)
-    - match: PathPrefix(`/v1/auth`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: auth-service
-          port: 8000
-
-    # User Profiles Route (/v1/profiles)
-    - match: PathPrefix(`/v1/profiles`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: social-graph-service
-          port: 8003
-
-    # Social Graph & Relationships Route (/v1/social)
-    - match: PathPrefix(`/v1/social`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: social-graph-service
-          port: 8003
-
-    # Direct Uploads Route (/v1/uploads)
-    - match: PathPrefix(`/v1/uploads`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: content-ingest-service
-          port: 8001
-
-    # Feed Route (/v1/feed)
-    - match: PathPrefix(`/v1/feed`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: feed-service
-          port: 8002
-
-    # Blipps Saves & Bookmarks Route (/v1/blipps/saved and /v1/blipps/{id}/save -> content-ingest-service)
-    - match: PathPrefix(`/v1/blipps/saved`) || (PathPrefix(`/v1/blipps`) && PathRegexp(`/v1/blipps/[^/]+/save`))
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: content-ingest-service
-          port: 8001
-
-    # Blipps Content Route (/v1/blipps -> feed-service)
-    - match: PathPrefix(`/v1/blipps`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: feed-service
-          port: 8002
-
-    # Telemetry Events Route (/v1/events)
-    - match: PathPrefix(`/v1/events`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Direct Messages Route (/v1/messages)
-    - match: PathPrefix(`/v1/messages`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: messaging-service
-          port: 8004
-
-    # 24-Hour Ephemeral Audio Stories Route (/v1/stories)
-    - match: PathPrefix(`/v1/stories`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: messaging-service
-          port: 8004
-
-    # User Reports Route (/v1/reports)
-    - match: PathPrefix(`/v1/reports`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: moderation-service
-          port: 8005
-
-    # Moderation Actions Route (/v1/moderation)
-    - match: PathPrefix(`/v1/moderation`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: moderation-service
-          port: 8005
-
-    # General Versioned Route (/v1)
-    - match: PathPrefix(`/v1`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: auth-service
-          port: 8000
-
-
-    # Legacy /api Microservice Route
-    - match: PathPrefix(`/api`)
-      kind: Rule
-      middlewares:
-        - name: blipp-ratelimit
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Swagger Documentation
-    - match: PathPrefix(`/docs`)
-      kind: Rule
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Health Probe
-    - match: PathPrefix(`/health`)
-      kind: Rule
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Readiness Probe
-    - match: PathPrefix(`/readyz`)
-      kind: Rule
-      services:
-        - name: auth-service
-          port: 8000
-
-    # Frontend Expo Web Client
-    - match: PathPrefix(`/`)
-      kind: Rule
-      services:
-        - name: blipp-app
-          port: 80

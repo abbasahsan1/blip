@@ -2,88 +2,86 @@ import { Tabs } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PALETTE } from '@/lib/palette';
-import {
-  FeedConsoleMark,
-  UploadConsoleMark,
-  ProfileConsoleMark,
-} from '@/components/common/Icons';
+import { Feather } from '@expo/vector-icons';
 
-function TabIcon({
-  label,
-  focused,
-  children,
-}: {
+interface TabItemProps {
   label: string;
+  iconName: keyof typeof Feather.glyphMap;
   focused: boolean;
-  children: React.ReactNode;
-}) {
+}
+
+function FloatingTabItem({ label, iconName, focused }: TabItemProps) {
   return (
-    <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-      {children}
-      <Text style={[styles.iconLabel, focused && styles.iconLabelActive]}>{label}</Text>
+    <View style={styles.tabItemContainer}>
+      <Feather 
+        name={iconName} 
+        size={22} 
+        color={focused ? PALETTE.primary : PALETTE.textSecondary} 
+      />
+      <Text style={[styles.tabLabel, focused && styles.tabLabelActive]}>{label}</Text>
+    </View>
+  );
+}
+
+function CenterDropButton({ focused }: { focused: boolean }) {
+  return (
+    <View style={styles.centerDropWrapper}>
+      <Feather 
+        name="plus" 
+        size={32} 
+        color={focused ? PALETTE.primary : PALETTE.textPrimary} 
+        style={focused ? styles.centerDropIconActive : styles.centerDropIcon}
+      />
     </View>
   );
 }
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const barHeight = 60 + insets.bottom;
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: PALETTE.surface,
-          borderTopColor: PALETTE.border,
-          borderTopWidth: 1,
-          height: 60 + insets.bottom,
-          paddingBottom: insets.bottom,
-          paddingTop: 8,
-          elevation: 0,
-        },
         tabBarShowLabel: false,
+        tabBarStyle: [
+          styles.frostedBottomBar,
+          {
+            height: barHeight,
+            paddingBottom: insets.bottom,
+          },
+        ],
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Feed" focused={focused}>
-              <FeedConsoleMark
-                size={20}
-                color={focused ? PALETTE.accent : PALETTE.textMuted}
-              />
-            </TabIcon>
+            <FloatingTabItem label="Feed" iconName="home" focused={focused} />
           ),
-          tabBarAccessibilityLabel: 'Feed console tab',
+          tabBarAccessibilityLabel: 'Feed tab',
         }}
       />
+
       <Tabs.Screen
         name="upload"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="Upload" focused={focused}>
-              <UploadConsoleMark
-                size={20}
-                color={focused ? PALETTE.accent : PALETTE.textMuted}
-              />
-            </TabIcon>
-          ),
-          tabBarAccessibilityLabel: 'Upload audio tab',
+          headerShown: false,
+          tabBarIcon: ({ focused }) => <CenterDropButton focused={focused} />,
+          tabBarAccessibilityLabel: 'Drop broadcast tab',
         }}
       />
+
       <Tabs.Screen
         name="profile"
         options={{
+          headerShown: false,
           tabBarIcon: ({ focused }) => (
-            <TabIcon label="Profile" focused={focused}>
-              <ProfileConsoleMark
-                size={20}
-                color={focused ? PALETTE.accent : PALETTE.textMuted}
-              />
-            </TabIcon>
+            <FloatingTabItem label="Profile" iconName="user" focused={focused} />
           ),
-          tabBarAccessibilityLabel: 'Profile console tab',
+          tabBarAccessibilityLabel: 'Profile tab',
         }}
       />
     </Tabs>
@@ -91,23 +89,46 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  iconWrap: {
+  frostedBottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    borderTopWidth: 0,
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    borderRadius: 8,
+    justifyContent: 'space-around',
+    elevation: 0,
   },
-  iconWrapActive: {
-    backgroundColor: PALETTE.accentDim,
+  tabItemContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    minWidth: 60,
   },
-  iconLabel: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 11,
-    color: PALETTE.textMuted,
+  tabLabel: {
+    fontFamily: 'Outfit_500Medium',
+    fontSize: 10,
+    color: PALETTE.textSecondary,
+    marginTop: 4,
   },
-  iconLabelActive: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    color: PALETTE.accent,
+  tabLabelActive: {
+    fontFamily: 'Outfit_700Bold',
+    color: PALETTE.primary,
+  },
+  centerDropWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    top: 5,
+  },
+  centerDropIcon: {
+    opacity: 0.8,
+  },
+  centerDropIconActive: {
+    opacity: 1,
+    shadowColor: PALETTE.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
   },
 });

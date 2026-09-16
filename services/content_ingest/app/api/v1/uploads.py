@@ -44,6 +44,12 @@ async def upload_media(
     Streams file chunks directly to MinIO raw uploads bucket, records the upload in Postgres,
     and publishes an upload.received event to NATS JetStream.
     """
+    if upload_type == "smart_clip":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Smart clip uploads are not implemented"
+        )
+
     upload_id = uuid.uuid4()
     ext = os.path.splitext(file.filename or "")[1].lower() or ".mp3"
     storage_key = f"{current_user.user_id}/{upload_id}{ext}"
@@ -358,6 +364,116 @@ async def complete_upload(
     created_at_str = row["created_at"].isoformat() if row["created_at"] else None
     raw_variants = row["audio_variants"]
     parsed_variants = json.loads(raw_variants) if isinstance(raw_variants, str) else (raw_variants or audio_variants)
+
+    return BlippResponse(
+        blipp_id=row["blipp_id"],
+        creator_id=row["creator_id"],
+        title=row["title"],
+        audio_url=row["audio_url"],
+        audio_variants=parsed_variants,
+        duration_seconds=row["duration_seconds"],
+        status=row["status"],
+        created_at=created_at_str,
+    )
+
+
+from pydantic import BaseModel
+
+class UploadStatusUpdateRequest(BaseModel):
+    status: str
+
+@router.patch("/{upload_id}/status", response_model=BlippResponse, status_code=status.HTTP_200_OK)
+async def update_upload_status(
+    upload_id: uuid.UUID,
+    req: UploadStatusUpdateRequest,
+):
+    """
+    Internal endpoint to update the blipp status (e.g. to 'published' after copyright clearance).
+    """
+    pool = await get_db_pool()
+    if not pool:
+        raise AppException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="DATABASE_UNAVAILABLE",
+            message="Database pool unavailable",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                # Check if the blipp exists using parent_upload_id
+                row = await conn.fetchrow(
+                    """
+                    UPDATE blipps
+                    SET status = $1
+                    WHERE parent_upload_id = $2
+                    RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
+                    """,
+                    req.status,
+                    upload_id
+                )
+
+                if not row:
+                    # Fallback if parent_upload_id wasn't set but it matches blipp_id
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE blipps
+                        SET status = $1
+                        WHERE blipp_id = $2
+                        RETURNING blipp_id, creator_id, title, audio_url, audio_variants, duration_seconds, status, created_at
+                        """,
+                        req.status,
+                        upload_id
+                    )
+
+                if not row:
+                    raise AppException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        code="NOT_FOUND",
+                        message=f"Blipp for upload/id '{upload_id}' not found",
+                    )
+                    
+                if req.status == "published":
+                    await conn.execute(
+                        """
+                        UPDATE uploads
+                        SET processing_status = 'done'
+                        WHERE upload_id = $1
+                        """,
+                        upload_id
+                    )
+        except AppException:
+            raise
+        except Exception as e:
+            logger.exception(f"Database error during status update for upload {upload_id}: {e}")
+            raise AppException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="DATABASE_ERROR",
+                message="Failed to update blipp and upload status in the database"
+            )
+
+    if req.status == "published":
+        try:
+            await event_bus.publish(
+                subject="engagement.blipp.published",
+                payload={
+                    "blipp_id": str(row["blipp_id"]),
+                    "creator_id": str(row["creator_id"]),
+                    "title": row["title"] or "",
+                    "audio_url": row["audio_url"],
+                    "duration_seconds": float(row["duration_seconds"] or 0.0),
+                    "published_at": now_utc.isoformat(),
+                },
+            )
+            logger.info(f"Published engagement.blipp.published event for blipp {row['blipp_id']}")
+        except Exception as pub_err:
+            logger.warning(f"Failed to publish engagement.blipp.published event: {pub_err}")
+
+    created_at_str = row["created_at"].isoformat() if row["created_at"] else None
+    raw_variants = row["audio_variants"]
+    parsed_variants = json.loads(raw_variants) if isinstance(raw_variants, str) else (raw_variants or {"standard": row["audio_url"]})
 
     return BlippResponse(
         blipp_id=row["blipp_id"],

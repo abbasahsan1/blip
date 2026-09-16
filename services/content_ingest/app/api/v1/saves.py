@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, status
 from blipp_common.database import get_db_pool
 from blipp_common.events import event_bus
 from blipp_common.exceptions import AppException
+from blipp_common.pagination import decode_cursor, encode_cursor
 from blipp_common.security import AuthenticatedUser, get_current_user
 from app.models.schemas import SaveActionResponse, SavedBlippItem, SavedBlippsResponse
 
@@ -19,7 +20,7 @@ router = APIRouter(tags=["Blipp Saves & Bookmarks"])
 @router.get("/blipps/saved", response_model=SavedBlippsResponse)
 async def get_saved_blipps(
     limit: int = Query(20, ge=1, le=100, description="Maximum items per page"),
-    cursor: Optional[str] = Query(None, description="ISO timestamp cursor for backward pagination"),
+    cursor: Optional[str] = Query(None, description="Cursor for backward pagination"),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ):
     """
@@ -36,14 +37,18 @@ async def get_saved_blipps(
     fetch_limit = limit + 1
     async with pool.acquire() as conn:
         if cursor:
-            try:
-                cursor_dt = datetime.fromisoformat(cursor)
-            except ValueError:
-                raise AppException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    code="INVALID_CURSOR",
-                    message="Cursor must be a valid ISO 8601 datetime string",
-                )
+            decoded = decode_cursor(cursor)
+            if decoded:
+                cursor_dt, _ = decoded
+            else:
+                try:
+                    cursor_dt = datetime.fromisoformat(cursor)
+                except ValueError:
+                    raise AppException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        code="INVALID_CURSOR",
+                        message="Cursor must be a valid cursor string",
+                    )
             rows = await conn.fetch(
                 """
                 SELECT 
@@ -123,7 +128,11 @@ async def get_saved_blipps(
             )
         )
 
-    next_cursor = items[-1].saved_at if (has_more and items) else None
+    next_cursor = (
+        encode_cursor(page_rows[-1]["saved_at"], str(page_rows[-1]["blipp_id"]))
+        if (has_more and page_rows and page_rows[-1]["saved_at"])
+        else None
+    )
 
     return SavedBlippsResponse(
         items=items,

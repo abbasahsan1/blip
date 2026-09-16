@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { AppState, type AppStateStatus, Platform } from 'react-native';
 import { resolvePublicAudioUrl } from '@/lib/api';
 import { getDeviceSignal } from '@/lib/deviceSignal';

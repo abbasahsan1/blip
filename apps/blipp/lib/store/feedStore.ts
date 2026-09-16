@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { blippApi, resolvePublicAudioUrl } from '../api';
+import { blippApi, likeBlipp, resolvePublicAudioUrl } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
 const GRADIENTS: [string, string][] = [
@@ -26,7 +26,7 @@ export interface FeedState {
   setSort: (sort: FeedSort) => void;
   loadFeed: (viewerId?: string | null) => Promise<void>;
   refresh: (viewerId?: string | null) => Promise<void>;
-  toggleLike: (postId: string) => void;
+  toggleLike: (postId: string) => Promise<void>;
 }
 
 export const useFeedStore = create<FeedState>((set, get) => ({
@@ -41,7 +41,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
     try {
-      const res = await blippApi.getFeed();
+      const res = await blippApi.getFeed(cursor);
       const serverItems = res.items || [];
 
       const nextCursor = res.next_cursor ?? null;
@@ -51,6 +51,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         const standardUrl = resolvePublicAudioUrl(rawStandard);
         const lowUrl = resolvePublicAudioUrl(item.audio_variants?.low || rawStandard);
         const highUrl = resolvePublicAudioUrl(item.audio_variants?.high || rawStandard);
+        const isAd = Boolean(item.is_ad || item.is_sponsored);
         return {
           id: item.blipp_id,
           blipp_id: item.blipp_id,
@@ -69,10 +70,18 @@ export const useFeedStore = create<FeedState>((set, get) => ({
           },
           audioUrl: standardUrl,
           coverGradient: GRADIENTS[idx % GRADIENTS.length],
-          listenCount: 0,
-          likeCount: 0,
-          isLiked: false,
-          createdAt: new Date().toISOString(),
+          listenCount: item.listens_count || item.listenCount || 0,
+          likeCount: item.likes_count || item.likeCount || 0,
+          isLiked: Boolean(item.isLiked || item.is_liked),
+          is_ad: isAd,
+          is_sponsored: isAd,
+          is_saved: Boolean(item.is_saved),
+          is_following: Boolean(item.is_following),
+          creator: item.creator,
+          sponsor: item.sponsor,
+          tags: item.tags || [],
+          sourceName: item.sourceName,
+          createdAt: item.created_at || new Date().toISOString(),
         };
       });
 
@@ -111,14 +120,32 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     await get().refreshFeed();
   },
 
-  toggleLike(postId: string) {
+  async toggleLike(postId: string) {
+    const post = get().items.find((item) => item.id === postId);
+    if (!post || post.isLiked) return;
+
+    // Optimistically show the active orange heart, then restore the exact
+    // server-facing state if persistence fails.
     set((state) => {
-      const updated = state.items.map((p) =>
-        p.id === postId
-          ? { ...p, isLiked: !p.isLiked, likeCount: p.likeCount + (p.isLiked ? -1 : 1) }
-          : p,
+      const updated = state.items.map((item) =>
+        item.id === postId
+          ? { ...item, isLiked: true, likeCount: item.likeCount + 1 }
+          : item,
       );
       return { items: updated, posts: updated };
     });
+
+    try {
+      await likeBlipp(postId);
+    } catch {
+      set((state) => {
+        const updated = state.items.map((item) =>
+          item.id === postId
+            ? { ...item, isLiked: false, likeCount: Math.max(0, item.likeCount - 1) }
+            : item,
+        );
+        return { items: updated, posts: updated };
+      });
+    }
   },
 }));

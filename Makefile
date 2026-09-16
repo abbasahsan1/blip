@@ -2,8 +2,7 @@ CLUSTER_NAME := blipp-cluster
 NAMESPACE    := blipp
 SHELL        := /bin/bash
 
-IMAGES := blipp-auth:latest \
-          blipp-content-ingest:latest \
+IMAGES := blipp-content-ingest:latest \
           blipp-feed:latest \
           blipp-social-graph:latest \
           blipp-messaging:latest \
@@ -24,7 +23,6 @@ help: ## Show available commands
 
 all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything from scratch (cluster, images, storage, workloads, port-forwards)
 	@echo "Waiting for core microservices to reach Ready state..."
-	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s || true
@@ -34,7 +32,6 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 	@echo "=================================================================="
 	@echo "  Blipps Platform is fully deployed and accessible on localhost!"
 	@echo "=================================================================="
-	@echo "  - Auth:           http://localhost:8000"
 	@echo "  - Content Ingest: http://localhost:8001"
 	@echo "  - Feed:           http://localhost:8002"
 	@echo "  - Social Graph:   http://localhost:8003"
@@ -49,7 +46,6 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running application services
 	@echo "Applying updated manifests to namespace $(NAMESPACE)..."
 	@kubectl apply -f k8s/secrets.yaml
-	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -59,7 +55,6 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl apply -f k8s/analytics-worker/
 	@kubectl apply -f k8s/ingress/
 	@echo "Triggering zero-downtime rolling restart..."
-	@kubectl rollout restart deployment/auth-service -n $(NAMESPACE)
 	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
 	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
 	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
@@ -103,9 +98,6 @@ k3d-import: ## Import all locally built Docker images into the k3d cluster
 # Container Builds (Context pinned to repository root for libs/common)
 # ==============================================================================
 
-build-auth:
-	docker build -t blipp-auth:latest -t blipp-auth-service:latest -f services/auth/Dockerfile .
-
 build-ingest:
 	docker build -t blipp-content-ingest:latest -f services/content_ingest/Dockerfile .
 
@@ -127,7 +119,7 @@ build-transcode:
 build-analytics:
 	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
-build-all: build-auth build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
+build-all: build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
 
 # ==============================================================================
 # Kubernetes Infrastructure & Deployments
@@ -156,7 +148,6 @@ k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifes
 	@kubectl apply -f k8s/keycloak/
 	@kubectl apply -f k8s/gorse/
 	# Core microservices
-	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -175,30 +166,20 @@ k8s-status: ## Show status of all cluster pods, services, and PVCs
 # Local Networking & Port Forwarding
 # ==============================================================================
 
-port-forward: port-forward-stop ## Start background port-forwarding on all interfaces
-	@echo "Establishing port-forwards for namespace: $(NAMESPACE) on 0.0.0.0..."
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/auth-service 8000:8000 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/content-ingest-service 8001:8001 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/feed-service 8002:8002 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/social-graph-service 8003:8003 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/messaging-service 8004:8004 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/moderation-service 8005:8005 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/minio 9000:9000 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/keycloak 8080:8080 > /dev/null 2>&1 &
-	@kubectl port-forward --address 0.0.0.0 -n $(NAMESPACE) svc/redis 6379:6379 > /dev/null 2>&1 &
-	@echo "Active endpoints bound to 0.0.0.0:"
-	@echo "  - Auth:           http://localhost:8000"
-	@echo "  - Content Ingest: http://localhost:8001"
-	@echo "  - Feed:           http://localhost:8002"
-	@echo "  - Social Graph:   http://localhost:8003"
-	@echo "  - Messaging:      http://localhost:8004"
-	@echo "  - Moderation:     http://localhost:8005"
-	@echo "  - MinIO:          http://localhost:9000"
-	@echo "  - Keycloak:       http://localhost:8080"
-	@echo "  - Redis:          localhost:6379"
+port-forward: port-forward-stop ## Expose single Traefik gateway on port 8419
+	@mkdir -p .logs
+	@echo "Binding Traefik Gateway to 0.0.0.0:8419..."
+	@kubectl port-forward --address 0.0.0.0 -n kube-system svc/traefik 8419:80 > .logs/pf-gateway.log 2>&1 &
+	@sleep 2
+	@if ! pgrep -f "[k]ubectl port-forward.*8419" > /dev/null; then \
+		echo "ERROR: Traefik gateway failed to bind! Dumping .logs/pf-gateway.log:"; \
+		cat .logs/pf-gateway.log; \
+		exit 1; \
+	fi
+	@echo "Gateway operational: http://localhost:8419"
 
-port-forward-stop: ## Kill any active kubectl port-forward processes safely
-	@-pkill -f "[k]ubectl port-forward" 2>/dev/null || true
+port-forward-stop: ## Stop Traefik gateway port-forward
+	@-pkill -f "[k]ubectl port-forward.*8419" 2>/dev/null || true
 	@echo "Port-forwards stopped."
 
 dev-mobile: ## Run mobile environment auto-configuration script

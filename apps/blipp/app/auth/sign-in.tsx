@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,26 +13,68 @@ import {
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSessionStore } from '@/lib/store/sessionStore';
-import { PALETTE } from '@/lib/palette';
-import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { LinearGradient } from 'expo-linear-gradient';
+import { api, profileApi } from '../../lib/api';
+import { useSessionStore } from '../../lib/store/sessionStore';
 import { StatusAlertMark } from '@/components/common/Icons';
 
 export default function SignInScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [touched, setTouched] = useState({ identifier: false, password: false });
-  const [focusedField, setFocusedField] = useState<'identifier' | 'password' | null>(null);
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const isSubmitting = useSessionStore((s) => s.isSubmitting);
-  const error = useSessionStore((s) => s.error);
   const status = useSessionStore((s) => s.status);
-  const signInWithEmail = useSessionStore((s) => s.signInWithEmail);
-  const signInWithOAuth = useSessionStore((s) => s.signInWithOAuth);
-  const clearError = useSessionStore((s) => s.clearError);
+  const setSessionTokens = useSessionStore((s) => s.setSessionTokens);
+
+  // Soundwave pulsation animation
+  const wave1 = useRef(new Animated.Value(0.4)).current;
+  const wave2 = useRef(new Animated.Value(0.8)).current;
+  const wave3 = useRef(new Animated.Value(0.5)).current;
+  const wave4 = useRef(new Animated.Value(0.9)).current;
+  const wave5 = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const createPulse = (val: Animated.Value, duration: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(val, {
+            toValue: 1,
+            duration,
+            useNativeDriver: true,
+          }),
+          Animated.timing(val, {
+            toValue: 0.25,
+            duration,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+
+    const a1 = createPulse(wave1, 550);
+    const a2 = createPulse(wave2, 420);
+    const a3 = createPulse(wave3, 620);
+    const a4 = createPulse(wave4, 480);
+    const a5 = createPulse(wave5, 590);
+
+    a1.start();
+    a2.start();
+    a3.start();
+    a4.start();
+    a5.start();
+
+    return () => {
+      a1.stop();
+      a2.stop();
+      a3.stop();
+      a4.stop();
+      a5.stop();
+    };
+  }, [wave1, wave2, wave3, wave4, wave5]);
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -38,358 +82,378 @@ export default function SignInScreen() {
     }
   }, [status, router]);
 
-  useEffect(() => {
-    clearError();
-  }, [clearError]);
-
-  const identifierError =
-    touched.identifier && identifier.trim().length === 0
-      ? 'Enter your username or email'
-      : null;
-  const passwordError =
-    touched.password && password.length === 0 ? 'Enter your password' : null;
-  const authError = error?.message || null;
-
-  const canSubmit = identifier.trim().length > 0 && password.length > 0 && !isSubmitting;
-
   async function handleSignIn() {
-    setTouched({ identifier: true, password: true });
-    if (!canSubmit) return;
-    await signInWithEmail(identifier.trim(), password);
-  }
+    if (!email.trim() || !password) {
+      setServerError('Please enter both email and password.');
+      return;
+    }
 
-  async function handleAppleSignIn() {
-    await signInWithOAuth('apple');
+    setServerError(null);
+    setIsLoading(true);
+
+    try {
+      const authResult = await api.login(email.trim(), password);
+      if (authResult?.tokens) {
+        await setSessionTokens(authResult.tokens, authResult.user);
+        
+        // First-login profile check
+        try {
+          await profileApi.getMyProfile();
+        } catch (err: any) {
+          // If profile does not exist (e.g. 404), claim it
+          if (err.status === 404) {
+            await profileApi.claimUsername({
+              username: authResult.user.username || email.split('@')[0],
+              display_name: authResult.user.displayName || email.split('@')[0],
+            });
+          }
+        }
+        
+        router.replace('/(tabs)');
+      } else {
+        setServerError('Authentication failed. Please check credentials.');
+      }
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Unable to sign in. Please verify your email and password.';
+      setServerError(msg);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 32 },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <View style={styles.container}>
+      {/* Immersive Ambient Gradient Background */}
+      <LinearGradient
+        colors={['#07080B', '#11131F', '#07080B']}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+      />
+
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Brand Console Identity */}
-        <View style={styles.brand}>
-          <Text style={styles.logo}>blipp</Text>
-          <Text style={styles.tagline}>Acoustic broadcast console</Text>
-        </View>
-
-        {/* Chassis Form Card */}
-        <View style={styles.card}>
-          <Text style={styles.heading}>Operator Sign In</Text>
-          <Text style={styles.subheading}>Access your studio and stream telemetry</Text>
-
-          {/* Error Banner */}
-          {authError && (
-            <View style={styles.errorBanner} accessibilityRole="alert">
-              <StatusAlertMark size={16} color={PALETTE.error} />
-              <Text style={styles.errorBannerText}>{authError}</Text>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          bounces={false}
+        >
+          {/* Top 40%: App Branding & Pulsating Soundwave */}
+          <View style={styles.topBrandingSection}>
+            <View style={styles.soundwaveCluster}>
+              {[wave1, wave2, wave3, wave4, wave5].map((w, idx) => (
+                <Animated.View
+                  key={idx}
+                  style={[
+                    styles.soundwaveBar,
+                    {
+                      transform: [{ scaleY: w }],
+                      backgroundColor: idx % 2 === 0 ? '#8B5CF6' : '#EC4899',
+                    },
+                  ]}
+                />
+              ))}
             </View>
-          )}
 
-          {/* Identifier Input */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Username or Email</Text>
-            <TextInput
-              id="sign-in-email"
-              style={[
-                styles.input,
-                focusedField === 'identifier' && styles.inputFocused,
-                identifierError ? styles.inputError : null,
-              ]}
-              value={identifier}
-              onChangeText={setIdentifier}
-              onFocus={() => setFocusedField('identifier')}
-              onBlur={() => {
-                setFocusedField(null);
-                setTouched((t) => ({ ...t, identifier: true }));
-              }}
-              placeholder="operator or operator@blipp.local"
-              placeholderTextColor={PALETTE.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="next"
-              accessibilityLabel="Username or email address"
-            />
-            {identifierError && <Text style={styles.fieldError}>{identifierError}</Text>}
+            <Text style={styles.brandTitle}>BLIPPS</Text>
+            <Text style={styles.brandTagline}>Drop in. Speak up.</Text>
           </View>
 
-          {/* Password Input */}
-          <View style={styles.field}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              id="sign-in-password"
-              style={[
-                styles.input,
-                focusedField === 'password' && styles.inputFocused,
-                passwordError ? styles.inputError : null,
-              ]}
-              value={password}
-              onChangeText={setPassword}
-              onFocus={() => setFocusedField('password')}
-              onBlur={() => {
-                setFocusedField(null);
-                setTouched((t) => ({ ...t, password: true }));
-              }}
-              placeholder="••••••••"
-              placeholderTextColor={PALETTE.textMuted}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleSignIn}
-              accessibilityLabel="Password"
-            />
-            {passwordError && <Text style={styles.fieldError}>{passwordError}</Text>}
-          </View>
+          {/* Bottom 60%: Sleek Modern Bottom Sheet Form */}
+          <View style={styles.bottomSheetCard}>
+            <View style={styles.sheetHandle} />
 
-          {/* Primary Action Button */}
-          <Pressable
-            id="sign-in-submit"
-            style={({ pressed }) => [
-              styles.button,
-              pressed && styles.buttonPressed,
-              !canSubmit && styles.buttonDisabled,
-            ]}
-            onPress={handleSignIn}
-            disabled={!canSubmit}
-            accessibilityRole="button"
-            accessibilityLabel="Sign In"
-          >
-            <Text style={styles.buttonText}>
-              {isSubmitting ? 'Authenticating...' : 'Sign In'}
-            </Text>
-          </Pressable>
+            <Text style={styles.sheetTitle}>Sign In</Text>
+            <Text style={styles.sheetSubtitle}>Access your audio feed and community</Text>
 
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue via provider</Text>
-            <View style={styles.dividerLine} />
-          </View>
+            {/* Clean Server Error Banner (Positioned above submit button) */}
+            {serverError && (
+              <View style={styles.errorContainer} accessibilityRole="alert">
+                <StatusAlertMark size={16} color="#EF4444" />
+                <Text style={styles.errorText}>{serverError}</Text>
+              </View>
+            )}
 
-          {/* Federated Provider Row */}
-          <View style={styles.oauthRow}>
-            <GoogleSignInButton />
+            {/* Email / Username Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email or Username</Text>
+              <TextInput
+                style={[
+                  styles.pillInput,
+                  focusedField === 'email' && styles.pillInputFocused,
+                ]}
+                value={email}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  if (serverError) setServerError(null);
+                }}
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="name@blipp.com"
+                placeholderTextColor="rgba(255, 255, 255, 0.3)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+              />
+            </View>
+
+            {/* Password Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={[
+                  styles.pillInput,
+                  focusedField === 'password' && styles.pillInputFocused,
+                ]}
+                value={password}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (serverError) setServerError(null);
+                }}
+                onFocus={() => setFocusedField('password')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="••••••••"
+                placeholderTextColor="rgba(255, 255, 255, 0.3)"
+                secureTextEntry
+                autoCapitalize="none"
+                returnKeyType="done"
+                onSubmitEditing={handleSignIn}
+              />
+            </View>
+
+            {/* Primary Action Button (Violet-to-Pink gradient) */}
             <Pressable
+              onPress={handleSignIn}
+              disabled={isLoading}
               style={({ pressed }) => [
-                styles.appleButton,
+                styles.submitButtonWrapper,
                 pressed && styles.buttonPressed,
               ]}
-              onPress={handleAppleSignIn}
               accessibilityRole="button"
-              accessibilityLabel="Continue with Apple"
+              accessibilityLabel="Sign In"
             >
-              <Text style={styles.appleButtonText}>Continue with Apple</Text>
+              <LinearGradient
+                colors={['#8B5CF6', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Sign In</Text>
+                )}
+              </LinearGradient>
             </Pressable>
-          </View>
 
-          {/* Account Creation Link */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>New operator? </Text>
-            <Link href="/auth/sign-up" asChild>
-              <Pressable accessibilityRole="link">
-                <Text style={styles.footerLink}>Create account</Text>
-              </Pressable>
-            </Link>
+            {/* Switch to Sign Up */}
+            <View style={styles.switchAuthRow}>
+              <Text style={styles.switchAuthPrompt}>New to Blipps? </Text>
+              <Link href="/auth/sign-up" asChild>
+                <Pressable hitSlop={8}>
+                  <Text style={styles.switchAuthLink}>Create Account</Text>
+                </Pressable>
+              </Link>
+            </View>
           </View>
-
-          {/* Legal Compliance Footer (Required Surface) */}
-          <View style={styles.legalFooter}>
-            <Text style={styles.legalText}>
-              By proceeding, you agree to our Terms of Service and Privacy Policy.
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#07080B',
   },
-  scroll: {
+  keyboardAvoid: {
+    flex: 1,
+  },
+  scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    maxWidth: 460,
-    width: '100%',
-    alignSelf: 'center',
+    justifyContent: 'space-between',
   },
-  brand: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logo: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 42,
-    color: PALETTE.text,
-    letterSpacing: -1.5,
-  },
-  tagline: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 14,
-    color: PALETTE.textMuted,
-    marginTop: 4,
-  },
-  card: {
-    backgroundColor: PALETTE.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    padding: 24,
-    gap: 16,
-  },
-  heading: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 20,
-    color: PALETTE.text,
-    letterSpacing: -0.3,
-  },
-  subheading: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 14,
-    color: PALETTE.textSecondary,
-    marginTop: -8,
-  },
-  errorBanner: {
-    backgroundColor: PALETTE.errorDim,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: `${PALETTE.error}40`,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  errorBannerText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 13,
-    color: PALETTE.error,
-    flex: 1,
-  },
-  field: {
-    gap: 6,
-  },
-  label: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 13,
-    color: PALETTE.textSecondary,
-  },
-  input: {
-    backgroundColor: PALETTE.card,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 14,
-    color: PALETTE.text,
-    minHeight: 46,
-  },
-  inputFocused: {
-    borderColor: PALETTE.accent,
-  },
-  inputError: {
-    borderColor: PALETTE.error,
-  },
-  fieldError: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 12,
-    color: PALETTE.error,
-  },
-  button: {
-    backgroundColor: PALETTE.accent,
-    borderRadius: 8,
-    paddingVertical: 14,
+
+  // Top 40% Branding
+  topBrandingSection: {
+    height: 240,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  soundwaveCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    gap: 6,
+    marginBottom: 16,
+  },
+  soundwaveBar: {
+    width: 6,
+    height: 40,
+    borderRadius: 3,
+  },
+  brandTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 36,
+    color: '#FFFFFF',
+    letterSpacing: 4,
+    textShadowColor: 'rgba(139, 92, 246, 0.65)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
+  },
+  brandTagline: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.65)',
+    marginTop: 6,
+    letterSpacing: 0.5,
+  },
+
+  // Bottom 60% Modern Sheet
+  bottomSheetCard: {
+    backgroundColor: '#0E111A',
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
+    borderWidth: 1,
+    borderColor: '#1F2433',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 36,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  sheetHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  sheetTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 24,
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  sheetSubtitle: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.5)',
     marginTop: 4,
-    minHeight: 48,
+    marginBottom: 20,
+  },
+
+  // Form Fields
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  pillInput: {
+    backgroundColor: '#161922',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#262B3A',
+    height: 52,
+    paddingHorizontal: 20,
+    color: '#FFFFFF',
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 15,
+  },
+  pillInputFocused: {
+    borderColor: '#8B5CF6',
+    backgroundColor: '#191D28',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+  },
+
+  // Error Banner
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
+    color: '#F87171',
+  },
+
+  // Primary Action Button
+  submitButtonWrapper: {
+    marginTop: 8,
+    borderRadius: 24,
+    height: 54,
+    overflow: 'hidden',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  submitGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitButtonText: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 16,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   buttonPressed: {
     opacity: 0.88,
+    transform: [{ scale: 0.985 }],
   },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
-    color: '#ffffff',
-  },
-  oauthRow: {
-    flexDirection: 'column',
-    gap: 10,
-  },
-  appleButton: {
-    backgroundColor: PALETTE.card,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  appleButtonText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
-    color: PALETTE.text,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginVertical: 4,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: PALETTE.border,
-  },
-  dividerText: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 12,
-    color: PALETTE.textMuted,
-  },
-  footer: {
+
+  // Footer Navigation
+  switchAuthRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: 24,
   },
-  footerText: {
+  switchAuthPrompt: {
     fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 13,
-    color: PALETTE.textMuted,
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.55)',
   },
-  footerLink: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 13,
-    color: PALETTE.accent,
-  },
-  legalFooter: {
-    borderTopWidth: 1,
-    borderTopColor: PALETTE.borderSubtle,
-    paddingTop: 12,
-    marginTop: 4,
-  },
-  legalText: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 11,
-    color: PALETTE.textMuted,
-    textAlign: 'center',
-    lineHeight: 16,
+  switchAuthLink: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 14,
+    color: '#A78BFA',
   },
 });

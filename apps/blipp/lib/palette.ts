@@ -1,35 +1,91 @@
-export const PALETTE = {
-  // Studio Console Backgrounds
-  bg: '#09090b', // Charcoal Vinyl base
-  surface: '#121215', // Deck Console housing
-  card: '#18181b', // Module chassis
-  cardHover: '#1f1f24',
+export const darkTheme = {
+  // New Theme Standard
+  background: '#000000',
+  surface: '#0D0D11',
+  textPrimary: '#FFFFFF',
+  textSecondary: '#8E8E93',
+  border: '#1C1C1E',
+  accent: '#FF5500',
+  overlay: 'rgba(0,0,0,0.85)',
 
-  // Mechanical Borders
-  border: '#27272a', // Track groove border
-  borderSubtle: '#1c1c1f',
-
-  // Readout Typography
-  text: '#fafafa', // Signal High
-  textSecondary: '#a1a1aa', // Studio Readout
-  textMuted: '#71717a', // Acoustic Low
-
-  // Frequency Brand Accent
-  primary: '#ffffff',
-  accent: '#6366f1', // Resonance Violet: audio frequency needle
-  accentDim: 'rgba(99, 102, 241, 0.15)',
-
-  // Status Indicators
-  success: '#10b981',
-  error: '#ef4444',
-  errorDim: 'rgba(239, 68, 68, 0.12)',
-  warning: '#f59e0b',
-
-  // Console Overlays (replacing liquid glass)
-  overlay: 'rgba(9, 9, 11, 0.85)',
-  glass: '#16161a', // Solid console inset, eliminating frosted glass
-  glassBorder: '#27272a',
+  // Legacy PALETTE compatibility
+  bg: '#000000',
+  surfaceSubtle: '#0D0D11',
+  card: '#0D0D11',
+  cardHover: '#1C1C1E',
+  cardGlass: 'rgba(13, 13, 17, 0.85)',
+  borderSubtle: '#0D0D11',
+  borderNeon: '#FF5500',
+  borderGlass: 'rgba(255, 85, 0, 0.25)',
+  text: '#FFFFFF',
+  textMuted: '#8E8E93',
+  primary: '#FF5500',
+  accentDim: 'rgba(255, 85, 0, 0.18)',
+  accentGlow: 'rgba(255, 85, 0, 0.35)',
+  magenta: '#F43F5E',
+  magentaDim: 'rgba(244, 63, 94, 0.18)',
+  magentaGlow: 'rgba(244, 63, 94, 0.35)',
+  lime: '#10B981',
+  limeDim: 'rgba(16, 185, 129, 0.18)',
+  limeGlow: 'rgba(16, 185, 129, 0.35)',
+  amber: '#F59E0B',
+  amberDim: 'rgba(245, 158, 11, 0.18)',
+  amberGlow: 'rgba(245, 158, 11, 0.35)',
+  success: '#10B981',
+  error: '#F43F5E',
+  errorDim: 'rgba(244, 63, 94, 0.15)',
+  warning: '#F59E0B',
+  overlayRadial: 'rgba(255, 85, 0, 0.12)',
+  glass: 'rgba(28, 28, 30, 0.78)',
+  glassBorder: 'rgba(255, 255, 255, 0.08)',
+  floatingPill: 'rgba(28, 28, 30, 0.85)',
 } as const;
 
-export type PaletteKey = keyof typeof PALETTE;
+export const lightTheme = {
+  // New Theme Standard
+  background: '#FFFFFF',
+  surface: '#F2F2F7',
+  textPrimary: '#1C1C1E',
+  textSecondary: '#8E8E93',
+  border: '#E5E5EA',
+  accent: '#FF5500',
+  overlay: 'rgba(255,255,255,0.85)',
 
+  // Legacy PALETTE compatibility
+  bg: '#FFFFFF',
+  surfaceSubtle: '#F2F2F7',
+  card: '#FFFFFF',
+  cardHover: '#F2F2F7',
+  cardGlass: 'rgba(255, 255, 255, 0.85)',
+  borderSubtle: '#E5E5EA',
+  borderNeon: '#FF5500',
+  borderGlass: 'rgba(255, 85, 0, 0.25)',
+  text: '#1C1C1E',
+  textMuted: '#8E8E93',
+  primary: '#FF5500',
+  accentDim: 'rgba(255, 85, 0, 0.18)',
+  accentGlow: 'rgba(255, 85, 0, 0.35)',
+  magenta: '#F43F5E',
+  magentaDim: 'rgba(244, 63, 94, 0.18)',
+  magentaGlow: 'rgba(244, 63, 94, 0.35)',
+  lime: '#10B981',
+  limeDim: 'rgba(16, 185, 129, 0.18)',
+  limeGlow: 'rgba(16, 185, 129, 0.35)',
+  amber: '#F59E0B',
+  amberDim: 'rgba(245, 158, 11, 0.18)',
+  amberGlow: 'rgba(245, 158, 11, 0.35)',
+  success: '#10B981',
+  error: '#F43F5E',
+  errorDim: 'rgba(244, 63, 94, 0.15)',
+  warning: '#F59E0B',
+  overlayRadial: 'rgba(255, 85, 0, 0.12)',
+  glass: 'rgba(255, 255, 255, 0.78)',
+  glassBorder: 'rgba(0, 0, 0, 0.08)',
+  floatingPill: 'rgba(255, 255, 255, 0.85)',
+} as const;
+
+export type Theme = typeof darkTheme;
+
+// Default export for legacy code
+export const PALETTE: Theme = darkTheme;
+export type PaletteKey = keyof Theme;

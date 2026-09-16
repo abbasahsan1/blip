@@ -112,7 +112,7 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 tier_file = variants_local[tier]
                 variant_key = f"{upload_id}/{tier}.m4a"
                 variant_url = await storage_manager.upload_file(
-                    file_path=tier_file,
+                    data=tier_file,
                     storage_key=variant_key,
                     content_type="audio/mp4",
                 )
@@ -154,6 +154,22 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 )
             except Exception as leg_err:
                 logger.debug(f"Legacy transcode.complete publication note: {leg_err}")
+
+            # TEMPORARY BRIDGE: unconditionally mock copyright.cleared
+            try:
+                mock_copyright_payload = {
+                    "upload_id": str(upload_id),
+                    "blipp_id": str(blipp_id),
+                    "status": "cleared",
+                    "notes": "auto-cleared (temporary bridge)"
+                }
+                await js.publish(
+                    subject="copyright.cleared",
+                    payload=json.dumps(mock_copyright_payload).encode("utf-8"),
+                )
+                logger.info(f"Published mocked copyright.cleared for upload {upload_id} (temporary bridge)")
+            except Exception as e:
+                logger.warning(f"Failed to publish mocked copyright.cleared event: {e}")
 
             # 5. Acknowledge (ack) message
             await msg.ack()

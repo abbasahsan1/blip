@@ -95,3 +95,26 @@ export async function recordPlayProgress(params: {
     // Non-blocking telemetry delivery
   }
 }
+
+export async function recordLikeEvent(params: { blipp_id: string }): Promise<void> {
+  const sessionUser = useSessionStore.getState().user;
+  const userId = sessionUser?.id;
+  if (!userId || !params.blipp_id) return;
+  const sessionId = getPlaybackSessionId();
+  const deviceSignal = getActiveDeviceSignal(true);
+
+  const payload = {
+    event_type: 'like',
+    user_id: userId,
+    blipp_id: params.blipp_id,
+    session_id: sessionId,
+    device_signal: deviceSignal,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await api.post('/v1/events', payload);
+  } catch {
+    // Non-blocking telemetry delivery
+  }
+}

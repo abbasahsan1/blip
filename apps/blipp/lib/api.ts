@@ -1,7 +1,16 @@
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSessionStore } from './store/sessionStore';
-import type { AuthTokens, PlaybackTelemetryPayload, User } from './types';
+import type {
+  AuthTokens,
+  PlaybackTelemetryPayload,
+  User,
+  BlippItem,
+  StoryItem,
+  DMMessageItem,
+  DMThreadItem,
+  MessageListResponse,
+} from './types';
 
 // ─── Platform Error Envelope ───────────────────────────────────────────────────
 
@@ -26,92 +35,56 @@ export class ApiError extends Error {
   }
 }
 
-// ─── Base URL Configuration ───────────────────────────────────────────────────
+// ─── Base URL & Traefik Gateway Configuration ────────────────────────────────
 
-export const getApiBaseUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+export const getGatewayUrl = (): string => {
+  if (process.env.EXPO_PUBLIC_GATEWAY_URL) {
+    return process.env.EXPO_PUBLIC_GATEWAY_URL.replace(/\/+$/, '');
   }
-  // In production browser environments where /v1 and /api are reverse-proxied via ingress
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    const raw = process.env.EXPO_PUBLIC_API_URL.replace(/\/+$/, '');
+    if (raw.includes(':8000')) {
+      return raw.replace(':8000', ':8419').replace(/\/v1$/, '');
+    }
+    return raw.replace(/\/v1$/, '');
+  }
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      return '';
+      return window.location.origin;
     }
   }
-  return 'http://localhost:8000/v1';
+  return 'http://localhost:8419';
 };
+
+export const getApiBaseUrl = (): string => getGatewayUrl();
+export const getContentIngestUrl = (): string => getGatewayUrl();
+export const getFeedServiceUrl = (): string => getGatewayUrl();
+export const getSocialGraphUrl = (): string => getGatewayUrl();
+export const getMessagingUrl = (): string => getGatewayUrl();
+export const getModerationUrl = (): string => getGatewayUrl();
+export const getMinioPublicUrl = (): string => getGatewayUrl();
 
 export const getKeycloakUrl = (): string => {
   if (process.env.EXPO_PUBLIC_KEYCLOAK_URL) {
     const raw = process.env.EXPO_PUBLIC_KEYCLOAK_URL.replace(/\/+$/, '');
-    return raw.endsWith('/keycloak') ? raw : `${raw}/keycloak`;
+    if (!raw.includes(':8080')) return raw;
   }
-  // In production browser environments where /keycloak is reverse-proxied via ingress
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    if (!window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      return '/keycloak';
-    }
-  }
-  return 'http://localhost:8080/keycloak';
-};
-export const getContentIngestUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_CONTENT_INGEST_URL) {
-    return process.env.EXPO_PUBLIC_CONTENT_INGEST_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8001');
-  }
-  return base;
+  return getGatewayUrl();
 };
 
-export const getFeedServiceUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_FEED_URL) {
-    return process.env.EXPO_PUBLIC_FEED_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8002');
-  }
-  return base;
-};
-
-export const getSocialGraphUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL) {
-    return process.env.EXPO_PUBLIC_SOCIAL_GRAPH_URL.replace(/\/+$/, '');
-  }
-  const base = getApiBaseUrl();
-  if (base.includes(':8000')) {
-    return base.replace(':8000', ':8003');
-  }
-  return base;
-};
-
-export const getMinioPublicUrl = (): string => {
-  if (process.env.EXPO_PUBLIC_MINIO_URL) {
-    return process.env.EXPO_PUBLIC_MINIO_URL.replace(/\/+$/, '');
-  }
-  if (typeof window !== 'undefined' && window.location && window.location.hostname) {
-    const host = window.location.hostname;
-    return `http://${host}:9000`;
-  }
-  return 'http://localhost:9000';
-};
-
-export const resolvePublicAudioUrl = (url?: string | null): string => {
+export function resolveMediaUrl(url: string | null | undefined): string {
   if (!url) return '';
-  const internalPatterns = [
-    'minio.blipp.svc.cluster.local:9000',
-    'minio:9000',
-  ];
-  for (const pattern of internalPatterns) {
-    if (url.includes(pattern)) {
-      const publicBase = getMinioPublicUrl();
-      return url.replace(/^https?:\/\/[^/]+(:9000)?/, publicBase);
-    }
+  const gateway = process.env.EXPO_PUBLIC_GATEWAY_URL || getGatewayUrl();
+  // Replace relative paths, localhost:9000, 127.0.0.1:9000, or minio:9000 with the single gateway URL
+  if (url.startsWith('/')) {
+    return `${gateway.replace(/\/+$/, '')}${url}`;
   }
-  return url;
-};
+  return url
+    .replace(/^https?:\/\/(localhost|127\.0\.0\.1|minio|minio\.blipp\.svc\.cluster\.local):9000/, gateway.replace(/\/+$/, ''))
+    .replace(/^https?:\/\/[^/]+:9000/, gateway.replace(/\/+$/, ''));
+}
+
+export const resolvePublicAudioUrl = resolveMediaUrl;
 
 export interface ApiResponse<T = any> {
   data: T;
@@ -158,42 +131,9 @@ export async function requestRaw<T = any>(
     headers['Authorization'] = `Bearer ${activeToken}`;
   }
 
-  let baseUrl = getApiBaseUrl();
-  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
-
-  if (
-    normalizedPath === '/v1/uploads' ||
-    normalizedPath.startsWith('/v1/uploads/') ||
-    normalizedPath === '/uploads' ||
-    normalizedPath.startsWith('/uploads/')
-  ) {
-    baseUrl = getContentIngestUrl();
-  } else if (
-    normalizedPath === '/v1/feed' ||
-    normalizedPath.startsWith('/v1/feed/') ||
-    normalizedPath === '/feed' ||
-    normalizedPath.startsWith('/feed/') ||
-    normalizedPath === '/v1/blipps' ||
-    normalizedPath.startsWith('/v1/blipps/')
-  ) {
-    baseUrl = getFeedServiceUrl();
-  } else if (
-    normalizedPath === '/v1/profiles' ||
-    normalizedPath.startsWith('/v1/profiles/') ||
-    normalizedPath === '/profiles' ||
-    normalizedPath.startsWith('/profiles/') ||
-    normalizedPath === '/v1/social' ||
-    normalizedPath.startsWith('/v1/social/') ||
-    normalizedPath === '/social' ||
-    normalizedPath.startsWith('/social/')
-  ) {
-    baseUrl = getSocialGraphUrl();
-  }
-
-  if (baseUrl.endsWith('/v1') && (normalizedPath === '/v1' || normalizedPath.startsWith('/v1/'))) {
-    normalizedPath = normalizedPath.slice(3);
-  }
-  const endpointUrl = baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+  const gateway = getGatewayUrl();
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const endpointUrl = `${gateway}${normalizedPath}`;
 
   const response = await fetch(endpointUrl, {
     ...rest,
@@ -201,13 +141,40 @@ export async function requestRaw<T = any>(
     body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  // Intercept 401 Unauthorized: clear session state and redirect to /auth/sign-in
+  // Intercept 401 Unauthorized: attempt auto-refresh
   if (response.status === 401) {
-    useSessionStore.getState().clearSession();
-    try {
-      router.replace('/auth/sign-in');
-    } catch {
-      // Router not mounted yet
+    const refreshToken = useSessionStore.getState().tokens?.refreshToken;
+    let refreshSuccess = false;
+    
+    if (refreshToken) {
+      try {
+        const newTokens = await authApi.refresh(refreshToken);
+        const me = await authApi.me(newTokens.accessToken);
+        useSessionStore.getState().setSessionTokens(newTokens, me);
+        
+        headers['Authorization'] = `Bearer ${newTokens.accessToken}`;
+        const retryResponse = await fetch(endpointUrl, {
+          ...rest,
+          headers,
+          body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+        });
+        
+        const retryData = await retryResponse.json().catch(() => null);
+        if (!retryResponse.ok) {
+            const errEnv = (retryData as ApiErrorResponse)?.error;
+            throw new ApiError('Retry failed', retryResponse.status, retryData, errEnv?.code, errEnv?.request_id);
+        }
+        return { data: retryData as T, status: retryResponse.status, headers: retryResponse.headers };
+      } catch (e) {
+        refreshSuccess = false;
+      }
+    }
+    
+    if (!refreshSuccess) {
+        useSessionStore.getState().clearSession();
+        try {
+          router.replace('/auth/sign-in');
+        } catch {}
     }
   }
 
@@ -244,6 +211,195 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
 // ─── Centralized API Client (Axios-like verbs returning { data, status, headers }) ──
 
+// ─── Typed Social, Saves, and Stories API Methods (§5.3, §5.4, §6.7) ───────────
+
+export async function followUser(userId: string): Promise<void> {
+  await requestRaw<void>(`/v1/social/follow/${userId}`, { method: 'POST' });
+}
+
+export async function unfollowUser(userId: string): Promise<void> {
+  await requestRaw<void>(`/v1/social/follow/${userId}`, { method: 'DELETE' });
+}
+
+export interface LikeActionResponse {
+  success: boolean;
+  blipp_id: string;
+  is_liked: boolean;
+}
+
+export async function likeBlipp(blippId: string): Promise<LikeActionResponse> {
+  const res = await requestRaw<LikeActionResponse>(`/v1/likes/${blippId}`, { method: 'POST' });
+  return res.data;
+}
+
+export async function saveBlipp(blippId: string): Promise<void> {
+  await requestRaw<void>(`/v1/blipps/${blippId}/save`, { method: 'POST' });
+}
+
+export async function unsaveBlipp(blippId: string): Promise<void> {
+  await requestRaw<void>(`/v1/blipps/${blippId}/save`, { method: 'DELETE' });
+}
+
+export async function getSavedBlipps(): Promise<BlippItem[]> {
+  const res = await requestRaw<{ items: any[] } | any[]>('/v1/blipps/saved', { method: 'GET' });
+  const rawItems = Array.isArray(res.data) ? res.data : (res.data as any)?.items || [];
+  const GRADIENTS: [string, string][] = [
+    ['#2563eb', '#8b5cf6'],
+    ['#6366f1', '#a855f7'],
+    ['#0f172a', '#1e3a5f'],
+    ['#064e3b', '#065f46'],
+  ];
+  return rawItems.map((item: any, idx: number) => {
+    const rawStandard = item.audio_variants?.standard || item.audio_url || '';
+    const standardUrl = resolvePublicAudioUrl(rawStandard);
+    return {
+      id: item.blipp_id || item.id,
+      blipp_id: item.blipp_id || item.id,
+      title: item.title || 'Saved Broadcast',
+      description: item.description,
+      author: item.display_name || item.author || (item.username ? `@${item.username}` : `Creator ${item.creator_id ? item.creator_id.slice(0, 6) : ''}`),
+      authorId: item.creator_id || '',
+      creator_id: item.creator_id,
+      duration: item.duration_seconds || item.duration || 30,
+      duration_seconds: item.duration_seconds || item.duration || 30,
+      audio_url: standardUrl,
+      audioUrl: standardUrl,
+      audio_variants: {
+        standard: standardUrl,
+        low: resolvePublicAudioUrl(item.audio_variants?.low || rawStandard),
+        high: resolvePublicAudioUrl(item.audio_variants?.high || rawStandard),
+      },
+      coverGradient: GRADIENTS[idx % GRADIENTS.length],
+      listenCount: item.listens_count || item.listenCount || 0,
+      likeCount: item.likes_count || item.likeCount || 0,
+      isLiked: false,
+      is_saved: true,
+      createdAt: item.saved_at || item.created_at || new Date().toISOString(),
+    };
+  });
+}
+
+export async function getStories(): Promise<StoryItem[]> {
+  const res = await requestRaw<StoryItem[] | { items: StoryItem[] }>('/v1/stories', { method: 'GET' });
+  const rawList: StoryItem[] = Array.isArray(res.data) ? res.data : (res.data as any)?.items || [];
+  return rawList.map((story) => ({
+    ...story,
+    media_url: resolveMediaUrl((story as any).media_url || (story as any).audio_url),
+    audio_url: resolveMediaUrl((story as any).audio_url || (story as any).media_url),
+  }));
+}
+
+export async function uploadStory(formData: FormData): Promise<void> {
+  await requestRaw<void>('/v1/stories', { method: 'POST', body: formData });
+}
+
+// ─── Direct Messaging Methods (§5.4) ──────────────────────────────────────────
+
+export async function getThreads(limit = 20, offset = 0): Promise<DMThreadItem[]> {
+  const res = await requestRaw<DMThreadItem[]>(`/v1/messages/threads?limit=${limit}&offset=${offset}`, { method: 'GET' });
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+export async function getDMThreads(limit = 20, offset = 0): Promise<DMThreadItem[]> {
+  return getThreads(limit, offset);
+}
+
+export async function createThread(recipientId: string): Promise<DMThreadItem> {
+  const res = await requestRaw<DMThreadItem>('/v1/messages/threads', {
+    method: 'POST',
+    body: { recipient_id: recipientId },
+  });
+  return res.data;
+}
+
+export async function getThreadMessages(
+  threadId: string,
+  limit = 30,
+  cursor?: string | null,
+): Promise<MessageListResponse> {
+  let path = `/v1/messages/threads/${threadId}?limit=${limit}`;
+  if (cursor) path += `&cursor=${encodeURIComponent(cursor)}`;
+  const res = await requestRaw<MessageListResponse>(path, { method: 'GET' });
+  return res.data;
+}
+
+export async function sendMessage(
+  threadId: string,
+  payload: {
+    message_type: 'text' | 'blipp_share';
+    body?: string;
+    blipp_id?: string;
+  },
+): Promise<DMMessageItem> {
+  const res = await requestRaw<DMMessageItem>(`/v1/messages/threads/${threadId}`, {
+    method: 'POST',
+    body: payload,
+  });
+  return res.data;
+}
+
+export async function getProfileByUsername(username: string): Promise<UserProfile> {
+  const res = await requestRaw<UserProfile>(`/v1/profiles/${encodeURIComponent(username)}`, { method: 'GET' });
+  return res.data;
+}
+
+export async function searchProfiles(query: string): Promise<Array<{
+  user_id: string;
+  username: string;
+  display_name?: string | null;
+  avatar_url?: string | null;
+}>> {
+  const clean = query.trim().replace(/^@/, '');
+  if (!clean) return [];
+  try {
+    const profile = await getProfileByUsername(clean);
+    if (profile && profile.user_id) {
+      return [
+        {
+          user_id: profile.user_id,
+          username: profile.username,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url,
+        },
+      ];
+    }
+  } catch {
+    // Return empty on not found
+  }
+  return [];
+}
+
+export async function getUserFollowing(userId: string): Promise<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }> {
+  const res = await requestRaw<{ items: Array<{ user_id: string; username: string; display_name?: string; avatar_url?: string | null }> }>(
+    `/v1/social/${userId}/following`,
+    { method: 'GET' },
+  );
+  return res.data || { items: [] };
+}
+
+export async function getFeed(cursor?: string | null): Promise<FeedResponse> {
+  const path = cursor ? `/v1/feed?cursor=${encodeURIComponent(cursor)}` : '/v1/feed';
+  const res = await requestRaw<FeedResponse>(path, { method: 'GET' });
+  const rawItems = res.data?.items || [];
+  const normalizedItems = rawItems.map((item) => {
+    const rawStandard = item.audio_variants?.standard || item.audio_url || '';
+    const standardUrl = resolveMediaUrl(rawStandard);
+    return {
+      ...item,
+      audio_url: standardUrl,
+      audio_variants: {
+        standard: standardUrl,
+        low: resolveMediaUrl(item.audio_variants?.low || rawStandard),
+        high: resolveMediaUrl(item.audio_variants?.high || rawStandard),
+      },
+    };
+  });
+  return {
+    items: normalizedItems,
+    next_cursor: res.data?.next_cursor ?? null,
+  };
+}
+
 export const api = {
   get: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
     requestRaw<T>(path, { ...options, method: 'GET' }),
@@ -256,20 +412,93 @@ export const api = {
 
   delete: <T = any>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> =>
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
+
+  login: apiLogin,
+  register: apiRegister,
+  followUser,
+  unfollowUser,
+  likeBlipp,
+  saveBlipp,
+  unsaveBlipp,
+  getFeed,
+  getSavedBlipps,
+  getStories,
+  uploadStory,
+  getThreads,
+  getDMThreads,
+  searchProfiles,
+  createThread,
+  getThreadMessages,
+  sendMessage,
+  getProfileByUsername,
+  getUserFollowing,
+  resolveMediaUrl,
 };
 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 
-interface LoginRequest {
+export interface LoginRequest {
   email?: string;
   username?: string;
   password: string;
 }
 
-interface RegisterRequest {
-  username: string;
+export interface RegisterRequest {
+  username?: string;
   email: string;
   password: string;
+  displayName?: string;
+}
+
+export async function apiLogin(
+  emailOrReq: string | LoginRequest,
+  maybePassword?: string,
+): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
+  const email = typeof emailOrReq === 'string' ? emailOrReq : emailOrReq.email;
+  const username = typeof emailOrReq === 'string' ? undefined : emailOrReq.username;
+  const password = typeof emailOrReq === 'string' ? maybePassword || '' : emailOrReq.password;
+
+  const loginId = username || email || '';
+
+  const params = new URLSearchParams();
+  params.append('client_id', 'blipp-app');
+  params.append('grant_type', 'password');
+  params.append('username', loginId);
+  params.append('password', password || '');
+
+  const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(data?.error_description || 'Login failed', res.status, data);
+  }
+
+  const tokens = toTokens(data as LoginResponse);
+  const me = await authApi.me(tokens.accessToken);
+  
+  return { 
+    tokens, 
+    user: me, 
+    access_token: tokens.accessToken, 
+    refresh_token: tokens.refreshToken 
+  };
+}
+
+export async function apiRegister(req: {
+  email: string;
+  password: string;
+  username?: string;
+  displayName?: string;
+}): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
+  // Direct API registration is removed. Users should register via Keycloak web UI.
+  // If your client still calls this, we throw an error.
+  throw new Error("Registration should be performed via OAuth or Keycloak portal.");
 }
 
 interface LoginResponse {
@@ -344,38 +573,20 @@ export const authApi = {
     return { tokens, user: me };
   },
 
-  async login(req: LoginRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    const username = req.username || req.email || '';
-    const password = req.password;
-    const body = `client_id=blipp-app&grant_type=password&username=${encodeURIComponent(username)}&password=${password}`;
-
-    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body,
-    });
-
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      const msg = data?.error_description || data?.error || `Login failed: ${res.status}`;
-      throw new ApiError(msg, res.status, data);
-    }
-
-    const tokens = toTokens(data as LoginResponse);
-    const me = await authApi.me(tokens.accessToken);
-    return { tokens, user: me };
-  },
-
-  async register(req: RegisterRequest): Promise<{ tokens: AuthTokens; user: User }> {
-    await request('/v1/auth/register', { method: 'POST', body: req });
-    return authApi.login({ email: req.email, password: req.password });
-  },
+  login: apiLogin,
+  register: (req: RegisterRequest) => apiRegister(req),
 
   async me(token: string): Promise<User> {
-    const r = await request<MeResponse>('/v1/auth/me', { token });
-    return toUser(r);
+    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/userinfo`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new ApiError('Failed to fetch user info', res.status, data);
+    }
+    return toUser(data as MeResponse);
   },
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -479,6 +690,31 @@ export interface FeedResponseItem {
   username?: string;
   display_name?: string;
   avatar_url?: string;
+  listens_count?: number;
+  listenCount?: number;
+  likes_count?: number;
+  likeCount?: number;
+  isLiked?: boolean;
+  is_liked?: boolean;
+  is_ad?: boolean;
+  is_sponsored?: boolean;
+  is_saved?: boolean;
+  is_following?: boolean;
+  creator?: {
+    id: string;
+    handle: string;
+    display_name: string;
+    avatar_url?: string;
+  };
+  sponsor?: {
+    brand_name: string;
+    cta_text: string;
+    cta_url: string;
+    tagline: string;
+  };
+  tags?: string[];
+  sourceName?: string;
+  created_at?: string;
 }
 
 export interface FeedResponse {
@@ -552,6 +788,10 @@ export const profileApi = {
 };
 
 export const socialApi = {
+  async like(blippId: string): Promise<LikeActionResponse> {
+    return likeBlipp(blippId);
+  },
+
   async follow(userId: string): Promise<FollowActionResponse> {
     const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
       method: 'POST',
@@ -590,16 +830,8 @@ export const socialApi = {
 };
 
 export const blippApi = {
-  async getBlipps(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/feed');
-    return res.data;
-  },
-
-  async getFeed(): Promise<FeedResponse> {
-    const res = await api.get<FeedResponse>('/v1/feed');
-    return res.data;
-  },
-
+  getBlipps: getFeed,
+  getFeed: getFeed,
 
   async uploadBlipp(formData: FormData, token?: string): Promise<BlippUploadResponse> {
     const res = await requestRaw<BlippUploadResponse>('/v1/blipps/upload', {

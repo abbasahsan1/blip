@@ -32,7 +32,8 @@ export interface AudioVariants {
 }
 
 export interface SponsorInfo {
-  name: string;
+  name?: string;
+  brand_name?: string;
   tagline?: string;
   cta_text: string;
   cta_url: string;
@@ -71,12 +72,37 @@ export interface Blipp {
   sourceType?: 'podcast' | 'interview' | 'documentary' | 'other' | string;
   // Server-hydrated sponsored ad slot (§6.4)
   is_sponsored?: boolean;
+  is_ad?: boolean;
   sponsor?: SponsorInfo;
   ad_metadata?: AdMetadata;
+  // User engagement state (§5.3, §6.7)
+  is_saved?: boolean;
+  is_following?: boolean;
+  creator?: {
+    id?: string;
+    username?: string;
+    display_name?: string;
+    avatar_url?: string | null;
+  };
 }
 
 // Alias AudioPost to Blipp for seamless compatibility
 export type AudioPost = Blipp;
+export type BlippItem = Blipp;
+
+export interface StoryItem {
+  story_id: string;
+  creator_id: string;
+  audio_url: string;
+  duration_seconds: number;
+  expires_at: string;
+  created_at: string;
+  creator?: {
+    username?: string;
+    display_name?: string;
+    avatar_url?: string | null;
+  };
+}
 
 export interface FeedState {
   posts: Blipp[];
@@ -111,6 +137,39 @@ export interface PlayerState {
   duration: number; // ms
   speed: 1 | 1.5 | 2;
   error: string | null;
+}
+
+// ─── Direct Messaging (§5.4) ────────────────────────────────────────────────
+
+export interface DMMessageItem {
+  message_id: string;
+  thread_id: string;
+  sender_id: string;
+  message_type: 'text' | 'blipp_share';
+  blipp_id?: string | null;
+  body?: string | null;
+  created_at: string;
+  blipp?: Blipp;
+}
+
+export interface DMThreadItem {
+  thread_id: string;
+  participant_ids: string[];
+  created_at: string;
+  updated_at?: string | null;
+  latest_message?: DMMessageItem | null;
+  other_participant?: {
+    user_id: string;
+    username: string;
+    display_name?: string | null;
+    avatar_url?: string | null;
+  };
+}
+
+export interface MessageListResponse {
+  items: DMMessageItem[];
+  next_cursor?: string | null;
+  has_more?: boolean;
 }
 
 // ─── Session ─────────────────────────────────────────────────────────────────

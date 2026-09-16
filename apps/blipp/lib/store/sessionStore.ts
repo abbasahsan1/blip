@@ -29,6 +29,7 @@ interface SessionStore {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  setSessionTokens: (tokens: { accessToken: string; refreshToken?: string }, user?: User | null) => Promise<void>;
   clearSession: () => void;
   clearError: () => void;
   refreshSession: () => Promise<boolean>;
@@ -188,6 +189,22 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
     await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
     set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null, tokens: null });
+  },
+
+  async setSessionTokens(tokens, user) {
+    await AsyncStorage.multiSet([
+      [KEY_ACCESS, tokens.accessToken],
+      ...(tokens.refreshToken ? [[KEY_REFRESH, tokens.refreshToken]] as const : []),
+    ]);
+    set({
+      status: 'authenticated',
+      user: user ?? { id: 'user_local', email: '', username: 'user', displayName: 'User' },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken ?? null,
+      tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+      isSubmitting: false,
+      error: null,
+    });
   },
 
   clearSession() {

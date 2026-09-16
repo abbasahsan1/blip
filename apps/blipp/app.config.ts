@@ -22,6 +22,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         imageWidth: 200,
       },
     ],
+    [
+      'expo-audio',
+      {
+        microphonePermission: 'Allow Blipp to access your microphone for recording voice blipps and stories.',
+        recordAudioAndroid: true,
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,

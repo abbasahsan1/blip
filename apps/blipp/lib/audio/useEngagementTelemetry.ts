@@ -14,8 +14,8 @@
  *       * 'skip' when user navigates away (isActive: true -> false) before reaching threshold
  */
 
-import { useEffect, useRef } from 'react';
-import { recordPlayProgress } from '@/lib/audio/listenTracker';
+import { useEffect, useRef, useCallback } from 'react';
+import { recordPlayProgress, recordLikeEvent } from '@/lib/audio/listenTracker';
 import type { Blipp } from '@/lib/types';
 
 // Section 6.5: emit one play_progress event every 5 seconds of active playback.
@@ -42,7 +42,7 @@ export function useEngagementTelemetry({
   positionSeconds,
   durationSeconds,
   isActive = true,
-}: UseEngagementTelemetryOptions): void {
+}: UseEngagementTelemetryOptions): { dispatchLike: () => Promise<void> } {
   const blippId = item?.blipp_id || item?.id;
 
   // Refs for current values so timers & lifecycle hooks always read latest data
@@ -145,4 +145,12 @@ export function useEngagementTelemetry({
 
     return () => clearInterval(timer);
   }, [isPlaying, blippId]);
+
+  const dispatchLike = useCallback(async () => {
+    if (blippId) {
+      await recordLikeEvent({ blipp_id: blippId });
+    }
+  }, [blippId]);
+
+  return { dispatchLike };
 }

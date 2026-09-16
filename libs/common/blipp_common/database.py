@@ -187,8 +187,10 @@ CREATE TABLE IF NOT EXISTS users_profile (
 
 ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS is_creator BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS verification_status VARCHAR(50) NOT NULL DEFAULT 'unverified';
+ALTER TABLE users_profile ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active';
 
 CREATE INDEX IF NOT EXISTS idx_users_profile_username ON users_profile (username);
+CREATE INDEX IF NOT EXISTS idx_users_profile_status ON users_profile (status);
 
 CREATE TABLE IF NOT EXISTS follows (
     follower_id UUID NOT NULL REFERENCES users_profile(user_id) ON DELETE CASCADE,
@@ -245,6 +247,19 @@ CREATE TABLE IF NOT EXISTS saves (
 CREATE INDEX IF NOT EXISTS idx_saves_user_id ON saves (user_id);
 CREATE INDEX IF NOT EXISTS idx_saves_blipp_id ON saves (blipp_id);
 CREATE INDEX IF NOT EXISTS idx_saves_created_at ON saves (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS likes (
+    -- Likes are owned by Social Graph while blipps are owned by Content
+    -- Ingest, so these deliberately do not use cross-service foreign keys.
+    user_id UUID NOT NULL,
+    blipp_id UUID NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_blipp_like UNIQUE (user_id, blipp_id),
+    PRIMARY KEY (user_id, blipp_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_likes_blipp_id ON likes (blipp_id);
+CREATE INDEX IF NOT EXISTS idx_likes_created_at ON likes (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS listening_session_agg (
     session_id UUID PRIMARY KEY,
@@ -351,4 +366,3 @@ __all__ = [
     "close_db",
     "CREATE_TABLES_SQL",
 ]
-

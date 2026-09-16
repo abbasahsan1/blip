@@ -54,6 +54,24 @@ export function HeartMark({ size = 20, color = '#ffffff', filled = false }: Icon
 }
 
 /**
+ * Audio Bookmark / Save Mark (Filled or Outlined)
+ */
+export function BookmarkMark({ size = 20, color = '#ffffff', filled = false }: IconProps & { filled?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 4.5A2.5 2.5 0 0 1 7.5 2H16.5A2.5 2.5 0 0 1 19 4.5V21.5L12 17.5L5 21.5V4.5Z"
+        fill={filled ? color : 'none'}
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
  * Feed Console Navigation Mark (Acoustic Spectrum Bars)
  */
 export function FeedConsoleMark({ size = 20, color = '#71717a' }: IconProps) {
@@ -150,3 +168,118 @@ export function StatusCheckMark({ size = 16, color = '#10b981' }: IconProps) {
     </Svg>
   );
 }
+
+/**
+ * Direct Message / Share Vector Mark (Paper airplane / direct share arrow)
+ */
+export function ShareMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M21.5 2.5L10.5 13.5M21.5 2.5L14.5 21.5L10.5 13.5L2.5 9.5L21.5 2.5Z"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Message Send Action Vector Mark
+ */
+export function SendMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M22 2L11 13M22 2L15 22L11 13L2 9L22 2Z"
+        fill={color}
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Plus / Add Vector Mark
+ */
+export function PlusMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1="12" y1="5" x2="12" y2="19" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <Line x1="5" y1="12" x2="19" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+/**
+ * Moderation / Report Flag Vector Mark
+ */
+export function FlagMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1v19"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Raised Microphone Vector Mark (for "Drop" tab)
+ */
+export function MicMark({ size = 22, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="9" y="3" width="6" height="11" rx="3" fill={color} />
+      <Path
+        d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/**
+ * 3-Dots Options Mark (More horizontal)
+ */
+export function MoreHorizontalMark({ size = 20, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="1.75" fill={color} />
+      <Circle cx="19" cy="12" r="1.75" fill={color} />
+      <Circle cx="5" cy="12" r="1.75" fill={color} />
+    </Svg>
+  );
+}
+
+/**
+ * Verified Badge Vector Mark (Tick)
+ */
+export function VerifiedMark({ size = 16, color = '#8B5CF6' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        stroke={color}
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+
+

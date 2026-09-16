@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import { PALETTE } from '@/lib/palette';
 import { useSessionStore } from '@/lib/store/sessionStore';
 import { useFeedStore } from '@/lib/store/feedStore';
 import { useUploadStore } from '@/lib/store/uploadStore';
-import { uploadAudio, getAudioDuration } from '@/lib/upload/audioUpload';
+import { uploadAudio, getAudioDuration, type UploadableFile } from '@/lib/upload/audioUpload';
 import {
   AudioReelMark,
   StatusAlertMark,
@@ -36,7 +37,7 @@ export default function UploadScreen() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<UploadableFile | null>(null);
   const [duration, setDuration] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -45,11 +46,42 @@ export default function UploadScreen() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleSelectFileClick = () => {
+  const handleSelectFileClick = async () => {
     setErrorMessage(null);
     resetUploadStore();
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
+
+    if (Platform.OS === 'web') {
+      if (fileInputRef.current) {
+        fileInputRef.current.click();
+      }
+      return;
+    }
+
+    try {
+      const DocumentPicker = await import('expo-document-picker');
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['audio/*', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/x-m4a', 'audio/wav', 'audio/ogg'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        const fileObj = {
+          uri: asset.uri,
+          name: asset.name,
+          size: asset.size,
+          type: asset.mimeType || 'audio/m4a',
+        };
+        setSelectedFile(fileObj);
+
+        if (!title) {
+          const baseName = asset.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+          setTitle(baseName);
+        }
+        setDuration(15);
+      }
+    } catch (pickerErr: any) {
+      setErrorMessage(pickerErr?.message || 'Could not open file picker.');
     }
   };
 
@@ -135,15 +167,17 @@ export default function UploadScreen() {
       ]}
       keyboardShouldPersistTaps="handled"
     >
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"
-        style={{ display: 'none' }}
-        data-testid="audio-file-input"
-        id="audio-file-input"
-      />
+      {Platform.OS === 'web'
+        ? React.createElement('input', {
+            type: 'file',
+            ref: fileInputRef,
+            onChange: handleFileChange,
+            accept: 'audio/*,.mp3,.wav,.m4a,.aac,.ogg',
+            style: { display: 'none' },
+            'data-testid': 'audio-file-input',
+            id: 'audio-file-input',
+          })
+        : null}
 
       {/* Header: Studio Console Header */}
       <View style={styles.header}>
@@ -206,7 +240,7 @@ export default function UploadScreen() {
           </Text>
           <Text style={styles.dropzoneSub}>
             {selectedFile
-              ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB${
+              ? `${selectedFile.size ? (selectedFile.size / (1024 * 1024)).toFixed(2) + ' MB' : 'Audio File'}${
                   duration > 0
                     ? ` • ${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`
                     : ''
@@ -264,11 +298,10 @@ export default function UploadScreen() {
             </View>
             <View style={styles.progressInfo}>
               <Text style={styles.progressText} testID="upload-status-text">
-                {uploadStatus === 'transcoding'
-                  ? 'Transcoding audio variants...'
-                  : uploadStatus === 'completed'
-                  ? 'Published successfully!'
-                  : `Uploading audio... (${progress}%)`}
+                {uploadStatus === 'idle' && selectedFile ? 'File Picked' : ''}
+                {uploadStatus === 'uploading' ? 'Uploading...' : ''}
+                {uploadStatus === 'transcoding' ? 'Processing...' : ''}
+                {uploadStatus === 'completed' ? 'Published' : ''}
               </Text>
               <Text style={styles.progressPercentage}>{progress}%</Text>
             </View>
@@ -290,11 +323,10 @@ export default function UploadScreen() {
         >
           {isUploading ? (
             <View style={styles.buttonRow}>
-              <ActivityIndicator size="small" color="#09090b" />
               <Text style={styles.submitButtonText}>
                 {uploadStatus === 'transcoding'
-                  ? 'Transcoding audio variants...'
-                  : 'Uploading audio...'}
+                  ? 'Processing...'
+                  : 'Uploading...'}
               </Text>
             </View>
           ) : uploadStatus === 'failed' ? (
@@ -510,7 +542,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   submitButton: {
-    backgroundColor: '#ffffff',
+    backgroundColor: PALETTE.primary,
     borderRadius: 8,
     paddingVertical: 14,
     alignItems: 'center',
@@ -529,8 +561,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   submitButtonText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 14,
-    color: '#09090b',
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 15,
+    color: '#FFFFFF',
   },
 });

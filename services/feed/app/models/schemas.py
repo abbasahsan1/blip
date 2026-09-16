@@ -11,10 +11,11 @@ class HealthResponse(BaseModel):
 
 
 class FeedItemResponse(BaseModel):
+    item_type: str = "blipp"
     id: Optional[str] = None
     blipp_id: Union[uuid.UUID, str]
     creator_id: Optional[Union[uuid.UUID, str]] = None
-    is_ad: bool = False
+    provider: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     audio_url: str
@@ -30,6 +31,7 @@ class FeedItemResponse(BaseModel):
 class FeedResponse(BaseModel):
     items: List[FeedItemResponse] = Field(default_factory=list)
     next_cursor: Optional[str] = None
+    has_more: bool = True
 
 
 __all__ = [
