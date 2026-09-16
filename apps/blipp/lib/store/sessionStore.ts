@@ -194,7 +194,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async setSessionTokens(tokens, user) {
     await AsyncStorage.multiSet([
       [KEY_ACCESS, tokens.accessToken],
-      ...(tokens.refreshToken ? [[KEY_REFRESH, tokens.refreshToken]] : []),
+      ...(tokens.refreshToken ? [[KEY_REFRESH, tokens.refreshToken]] as const : []),
     ]);
     set({
       status: 'authenticated',

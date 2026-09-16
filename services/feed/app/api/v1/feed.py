@@ -3,7 +3,6 @@ import json
 import uuid
 import logging
 import mimetypes
-from datetime import datetime, timezone
 from typing import Optional, List
 import httpx
 from fastapi import APIRouter, Depends, Query, status, HTTPException
@@ -34,10 +33,9 @@ async def get_feed(
     Section 6.4: Multi-stage ranked feed orchestration:
     - Stage 1 (Cache): Query Redis for pre-computed candidate array tied to user.
     - Stage 2 (RecSys Fetch): On cache miss, query Gorse REST API for recommendations & cache in Redis with 60s TTL.
-    - Stage 3 (Hydration): Query PostgreSQL to resolve candidate IDs into media entities, preserving exact ranking order.
-    - Stage 4 (Cold-Start Injection): Query PostgreSQL for recent blipps (<24h old), interleaving into feed response.
+    - Stage 3 (Hydration): Query PostgreSQL to resolve candidate IDs into media entities.
+    - Stage 4 (Cold Start): Fill missing recommendations with recent published blipps.
     """
-    import random
     user_id_str = str(current_user.user_id)
     cache_key = f"feed:user:{user_id_str}"
     candidate_ids: List[str] = []
@@ -83,13 +81,33 @@ async def get_feed(
         except Exception as e:
             logger.warning(f"Gorse recommendation fetch error: {e}")
 
+    decoded_cursor = decode_cursor(cursor)
+    if cursor and not decoded_cursor:
+        raise AppException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_CURSOR",
+            message="Cursor must be a valid feed cursor",
+        )
+
+    cursor_created_at, cursor_blipp_id = decoded_cursor or (None, None)
+    try:
+        cursor_blipp_uuid = uuid.UUID(cursor_blipp_id) if cursor_blipp_id else None
+    except (ValueError, TypeError):
+        raise AppException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_CURSOR",
+            message="Cursor contains an invalid blipp ID",
+        )
+
     pool = await get_db_pool()
     if not pool:
         return FeedResponse(items=[], next_cursor=None)
 
-    # ─── Stage 3: Database Hydration with Strict Ranking ────────────────────
+    # ─── Stage 3: Database hydration and cold-start fallback ────────────────
+    # Fetch one extra row so `has_more` and `next_cursor` describe a real,
+    # stable `(created_at, blipp_id)` page boundary.  Recommendation IDs are
+    # preferred, but all rows retain this ordering to make pagination safe.
     hydrated_rows = []
-    seen_blipp_ids = set()
 
     # Parse candidate IDs to valid UUIDs
     valid_candidate_uuids = []
@@ -101,6 +119,7 @@ async def get_feed(
 
     try:
         async with pool.acquire() as conn:
+            fetch_limit = limit + 1
             if valid_candidate_uuids:
                 rows = await conn.fetch(
                     """
@@ -112,25 +131,30 @@ async def get_feed(
                         b.audio_url, 
                         b.audio_variants, 
                         b.duration_seconds,
+                        b.created_at,
                         u.username,
                         COALESCE(u.display_name, u.username, 'Creator') AS display_name,
                         u.avatar_url
                     FROM blipps b
                     LEFT JOIN users_profile u ON b.creator_id = u.user_id
                     WHERE b.blipp_id = ANY($1::uuid[]) AND b.status = 'published'
-                    ORDER BY array_position($1::uuid[], b.blipp_id);
+                      AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
+                    ORDER BY b.created_at DESC, b.blipp_id DESC
+                    LIMIT $4;
                     """,
                     valid_candidate_uuids,
+                    cursor_created_at,
+                    cursor_blipp_uuid,
+                    fetch_limit,
                 )
                 hydrated_rows = list(rows)
-                seen_blipp_ids = {r["blipp_id"] for r in hydrated_rows}
 
-            # If Gorse had no recommendations or fewer than limit,
-            # supplement with latest published blipps:
-            if len(hydrated_rows) < limit:
-                needed = limit - len(hydrated_rows)
-                fallback_rows = await conn.fetch(
-                    """
+            # Always fetch the chronological slice as well. Redis/Gorse can
+            # legitimately be empty on cold start, and the authoritative slice
+            # prevents recommendation ordering from skipping newly published
+            # records between cursor pages.
+            fallback_rows = await conn.fetch(
+                """
                     SELECT 
                         b.blipp_id, 
                         b.creator_id, 
@@ -139,6 +163,7 @@ async def get_feed(
                         b.audio_url, 
                         b.audio_variants, 
                         b.duration_seconds,
+                        b.created_at,
                         u.username,
                         COALESCE(u.display_name, u.username, 'Creator') AS display_name,
                         u.avatar_url
@@ -146,56 +171,32 @@ async def get_feed(
                     LEFT JOIN users_profile u ON b.creator_id = u.user_id
                     WHERE b.status = 'published'
                       AND NOT (b.blipp_id = ANY($1::uuid[]))
-                    ORDER BY b.created_at DESC
-                    LIMIT $2;
-                    """,
-                    list(seen_blipp_ids) if seen_blipp_ids else [],
-                    needed,
-                )
-                for fr in fallback_rows:
-                    hydrated_rows.append(fr)
-                    seen_blipp_ids.add(fr["blipp_id"])
-
-            # ─── Stage 4: Cold-Start Exploration Injection ──────────────────
-            # Retrieve up to 3 newly published blipps (<24h old, lowest play counts) randomly
-            cold_start_rows = await conn.fetch(
-                """
-                SELECT 
-                    b.blipp_id, 
-                    b.creator_id, 
-                    b.title, 
-                    b.description, 
-                    b.audio_url, 
-                    b.audio_variants, 
-                    b.duration_seconds, 
-                    u.username, 
-                    COALESCE(u.display_name, u.username, 'Creator') AS display_name, 
-                    u.avatar_url
-                FROM blipps b
-                LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                WHERE b.status = 'published'
-                  AND b.created_at >= NOW() - INTERVAL '24 hours'
-                  AND NOT (b.blipp_id = ANY($1::uuid[]))
-                ORDER BY (
-                      SELECT COUNT(*)
-                      FROM listening_session_agg lsa
-                      WHERE lsa.blipp_id = b.blipp_id
-                  ) ASC
-                LIMIT 3;
+                      AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
+                    ORDER BY b.created_at DESC, b.blipp_id DESC
+                    LIMIT $4;
                 """,
-                list(seen_blipp_ids) if seen_blipp_ids else [],
+                [r["blipp_id"] for r in hydrated_rows],
+                cursor_created_at,
+                cursor_blipp_uuid,
+                fetch_limit,
             )
+            hydrated_rows.extend(fallback_rows)
 
     except Exception as e:
         logger.exception(f"Error hydrating feed from database: {e}")
         return FeedResponse(items=[], next_cursor=None, has_more=False)
 
-    # Interleave cold-start items randomly into the candidate slice
-    final_rows = list(hydrated_rows)[:limit]
-    cold_items = list(cold_start_rows)
-    for cold_item in cold_items:
-        insert_idx = random.randint(0, len(final_rows))
-        final_rows.insert(insert_idx, cold_item)
+    # Keep the cursor ordering consistent even when recommended and fallback
+    # records are combined. Deduplicate before choosing the page.
+    ordered_rows = sorted(hydrated_rows, key=lambda row: (row["created_at"], row["blipp_id"]), reverse=True)
+    unique_rows = []
+    seen_blipp_ids = set()
+    for row in ordered_rows:
+        if row["blipp_id"] not in seen_blipp_ids:
+            unique_rows.append(row)
+            seen_blipp_ids.add(row["blipp_id"])
+    has_more = len(unique_rows) > limit
+    final_rows = unique_rows[:limit]
 
     # Transform to FeedItemResponse with presigned playback URLs
     items = []
@@ -264,13 +265,13 @@ async def get_feed(
                 )
             )
 
-    next_cursor = None
-    if items:
-        last_item = items[-1]
-        now_dt = datetime.now(timezone.utc)
-        next_cursor = encode_cursor(now_dt, str(last_item.blipp_id))
+    next_cursor = (
+        encode_cursor(final_rows[-1]["created_at"], str(final_rows[-1]["blipp_id"]))
+        if has_more and final_rows
+        else None
+    )
 
-    return FeedResponse(items=final_feed_items, next_cursor=next_cursor, has_more=True)
+    return FeedResponse(items=final_feed_items, next_cursor=next_cursor, has_more=has_more)
 
 
 @router.api_route("/audio/{filename:path}", methods=["GET", "HEAD"])

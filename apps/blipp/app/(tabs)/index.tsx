@@ -30,10 +30,12 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
 
   const posts = useFeedStore((s) => s.posts);
+  const cursor = useFeedStore((s) => s.cursor);
   const sort = useFeedStore((s) => s.sort);
   const isLoading = useFeedStore((s) => s.isLoading);
   const isRefreshing = useFeedStore((s) => s.isRefreshing);
   const setSort = useFeedStore((s) => s.setSort);
+  const fetchFeed = useFeedStore((s) => s.fetchFeed);
   const refresh = useFeedStore((s) => s.refresh);
   const toggleLike = useFeedStore((s) => s.toggleLike);
 
@@ -62,6 +64,12 @@ export default function FeedScreen() {
     },
     [posts.length],
   );
+
+  const loadMore = useCallback(() => {
+    if (cursor && !isLoading) {
+      void fetchFeed(cursor);
+    }
+  }, [cursor, fetchFeed, isLoading]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: AudioPost; index: number }) => (
@@ -130,6 +138,8 @@ export default function FeedScreen() {
           data={posts}
           keyExtractor={(p) => p.id}
           renderItem={renderItem}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.7}
           onScroll={onScroll}
           scrollEventThrottle={16}
           pagingEnabled={true}
@@ -141,8 +151,8 @@ export default function FeedScreen() {
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => refresh(userId)}
-              tintColor={PALETTE.primary}
-              colors={[PALETTE.primary]}
+              tintColor="#F97316"
+              colors={['#F97316']}
               progressViewOffset={insets.top + 60}
             />
           }
@@ -171,7 +181,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: PALETTE.bg,
+    backgroundColor: '#000000',
   },
   headerContainer: {
     position: 'absolute',
@@ -201,25 +211,21 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    backgroundColor: PALETTE.surface,
     minHeight: 30,
     justifyContent: 'center',
   },
   chipActive: {
-    backgroundColor: PALETTE.accentDim,
-    borderColor: PALETTE.accent,
+    borderBottomWidth: 2,
+    borderBottomColor: '#F97316',
   },
   chipText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 12,
     color: PALETTE.textMuted,
   },
   chipTextActive: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    color: PALETTE.accent,
+    fontFamily: 'Outfit_600SemiBold',
+    color: '#F97316',
   },
   loadingState: {
     flex: 1,
@@ -294,7 +300,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptySub: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 14,
     color: PALETTE.textMuted,
     textAlign: 'center',

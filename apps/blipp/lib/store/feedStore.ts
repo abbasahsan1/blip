@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { blippApi, resolvePublicAudioUrl } from '../api';
+import { blippApi, likeBlipp, resolvePublicAudioUrl } from '../api';
 import type { Blipp, FeedSort } from '../types';
 
 const GRADIENTS: [string, string][] = [
@@ -26,7 +26,7 @@ export interface FeedState {
   setSort: (sort: FeedSort) => void;
   loadFeed: (viewerId?: string | null) => Promise<void>;
   refresh: (viewerId?: string | null) => Promise<void>;
-  toggleLike: (postId: string) => void;
+  toggleLike: (postId: string) => Promise<void>;
 }
 
 export const useFeedStore = create<FeedState>((set, get) => ({
@@ -41,7 +41,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   async fetchFeed(cursor?: string | null) {
     set({ isLoading: true, error: null });
     try {
-      const res = await blippApi.getFeed();
+      const res = await blippApi.getFeed(cursor);
       const serverItems = res.items || [];
 
       const nextCursor = res.next_cursor ?? null;
@@ -120,14 +120,32 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     await get().refreshFeed();
   },
 
-  toggleLike(postId: string) {
+  async toggleLike(postId: string) {
+    const post = get().items.find((item) => item.id === postId);
+    if (!post || post.isLiked) return;
+
+    // Optimistically show the active orange heart, then restore the exact
+    // server-facing state if persistence fails.
     set((state) => {
-      const updated = state.items.map((p) =>
-        p.id === postId
-          ? { ...p, isLiked: !p.isLiked, likeCount: p.likeCount + (p.isLiked ? -1 : 1) }
-          : p,
+      const updated = state.items.map((item) =>
+        item.id === postId
+          ? { ...item, isLiked: true, likeCount: item.likeCount + 1 }
+          : item,
       );
       return { items: updated, posts: updated };
     });
+
+    try {
+      await likeBlipp(postId);
+    } catch {
+      set((state) => {
+        const updated = state.items.map((item) =>
+          item.id === postId
+            ? { ...item, isLiked: false, likeCount: Math.max(0, item.likeCount - 1) }
+            : item,
+        );
+        return { items: updated, posts: updated };
+      });
+    }
   },
 }));

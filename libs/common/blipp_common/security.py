@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from blipp_common.config import settings
 from blipp_common.exceptions import AppException
+from blipp_common.redis import get_redis_client
 
 logger = logging.getLogger("blipp_common.security")
 
@@ -140,6 +141,31 @@ async def verify_token(token: str) -> Dict[str, Any]:
                 message="Invalid or expired access token",
                 headers={"WWW-Authenticate": "Bearer"}
             )
+
+        # Redis blocklist check
+        jti = payload.get("jti")
+        sub = payload.get("sub")
+        if jti or sub:
+            try:
+                redis_client = await get_redis_client()
+                if jti and await redis_client.get(f"blocklist:jti:{jti}"):
+                    raise AppException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        code="UNAUTHORIZED",
+                        message="Token has been revoked",
+                        headers={"WWW-Authenticate": "Bearer"}
+                    )
+                if sub and await redis_client.get(f"blocklist:sub:{sub}"):
+                    raise AppException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        code="UNAUTHORIZED",
+                        message="Account is suspended or blocked",
+                        headers={"WWW-Authenticate": "Bearer"}
+                    )
+            except AppException:
+                raise
+            except Exception as e:
+                logger.warning(f"Redis blocklist check failed: {e}")
 
         return payload
     except (jwt.ExpiredSignatureError, JWTError):

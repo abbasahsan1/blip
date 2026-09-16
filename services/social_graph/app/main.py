@@ -22,6 +22,7 @@ from blipp_common.exceptions import (
 )
 from app.api.v1.profiles import router as profiles_router
 from app.api.v1.relationships import router as relationships_router
+from app.api.v1.likes import router as likes_router
 from app.models.profile import HealthResponse
 
 logging.basicConfig(
@@ -201,8 +202,10 @@ async def docs_redirect():
 # Mount routes under /v1 (standard) and /api (compatibility)
 app.include_router(profiles_router, prefix="/v1")
 app.include_router(relationships_router, prefix="/v1")
+app.include_router(likes_router, prefix="/v1")
 app.include_router(profiles_router, prefix="/api")
 app.include_router(relationships_router, prefix="/api")
+app.include_router(likes_router, prefix="/api")
 
 
 # ─── Health & Readiness Probes ───────────────────────────────────────────────

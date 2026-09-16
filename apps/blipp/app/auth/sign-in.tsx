@@ -14,7 +14,7 @@ import {
 import { Link, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { api } from '../../lib/api';
+import { api, profileApi } from '../../lib/api';
 import { useSessionStore } from '../../lib/store/sessionStore';
 import { StatusAlertMark } from '@/components/common/Icons';
 
@@ -95,6 +95,20 @@ export default function SignInScreen() {
       const authResult = await api.login(email.trim(), password);
       if (authResult?.tokens) {
         await setSessionTokens(authResult.tokens, authResult.user);
+        
+        // First-login profile check
+        try {
+          await profileApi.getMyProfile();
+        } catch (err: any) {
+          // If profile does not exist (e.g. 404), claim it
+          if (err.status === 404) {
+            await profileApi.claimUsername({
+              username: authResult.user.username || email.split('@')[0],
+              display_name: authResult.user.displayName || email.split('@')[0],
+            });
+          }
+        }
+        
         router.replace('/(tabs)');
       } else {
         setServerError('Authentication failed. Please check credentials.');

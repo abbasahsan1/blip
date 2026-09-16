@@ -354,9 +354,11 @@ export default function SavedScreen() {
               item={activeReelItem as any}
               isActive={true}
               height={760}
-              onLike={() => {
+              onLike={async () => {
+                if (!activeReelItem?.id || activeReelItem.isLiked) return;
+                await api.likeBlipp(activeReelItem.id);
                 setActiveReelItem((prev) =>
-                  prev ? { ...prev, isLiked: !prev.isLiked } : null,
+                  prev ? { ...prev, isLiked: true } : null,
                 );
               }}
             />

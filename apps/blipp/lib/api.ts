@@ -141,13 +141,40 @@ export async function requestRaw<T = any>(
     body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  // Intercept 401 Unauthorized: clear session state and redirect to /auth/sign-in
+  // Intercept 401 Unauthorized: attempt auto-refresh
   if (response.status === 401) {
-    useSessionStore.getState().clearSession();
-    try {
-      router.replace('/auth/sign-in');
-    } catch {
-      // Router not mounted yet
+    const refreshToken = useSessionStore.getState().tokens?.refreshToken;
+    let refreshSuccess = false;
+    
+    if (refreshToken) {
+      try {
+        const newTokens = await authApi.refresh(refreshToken);
+        const me = await authApi.me(newTokens.accessToken);
+        useSessionStore.getState().setSessionTokens(newTokens, me);
+        
+        headers['Authorization'] = `Bearer ${newTokens.accessToken}`;
+        const retryResponse = await fetch(endpointUrl, {
+          ...rest,
+          headers,
+          body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+        });
+        
+        const retryData = await retryResponse.json().catch(() => null);
+        if (!retryResponse.ok) {
+            const errEnv = (retryData as ApiErrorResponse)?.error;
+            throw new ApiError('Retry failed', retryResponse.status, retryData, errEnv?.code, errEnv?.request_id);
+        }
+        return { data: retryData as T, status: retryResponse.status, headers: retryResponse.headers };
+      } catch (e) {
+        refreshSuccess = false;
+      }
+    }
+    
+    if (!refreshSuccess) {
+        useSessionStore.getState().clearSession();
+        try {
+          router.replace('/auth/sign-in');
+        } catch {}
     }
   }
 
@@ -192,6 +219,17 @@ export async function followUser(userId: string): Promise<void> {
 
 export async function unfollowUser(userId: string): Promise<void> {
   await requestRaw<void>(`/v1/social/follow/${userId}`, { method: 'DELETE' });
+}
+
+export interface LikeActionResponse {
+  success: boolean;
+  blipp_id: string;
+  is_liked: boolean;
+}
+
+export async function likeBlipp(blippId: string): Promise<LikeActionResponse> {
+  const res = await requestRaw<LikeActionResponse>(`/v1/likes/${blippId}`, { method: 'POST' });
+  return res.data;
 }
 
 export async function saveBlipp(blippId: string): Promise<void> {
@@ -379,6 +417,7 @@ export const api = {
   register: apiRegister,
   followUser,
   unfollowUser,
+  likeBlipp,
   saveBlipp,
   unsaveBlipp,
   getFeed,
@@ -419,29 +458,36 @@ export async function apiLogin(
   const username = typeof emailOrReq === 'string' ? undefined : emailOrReq.username;
   const password = typeof emailOrReq === 'string' ? maybePassword || '' : emailOrReq.password;
 
-  const res = await requestRaw<any>('/v1/auth/login', {
+  const loginId = username || email || '';
+
+  const params = new URLSearchParams();
+  params.append('client_id', 'blipp-app');
+  params.append('grant_type', 'password');
+  params.append('username', loginId);
+  params.append('password', password || '');
+
+  const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/token`, {
     method: 'POST',
-    body: {
-      email,
-      username: username || (email && email.includes('@') ? email.split('@')[0] : email),
-      password,
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
+    body: params.toString(),
   });
 
-  const data = res.data;
-  const tokens: AuthTokens = {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresIn: data.expires_in || 3600,
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(data?.error_description || 'Login failed', res.status, data);
+  }
+
+  const tokens = toTokens(data as LoginResponse);
+  const me = await authApi.me(tokens.accessToken);
+  
+  return { 
+    tokens, 
+    user: me, 
+    access_token: tokens.accessToken, 
+    refresh_token: tokens.refreshToken 
   };
-  const uname = data.username || username || (email && email.includes('@') ? email.split('@')[0] : 'user');
-  const user: User = {
-    id: data.user_id || 'user_local',
-    email: email || '',
-    username: uname,
-    displayName: uname,
-  };
-  return { tokens, user, access_token: data.access_token, refresh_token: data.refresh_token };
 }
 
 export async function apiRegister(req: {
@@ -450,16 +496,9 @@ export async function apiRegister(req: {
   username?: string;
   displayName?: string;
 }): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
-  await requestRaw('/v1/auth/register', {
-    method: 'POST',
-    body: {
-      email: req.email,
-      password: req.password,
-      username: req.username || req.email.split('@')[0],
-      display_name: req.displayName || req.username,
-    },
-  });
-  return apiLogin(req.email, req.password);
+  // Direct API registration is removed. Users should register via Keycloak web UI.
+  // If your client still calls this, we throw an error.
+  throw new Error("Registration should be performed via OAuth or Keycloak portal.");
 }
 
 interface LoginResponse {
@@ -538,8 +577,16 @@ export const authApi = {
   register: (req: RegisterRequest) => apiRegister(req),
 
   async me(token: string): Promise<User> {
-    const r = await request<MeResponse>('/v1/auth/me', { token });
-    return toUser(r);
+    const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/userinfo`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new ApiError('Failed to fetch user info', res.status, data);
+    }
+    return toUser(data as MeResponse);
   },
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -741,6 +788,10 @@ export const profileApi = {
 };
 
 export const socialApi = {
+  async like(blippId: string): Promise<LikeActionResponse> {
+    return likeBlipp(blippId);
+  },
+
   async follow(userId: string): Promise<FollowActionResponse> {
     const res = await requestRaw<FollowActionResponse>(`/v1/social/follow/${userId}`, {
       method: 'POST',

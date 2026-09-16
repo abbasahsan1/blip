@@ -14,6 +14,7 @@ import {
   Animated,
   Dimensions,
   FlatList,
+  Image,
   Linking,
   Modal,
   Pressable,
@@ -23,19 +24,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PALETTE } from '@/lib/palette';
-import {
-  PlayMark,
-  PauseMark,
-  HeartMark,
-  BookmarkMark,
-  ShareMark,
-  FlagMark,
-  StatusCheckMark,
-  MoreHorizontalMark,
-  VerifiedMark,
-} from '@/components/common/Icons';
+import { Feather } from '@expo/vector-icons';
 import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
-import { useEngagementTelemetry } from '@/lib/audio/useEngagementTelemetry';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
@@ -62,7 +52,7 @@ interface Props {
   item?: Blipp;
   isActive: boolean;
   height: number;
-  onLike: () => void;
+  onLike: () => Promise<void>;
   onAutoSkip?: () => void;
   feedItems?: Blipp[];
   activeIndex?: number;
@@ -252,15 +242,6 @@ export function AudioReel({
     }
   }, [isAdFallback, isActive, adCountdown, onAutoSkip]);
 
-  // ── Engagement telemetry ───────────────────────────────────────────────────
-  const { dispatchLike } = useEngagementTelemetry({
-    item,
-    isPlaying,
-    positionSeconds,
-    durationSeconds,
-    isActive,
-  });
-
   // Like bouncing heart animation
   const heartScale = useRef(new Animated.Value(1)).current;
 
@@ -269,8 +250,7 @@ export function AudioReel({
       Animated.spring(heartScale, { toValue: 1.5, friction: 3, useNativeDriver: true }),
       Animated.spring(heartScale, { toValue: 1, friction: 4, useNativeDriver: true }),
     ]).start();
-    onLike();
-    await dispatchLike();
+    await onLike();
   };
 
   // ── Dynamic Center Equalizer Visualizer (5 bars with random spring physics) ──
@@ -398,9 +378,9 @@ export function AudioReel({
 
   return (
     <View style={[styles.root, { height: reelHeight }]} testID="audio-reel-card">
-      {/* 1. Ambient Background: Dark vertical gradient canvas */}
+      {/* 1. Edge-to-edge dark/orange canvas */}
       <LinearGradient
-        colors={['#07080B', '#11131F', '#07080B']}
+        colors={['#000000', '#090A0F', '#000000']}
         style={StyleSheet.absoluteFill}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
@@ -419,9 +399,9 @@ export function AudioReel({
           {/* Center tactile play / pause status badge */}
           <View style={[styles.centerPlayBadge, isPlaying && styles.centerPlayBadgePlaying]}>
             {isPlaying ? (
-              <PauseMark size={24} color="#FFFFFF" />
+              <Feather name="pause" size={24} color="#FFFFFF" />
             ) : (
-              <PlayMark size={26} color="#FFFFFF" />
+              <Feather name="play" size={26} color="#FFFFFF" />
             )}
           </View>
         </View>
@@ -429,6 +409,19 @@ export function AudioReel({
 
       {/* 3. Floating Thumb-Friendly Action Column (Right Side) */}
       <View style={styles.floatingActionColumn} testID="floating-action-dock">
+        <View style={styles.profileItem}>
+          {item?.creator?.avatar_url || (item as any)?.avatar_url ? (
+            <Image
+              source={{ uri: item?.creator?.avatar_url || (item as any)?.avatar_url }}
+              style={styles.profilePicture}
+              accessibilityLabel={`${creatorDisplayName}'s profile picture`}
+            />
+          ) : (
+            <View style={styles.profileFallback}>
+              <Text style={styles.profileInitial}>{creatorDisplayName.slice(0, 1).toUpperCase()}</Text>
+            </View>
+          )}
+        </View>
         {/* Like Button (Bouncing heart + count) */}
         <View style={styles.actionItemWrapper}>
           <Pressable
@@ -442,17 +435,13 @@ export function AudioReel({
             testID="like-blipp-button"
           >
             <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-              <HeartMark
-                size={24}
-                color={item?.isLiked ? '#EC4899' : '#FFFFFF'}
-                filled={item?.isLiked}
-              />
+              <Feather name="heart" size={24} color={item?.isLiked ? "#F97316" : "#FFFFFF"} />
             </Animated.View>
           </Pressable>
           <Text
             style={[
               styles.actionCounterText,
-              item?.isLiked && { color: '#EC4899' },
+              item?.isLiked && { color: '#F97316' },
             ]}
           >
             {formatListens(item?.likeCount || 0)}
@@ -472,11 +461,7 @@ export function AudioReel({
             accessibilityLabel={isSaved ? 'Remove from stash' : 'Stash blipp'}
             testID="save-blipp-button"
           >
-            <BookmarkMark
-              size={23}
-              color={isSaved ? '#F59E0B' : '#FFFFFF'}
-              filled={isSaved}
-            />
+            <Feather name="bookmark" size={23} color={isSaved ? "#F59E0B" : "#FFFFFF"} />
           </Pressable>
           <Text
             style={[
@@ -500,7 +485,7 @@ export function AudioReel({
             accessibilityLabel="Echo to direct message"
             testID="share-blipp-button"
           >
-            <ShareMark size={22} color="#FFFFFF" />
+            <Feather name="send" size={22} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.actionCounterText}>Echo</Text>
         </View>
@@ -517,7 +502,7 @@ export function AudioReel({
             accessibilityLabel="Blipp options"
             testID="report-content-button"
           >
-            <MoreHorizontalMark size={22} color="#FFFFFF" />
+            <Feather name="more-horizontal" size={22} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.actionCounterText}>More</Text>
         </View>
@@ -531,7 +516,7 @@ export function AudioReel({
             <Text style={styles.creatorHandleText} numberOfLines={1}>
               @{creatorHandle}
             </Text>
-            <VerifiedMark size={16} color="#8B5CF6" />
+            <Feather name="check-circle" size={16} color="#F97316" />
           </View>
 
           {!isAd && creatorId && (
@@ -710,7 +695,7 @@ export function AudioReel({
 
             {reportSubmitted ? (
               <View style={styles.reportSuccessBox}>
-                <StatusCheckMark size={32} color={PALETTE.lime} />
+                <Feather name="check-circle" size={32} color={PALETTE.lime} />
                 <Text style={styles.reportSuccessText}>Thank you for your report.</Text>
                 <Text style={styles.reportSuccessSubtext}>Our moderation engine will review it promptly.</Text>
               </View>
@@ -769,14 +754,15 @@ export function AudioReel({
 
 const styles = StyleSheet.create({
   root: {
+    flex: 1,
     width: WINDOW_WIDTH,
     position: 'relative',
-    backgroundColor: '#07080B',
+    backgroundColor: '#000000',
     overflow: 'hidden',
   },
   canvasBackground: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#07080B',
+    backgroundColor: '#000000',
   },
   ambientRadialGlow: {
     position: 'absolute',
@@ -785,8 +771,8 @@ const styles = StyleSheet.create({
     width: 240,
     height: 240,
     borderRadius: 120,
-    backgroundColor: 'rgba(139, 92, 246, 0.25)',
-    shadowColor: '#8B5CF6',
+    backgroundColor: 'rgba(249, 115, 22, 0.18)',
+    shadowColor: '#F97316',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 80,
@@ -831,7 +817,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
   },
   centerPlayBadgePlaying: {
-    borderColor: PALETTE.primary,
+    borderColor: '#F97316',
     backgroundColor: 'rgba(234, 88, 12, 0.3)',
   },
 
@@ -839,7 +825,7 @@ const styles = StyleSheet.create({
   floatingActionColumn: {
     position: 'absolute',
     right: 16,
-    bottom: 120,
+    bottom: 108,
     alignItems: 'center',
     gap: 16,
     zIndex: 10,
@@ -847,6 +833,31 @@ const styles = StyleSheet.create({
   actionItemWrapper: {
     alignItems: 'center',
     gap: 4,
+  },
+  profileItem: {
+    marginBottom: 2,
+  },
+  profilePicture: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#F97316',
+  },
+  profileFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#090A0F',
+    borderWidth: 2,
+    borderColor: '#F97316',
+  },
+  profileInitial: {
+    color: '#FFFFFF',
+    fontFamily: 'Outfit_700Bold',
+    fontSize: 18,
   },
   actionFrostedBtn: {
     width: 48,
@@ -867,7 +878,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.22)',
   },
   actionCounterText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 11,
     color: '#FFFFFF',
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
@@ -895,7 +906,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   creatorHandleText: {
-    fontFamily: 'PlusJakartaSans_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 18,
     color: '#FFFFFF',
     letterSpacing: 0.2,
@@ -904,9 +915,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   sleekPillFollowBtn: {
-    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: 'rgba(249, 115, 22, 0.20)',
     borderWidth: 1,
-    borderColor: '#8B5CF6',
+    borderColor: '#F97316',
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -919,15 +930,15 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.95 }],
   },
   sleekPillFollowText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 11,
-    color: '#A78BFA',
+    color: '#F97316',
   },
   sleekPillFollowingText: {
     color: 'rgba(255, 255, 255, 0.75)',
   },
   blippTitle: {
-    fontFamily: 'Sora_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 20,
     color: '#FFFFFF',
     lineHeight: 20,
@@ -936,7 +947,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   blippDescription: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 13,
     color: 'rgba(255, 255, 255, 0.75)',
     lineHeight: 17,
@@ -956,7 +967,7 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.amber,
   },
   sponsoredPillText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 10,
     color: PALETTE.amber,
     letterSpacing: 0.5,
@@ -970,7 +981,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   sponsoredCtaText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 11,
     color: '#FFFFFF',
   },
@@ -990,7 +1001,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   audioTrackTagText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.9)',
   },
@@ -1012,7 +1023,7 @@ const styles = StyleSheet.create({
   },
   bottomScrubberFill: {
     height: '100%',
-    backgroundColor: PALETTE.primary,
+    backgroundColor: '#F97316',
     borderRadius: 1.5,
   },
 
@@ -1042,13 +1053,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sheetTitle: {
-    fontFamily: 'Sora_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 17,
     color: PALETTE.primary,
     marginBottom: 12,
   },
   sheetFeedbackText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 13,
     color: PALETTE.lime,
     marginBottom: 10,
@@ -1061,7 +1072,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyListText: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 13,
     color: PALETTE.textMuted,
   },
@@ -1087,7 +1098,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   threadAvatarText: {
-    fontFamily: 'Sora_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 15,
     color: PALETTE.primary,
   },
@@ -1095,12 +1106,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   threadName: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 14,
     color: PALETTE.primary,
   },
   threadUsername: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 12,
     color: PALETTE.textSecondary,
   },
@@ -1111,7 +1122,7 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.accent,
   },
   echoChipText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 12,
     color: '#FFFFFF',
   },
@@ -1128,13 +1139,13 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.border,
   },
   reportHeading: {
-    fontFamily: 'Sora_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 18,
     color: PALETTE.primary,
     marginBottom: 6,
   },
   reportSubheading: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 13,
     color: PALETTE.textSecondary,
     marginBottom: 18,
@@ -1144,13 +1155,13 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   reportSuccessText: {
-    fontFamily: 'Sora_700Bold',
+    fontFamily: 'Outfit_700Bold',
     fontSize: 16,
     color: PALETTE.primary,
     marginTop: 12,
   },
   reportSuccessSubtext: {
-    fontFamily: 'PlusJakartaSans_400Regular',
+    fontFamily: 'Outfit_400Regular',
     fontSize: 13,
     color: PALETTE.textSecondary,
     marginTop: 4,
@@ -1183,7 +1194,7 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.accent,
   },
   reasonText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 13,
     color: PALETTE.primary,
   },
@@ -1198,7 +1209,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cancelBtnText: {
-    fontFamily: 'PlusJakartaSans_500Medium',
+    fontFamily: 'Outfit_500Medium',
     fontSize: 14,
     color: PALETTE.textSecondary,
   },
@@ -1209,7 +1220,7 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.magenta,
   },
   submitReportText: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontFamily: 'Outfit_600SemiBold',
     fontSize: 14,
     color: '#FFFFFF',
   },

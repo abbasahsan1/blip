@@ -2,8 +2,7 @@ CLUSTER_NAME := blipp-cluster
 NAMESPACE    := blipp
 SHELL        := /bin/bash
 
-IMAGES := blipp-auth:latest \
-          blipp-content-ingest:latest \
+IMAGES := blipp-content-ingest:latest \
           blipp-feed:latest \
           blipp-social-graph:latest \
           blipp-messaging:latest \
@@ -24,7 +23,6 @@ help: ## Show available commands
 
 all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything from scratch (cluster, images, storage, workloads, port-forwards)
 	@echo "Waiting for core microservices to reach Ready state..."
-	@kubectl rollout status deployment/auth-service -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/content-ingest -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/feed -n $(NAMESPACE) --timeout=120s || true
 	@kubectl rollout status deployment/social-graph -n $(NAMESPACE) --timeout=120s || true
@@ -34,7 +32,6 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 	@echo "=================================================================="
 	@echo "  Blipps Platform is fully deployed and accessible on localhost!"
 	@echo "=================================================================="
-	@echo "  - Auth:           http://localhost:8000"
 	@echo "  - Content Ingest: http://localhost:8001"
 	@echo "  - Feed:           http://localhost:8002"
 	@echo "  - Social Graph:   http://localhost:8003"
@@ -49,7 +46,6 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running application services
 	@echo "Applying updated manifests to namespace $(NAMESPACE)..."
 	@kubectl apply -f k8s/secrets.yaml
-	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -59,7 +55,6 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl apply -f k8s/analytics-worker/
 	@kubectl apply -f k8s/ingress/
 	@echo "Triggering zero-downtime rolling restart..."
-	@kubectl rollout restart deployment/auth-service -n $(NAMESPACE)
 	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
 	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
 	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
@@ -103,9 +98,6 @@ k3d-import: ## Import all locally built Docker images into the k3d cluster
 # Container Builds (Context pinned to repository root for libs/common)
 # ==============================================================================
 
-build-auth:
-	docker build -t blipp-auth:latest -t blipp-auth-service:latest -f services/auth/Dockerfile .
-
 build-ingest:
 	docker build -t blipp-content-ingest:latest -f services/content_ingest/Dockerfile .
 
@@ -127,7 +119,7 @@ build-transcode:
 build-analytics:
 	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
-build-all: build-auth build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
+build-all: build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
 
 # ==============================================================================
 # Kubernetes Infrastructure & Deployments
@@ -156,7 +148,6 @@ k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifes
 	@kubectl apply -f k8s/keycloak/
 	@kubectl apply -f k8s/gorse/
 	# Core microservices
-	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/

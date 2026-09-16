@@ -11,16 +11,7 @@ spec:
     average: 100
     burst: 50
 
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: strip-auth
-  namespace: blipp
-spec:
-  stripPrefix:
-    prefixes:
-      - /auth
+
 
 ---
 apiVersion: traefik.io/v1alpha1
@@ -112,19 +103,7 @@ spec:
   entryPoints:
     - web
   routes:
-    # 1. Auth Service (/v1/auth, /api/v1/auth, /auth/v1/auth, /auth)
-    - match: PathPrefix(`/v1/auth`) || PathPrefix(`/api/v1/auth`) || PathPrefix(`/auth/v1/auth`)
-      kind: Rule
-      services:
-        - name: auth-service
-          port: 8000
-    - match: PathPrefix(`/auth`)
-      kind: Rule
-      middlewares:
-        - name: strip-auth
-      services:
-        - name: auth-service
-          port: 8000
+
 
     # 2. Content Ingest Service (/ingest, /v1/uploads, /v1/blipps)
     - match: PathPrefix(`/ingest`)
@@ -154,7 +133,7 @@ spec:
         - name: feed-service
           port: 8002
 
-    # 4. Social Graph Service (/social, /v1/profiles, /v1/social)
+    # 4. Social Graph Service (/social, /v1/profiles, /v1/social, /v1/likes)
     - match: PathPrefix(`/social`)
       kind: Rule
       middlewares:
@@ -162,7 +141,7 @@ spec:
       services:
         - name: social-graph-service
           port: 8003
-    - match: PathPrefix(`/v1/profiles`) || PathPrefix(`/v1/social`)
+    - match: PathPrefix(`/v1/profiles`) || PathPrefix(`/v1/social`) || PathPrefix(`/v1/likes`)
       kind: Rule
       services:
         - name: social-graph-service
