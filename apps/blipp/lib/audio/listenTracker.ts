@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { api } from '../api';
 import { useSessionStore } from '../store/sessionStore';
 import { computeDeviceSignal } from '../deviceSignal';
@@ -14,6 +15,8 @@ export interface PlayProgressEvent {
 }
 
 let activeSessionId: string = '';
+const eventBuffer: PlayProgressEvent[] = [];
+let isFlushing = false;
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -38,6 +41,24 @@ export function resetPlaybackSessionId(): string {
   return activeSessionId;
 }
 
+export async function flushTelemetry(): Promise<void> {
+  if (isFlushing || eventBuffer.length === 0) return;
+  isFlushing = true;
+  const batch = eventBuffer.splice(0, eventBuffer.length);
+  try {
+    await api.post('/v1/events', batch);
+  } catch {
+    // Preserve unsent events for the next flush, bounded to one playback window.
+    eventBuffer.unshift(...batch.slice(0, Math.max(0, 6 - eventBuffer.length)));
+  } finally {
+    isFlushing = false;
+  }
+}
+
+AppState.addEventListener('change', (state) => {
+  if (state === 'background' || state === 'inactive') void flushTelemetry();
+});
+
 /**
  * Resolves high-fidelity device telemetry signal:
  * - 'app_backgrounded' when AppState is background
@@ -58,8 +79,7 @@ export function getActiveDeviceSignal(isPlaying: boolean = true): PlayProgressEv
 }
 
 /**
- * Emits real playback telemetry payload to POST /v1/events.
- * Eliminates synthetic disconnected local loops.
+ * Buffers telemetry and posts it as an array at meaningful playback boundaries.
  */
 export async function recordPlayProgress(params: {
   blipp_id: string;
@@ -89,10 +109,9 @@ export async function recordPlayProgress(params: {
     timestamp: new Date().toISOString(),
   };
 
-  try {
-    await api.post('/v1/events', payload);
-  } catch {
-    // Non-blocking telemetry delivery
+  eventBuffer.push(payload);
+  if (payload.event_type !== 'play_progress' || eventBuffer.length >= 6) {
+    await flushTelemetry();
   }
 }
 
