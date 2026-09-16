@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated } from 'react-native';
 import { resolveMediaUrl, resolvePublicAudioUrl } from '@/lib/api';
 import { resetPlaybackSessionId } from '@/lib/audio/listenTracker';
 import type { Blipp } from '@/lib/types';
@@ -34,8 +35,8 @@ export interface AudioPlayerControls {
   positionSeconds: number;
   /** Total track duration in whole seconds (0 until metadata loads). */
   durationSeconds: number;
-  /** Playback progress as a 0–1 fraction (for waveform / progress bar). */
-  progress: number;
+  /** Playback progress as an Animated.Value (for native waveform / progress bar rendering without React re-renders). */
+  progress: Animated.Value;
   /** Toggle between play and pause. No-ops if no audio is loaded. */
   togglePlayPause: () => void;
   /** Seek to an absolute position in seconds. */
@@ -78,7 +79,7 @@ export function useAudioPlayer({
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [positionSeconds, setPositionSeconds] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
-  const [progress, setProgress] = useState(0);
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   const isPlaying = audioState === 'playing';
   const isLoading = audioState === 'loading';
@@ -154,7 +155,7 @@ export function useAudioPlayer({
     setAudioState('loading');
     setPositionSeconds(0);
     setDurationSeconds(0);
-    setProgress(0);
+    progressAnim.setValue(0);
 
     // ── Event handlers ────────────────────────────────────────────────────────
 
@@ -177,16 +178,20 @@ export function useAudioPlayer({
       const dur = audio.duration && isFinite(audio.duration) ? audio.duration : 0;
       const pos = audio.currentTime ?? 0;
       const frac = dur > 0 ? pos / dur : 0;
-      setPositionSeconds(Math.floor(pos));
-      setDurationSeconds(Math.floor(dur));
-      setProgress(frac);
+      
+      const posInt = Math.floor(pos);
+      const durInt = Math.floor(dur);
+      
+      setPositionSeconds(prev => prev === posInt ? prev : posInt);
+      setDurationSeconds(prev => prev === durInt ? prev : durInt);
+      progressAnim.setValue(frac);
     };
 
     const handleEnded = () => {
       setAudioState('ended');
-      setProgress(1);
+      progressAnim.setValue(1);
       setTimeout(() => {
-        setProgress(0);
+        progressAnim.setValue(0);
         setPositionSeconds(0);
       }, 400);
     };
@@ -275,7 +280,7 @@ export function useAudioPlayer({
     isLoading,
     positionSeconds,
     durationSeconds,
-    progress,
+    progress: progressAnim,
     togglePlayPause,
     seekTo,
     isAdFallback,

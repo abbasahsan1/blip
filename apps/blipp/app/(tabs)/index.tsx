@@ -150,9 +150,6 @@ export default function FeedScreen() {
           onScroll={onScroll}
           scrollEventThrottle={16}
           pagingEnabled={true}
-          snapToInterval={feedHeight}
-          snapToAlignment="start"
-          decelerationRate="fast"
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl

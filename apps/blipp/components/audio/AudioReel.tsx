@@ -12,6 +12,7 @@
 
 import { useState, useEffect } from 'react';
 import {
+  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -348,10 +349,15 @@ export function AudioReel({
         testID="bottom-scrubber-bar"
       >
         <View style={styles.scrubberTrack}>
-          <View
+          <Animated.View
             style={[
               styles.scrubberFill,
-              { width: `${Math.max(0, Math.min(100, progress * 100))}%` },
+              { 
+                width: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%']
+                }) 
+              },
             ]}
           />
         </View>
