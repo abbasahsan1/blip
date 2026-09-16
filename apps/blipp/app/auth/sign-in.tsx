@@ -31,7 +31,7 @@ export default function SignInScreen() {
   const status = useSessionStore((s) => s.status);
   const error = useSessionStore((s) => s.error);
   const isSubmitting = useSessionStore((s) => s.isSubmitting);
-  const signInWithEmail = useSessionStore((s) => s.signInWithEmail);
+  const signIn = useSessionStore((s) => s.signIn);
   const user = useSessionStore((s) => s.user);
 
   // Soundwave pulsation animation
@@ -105,7 +105,7 @@ export default function SignInScreen() {
     }
 
     setServerError(null);
-    await signInWithEmail(email.trim(), password);
+    await signIn(email.trim(), password);
   }
 
   return (

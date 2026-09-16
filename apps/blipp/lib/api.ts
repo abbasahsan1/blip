@@ -414,7 +414,6 @@ export const api = {
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
 
   login: apiLogin,
-  register: apiRegister,
   followUser,
   unfollowUser,
   likeBlipp,
@@ -490,54 +489,7 @@ export async function apiLogin(
   };
 }
 
-export async function apiRegister(req: {
-  email: string;
-  password: string;
-  username?: string;
-  displayName?: string;
-}): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
-  // 1. Get Admin Token
-  const adminParams = new URLSearchParams();
-  adminParams.append('client_id', 'admin-cli');
-  adminParams.append('grant_type', 'password');
-  adminParams.append('username', 'admin');
-  adminParams.append('password', 'admin_master_password');
-
-  const adminRes = await fetch(`${getKeycloakUrl()}/realms/master/protocol/openid-connect/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: adminParams.toString(),
-  });
-
-  const adminData = await adminRes.json().catch(() => null);
-  if (!adminRes.ok) {
-    throw new ApiError(adminData?.error_description || 'Failed to get admin token', adminRes.status, adminData);
-  }
-
-  // 2. Create User via Admin API
-  const createUserRes = await fetch(`${getKeycloakUrl()}/admin/realms/blipp/users`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${adminData.access_token}`
-    },
-    body: JSON.stringify({
-      username: req.username || req.email.split('@')[0],
-      email: req.email,
-      enabled: true,
-      firstName: req.displayName || req.username,
-      credentials: [{ type: 'password', value: req.password, temporary: false }]
-    }),
-  });
-
-  if (!createUserRes.ok) {
-    const errData = await createUserRes.json().catch(() => null);
-    throw new ApiError(errData?.errorMessage || 'Failed to create user', createUserRes.status, errData);
-  }
-
-  // 3. Login as the new user to get tokens
-  return apiLogin({ email: req.email, password: req.password });
-}
+// Removed apiRegister to prevent Admin API usage on the client
 
 interface LoginResponse {
   access_token: string;
@@ -580,7 +532,6 @@ function toUser(r: MeResponse): User {
 
 export const authApi = {
   login: apiLogin,
-  register: (req: RegisterRequest) => apiRegister(req),
 
   async me(token: string): Promise<User> {
     const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/userinfo`, {

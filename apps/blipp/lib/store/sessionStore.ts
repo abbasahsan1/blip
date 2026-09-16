@@ -23,7 +23,7 @@ interface SessionStore {
 
   // Actions
   initialize: () => Promise<void>;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
   setSessionTokens: (tokens: { accessToken: string; refreshToken?: string }, user?: User | null) => Promise<void>;
@@ -81,45 +81,79 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async signInWithEmail(email, password) {
+  async signIn(email, password) {
     set({ isSubmitting: true, error: null });
     try {
-      const { tokens, user } = await authApi.login({ email, password });
+      // 1. Post to Keycloak token endpoint
+      const keycloakUrl = process.env.EXPO_PUBLIC_KEYCLOAK_URL?.replace(/\/+$/, '') || 'http://localhost:8419/keycloak';
+      const tokenEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/token`;
+      
+      const params = new URLSearchParams();
+      params.append('client_id', 'blipp-app');
+      params.append('grant_type', 'password');
+      params.append('username', email);
+      params.append('password', password);
+      params.append('scope', 'openid profile email');
+
+      const tokenRes = await fetch(tokenEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      const tokenData = await tokenRes.json().catch(() => null);
+
+      if (!tokenRes.ok) {
+        throw new Error(tokenData?.error_description || 'Login failed');
+      }
+
+      const accessToken = tokenData.access_token;
+      const refreshToken = tokenData.refresh_token;
+
+      // 2. Fetch User Profile
+      const userinfoEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/userinfo`;
+      const userRes = await fetch(userinfoEndpoint, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      const userData = await userRes.json().catch(() => null);
+      if (!userRes.ok) {
+        throw new Error('Failed to fetch user profile');
+      }
+
+      const displayName = userData.name || (userData.first_name ? `${userData.first_name} ${userData.last_name || ''}`.trim() : undefined);
+      const user: User = {
+        id: userData.sub || '',
+        email: userData.email || email,
+        username: userData.preferred_username || '',
+        displayName: displayName || userData.preferred_username || '',
+        avatarUrl: userData.picture,
+      };
+
       await AsyncStorage.multiSet([
-        [KEY_ACCESS, tokens.accessToken],
-        [KEY_REFRESH, tokens.refreshToken],
+        [KEY_ACCESS, accessToken],
+        [KEY_REFRESH, refreshToken],
       ]);
+
       set({
         status: 'authenticated',
         user,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+        accessToken,
+        refreshToken,
+        tokens: { accessToken, refreshToken },
         isSubmitting: false,
       });
     } catch (err) {
-      const failure = toFailure(err);
-      set({ isSubmitting: false, error: failure });
+      set({ isSubmitting: false, error: toFailure(err) });
     }
   },
 
   async signUpWithEmail(username, email, password) {
     set({ isSubmitting: true, error: null });
     try {
-      const pwd = password || 'DefaultOtpPassword123!';
-      const { tokens, user } = await authApi.register({ username, email, password: pwd, displayName: username });
-      await AsyncStorage.multiSet([
-        [KEY_ACCESS, tokens.accessToken],
-        [KEY_REFRESH, tokens.refreshToken],
-      ]);
-      set({
-        status: 'authenticated',
-        user,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
-        isSubmitting: false,
-      });
+      // In-app registration via API is disabled for security reasons
+      // Users should be redirected to the web portal or standard OIDC flow
+      throw new Error('In-app registration is disabled. Please sign up via the web portal.');
     } catch (err) {
       set({ isSubmitting: false, error: toFailure(err) });
     }
@@ -193,10 +227,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toFailure(err: unknown): AuthFailure {
-  if (err instanceof ApiError) {
+  if (err instanceof Error) {
     const msg = err.message.toLowerCase();
-    if (msg.includes('invalid credentials') || msg.includes('unauthorized') || err.status === 401) {
-      return { field: 'credentials', message: 'Incorrect email or password.' };
+    if (msg.includes('invalid credentials') || msg.includes('unauthorized') || msg.includes('invalid user credentials')) {
+      return { field: 'credentials', message: 'Invalid email or password.' };
     }
     if (msg.includes('email') && msg.includes('already')) {
       return { field: 'email', message: 'An account with this email already exists.' };
