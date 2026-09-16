@@ -97,6 +97,8 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
   token?: string | null;
 }
 
+let refreshPromise: Promise<AuthTokens> | null = null;
+
 // ─── Centralized Request Execution & Interception ──────────────────────────────
 
 export async function requestRaw<T = any>(
@@ -148,9 +150,21 @@ export async function requestRaw<T = any>(
     
     if (refreshToken) {
       try {
-        const newTokens = await authApi.refresh(refreshToken);
-        const me = await authApi.me(newTokens.accessToken);
-        useSessionStore.getState().setSessionTokens(newTokens, me);
+        if (!refreshPromise) {
+          refreshPromise = (async () => {
+            try {
+              const newTokens = await authApi.refresh(refreshToken);
+              const me = await authApi.me(newTokens.accessToken);
+              await useSessionStore.getState().setSessionTokens(newTokens, me);
+              return newTokens;
+            } finally {
+              refreshPromise = null;
+            }
+          })();
+        }
+        
+        const newTokens = await refreshPromise;
+        refreshSuccess = true;
         
         headers['Authorization'] = `Bearer ${newTokens.accessToken}`;
         const retryResponse = await fetch(endpointUrl, {

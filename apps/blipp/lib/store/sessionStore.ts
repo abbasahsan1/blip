@@ -151,8 +151,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async signUpWithEmail(username, email, password) {
     set({ isSubmitting: true, error: null });
     try {
-      const pwd = password || 'DefaultOtpPassword123!';
-      const res = await authApi.register({ username, email, password: pwd, displayName: username });
+      if (!password) {
+        throw new Error('Password is required.');
+      }
+      const res = await authApi.register({ username, email, password, displayName: username });
       
       const user: User = {
         id: res.user.id,

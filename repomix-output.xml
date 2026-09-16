@@ -102,11 +102,15 @@ apps/
 docs/
   context.md
   DESIGN.md
+  IMPLEMENTATION_AUDIT.md
   memory.md
   PRODUCT.md
 k8s/
   analytics-worker/
     deployment.yaml
+  auth/
+    deployment.yaml
+    service.yaml
   blipp-app/
     deployment.yaml
     service.yaml
@@ -181,6 +185,16 @@ services/
   analytics_worker/
     app/
       __init__.py
+      main.py
+    Dockerfile
+    requirements.txt
+  auth/
+    app/
+      api/
+        v1/
+          auth.py
+      models/
+        schemas.py
       main.py
     Dockerfile
     requirements.txt
@@ -296,11 +310,97 @@ Makefile
 package.json
 README.md
 test_audio.mp3
+test_kc.py
 test_upload.sh
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="docs/IMPLEMENTATION_AUDIT.md">
+# Blipp Implementation Audit
+
+## 1. Executive Summary
+This audit outlines critical architectural violations, incomplete features, and UI/HCI problems in the Blipp repository. While the repository claims to implement a scalable microservices architecture with a React Native frontend, the reality is a monolithic database schema disguised as microservices, complete with hardcoded credentials, fake AI integration, and broken event flows. 
+
+## 2. Current Architecture
+The backend is split into several Python microservices (`auth`, `content_ingest`, `feed`, `messaging`, `moderation`, `social_graph`, `analytics_worker`, `transcode_worker`). The frontend is a React Native Expo application under `apps/blipp`. Communication occurs via HTTP REST endpoints and NATS JetStream events.
+
+## 3. Actual Service Ownership
+Service ownership is completely compromised. Services do not own their databases; instead, a single shared `database.py` in `libs/common/blipp_common` defines all tables and connections. Cross-service foreign keys are actively used (e.g., `uploads` and `blipps` referencing `users_profile`). 
+
+## 4. Actual Data Flow
+- **Service reading another service's database**: The `feed` service queries the `blipps` and `users_profile` tables directly to hydrate its feed, bypassing `content_ingest` and `social_graph` APIs.
+- **Events emitted after direct DB writes**: `content_ingest` upserts into the database, commits the transaction, and *then* emits events like `engagement.blipp.published`. If the application crashes between these two steps, the event is permanently lost.
+
+## 5. Critical Broken Flows
+- **Fake event flows / Mocked workers**: The `transcode_worker` unconditionally publishes a fake `copyright.cleared` event. There is no real copyright worker.
+- **Recommendation ranking being discarded**: The `feed` service queries the Gorse recommendation engine for candidates, but when hydrating these from PostgreSQL, it forces a strict `ORDER BY b.created_at DESC, b.blipp_id DESC`, entirely discarding the algorithmic ranking and turning it into a simple chronological feed.
+
+## 6. API Mismatches
+- **Components doing network requests themselves**: The React Native `AudioReel` component directly calls `api.post('/v1/reports', ...)` instead of utilizing a structured store.
+
+## 7. Authentication Issues
+- **Hardcoded credentials**: The moderation service hardcodes `admin_master_password` to authenticate with the Keycloak Admin API when suspending a user in `services/moderation/app/event_handlers.py`.
+
+## 8. Feed Issues
+- **Fake URLs / Demo advertisements**: The feed service interleaves ads server-side using a hardcoded fake URL (`https://cdn.blipps.internal/ads/sample-ad.aac`).
+
+## 9. Upload Issues
+Upload flow generally works, but processing status relies on the transcode worker completing successfully.
+
+## 10. Audio Issues
+- **Hardcoded media duration**: The frontend hardcodes a fallback duration of `30` seconds in `AudioReel` and `api.ts`, which breaks scrubbing for audio items missing duration metadata.
+
+## 11. Engagement Issues
+- **Optimistic state that doesn't rollback correctly**: The `toggleLike` function in `feedStore.ts` optimistically increments likes and assumes `isLiked: false` on error, ignoring the actual previous state.
+
+## 12. Messaging Issues
+Messaging DM flow exists, but is not fully integrated with real-time sockets; shares are sent via HTTP calls.
+
+## 13. Event Issues
+- Database transactions and NATS event emissions are decoupled without an outbox pattern.
+
+## 14. Mock/Placeholder Implementations
+- **Fake copyright results**: As mentioned, `transcode_worker` bridges copyright clearance without real scanning.
+- **Mocked workers**: Reporting intake exists in `moderation`, but no worker actually actions the reports. 
+
+## 15. UI/HCI Problems
+- **Excessive shadows/glows**: The `centerPlayBadge` uses a large shadow radius (12) which looks out of place.
+- **Unnecessary animations / Animation loops**: The audio track tag text uses an infinite `Animated.loop`, causing constant CPU usage even when the user isn't interacting.
+- **Pill controls**: Inconsistent use of sleek pill follow buttons vs frosted action buttons.
+
+## 16. Animation/Performance Problems
+- Infinite animation loops in the feed card track.
+
+## 17. Infrastructure Gaps
+- Minimal KEDA scaling configs; most deployments are basic.
+
+## 18. Testing Gaps
+- There are only 4 test files across the entire microservice architecture. 
+
+## 19. Prioritized Repair Order
+1. Fix shared database and cross-service queries to isolate data models.
+2. Implement transaction outbox for events to prevent data loss.
+3. Fix the feed algorithmic sorting to respect Gorse rankings.
+4. Remove hardcoded credentials.
+5. Fix frontend optimistic rollback.
+
+---
+
+### CRITICAL ROOT CAUSES
+1. `libs/common/blipp_common/database.py` defines all tables in one monolithic file, destroying microservice data isolation.
+2. NATS event emissions are not atomically tied to database transactions.
+3. The `feed` service forces `ORDER BY created_at DESC` overriding the Gorse recommendation system IDs.
+4. Hardcoded admin passwords and fake CDN URLs in core application flows.
+
+### DO NOT FIX YET
+1. Shared database schema violations.
+2. Recommendation ranking destruction in feed.
+3. Fake copyright event injection.
+4. UI component animation loops.
+5. Frontend optimistic state rollback bug.
+</file>
 
 <file path=".agents/mcp_config.json">
 {
@@ -785,7 +885,7 @@ const styles = StyleSheet.create({
   shareBody: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 10,x
     backgroundColor: PALETTE.surface,
     padding: 10,
     borderRadius: 8,
@@ -4299,6 +4399,20 @@ charts/
     "typescript": "^5.6.0"
   }
 }
+</file>
+
+<file path="test_kc.py">
+import os, asyncio, httpx
+KEYCLOAK_URL = "http://localhost:8419/keycloak"
+async def main():
+    async with httpx.AsyncClient() as client:
+        t = await client.post(f"{KEYCLOAK_URL}/realms/master/protocol/openid-connect/token",
+            data={"client_id": "admin-cli", "grant_type": "password", "username": "admin", "password": "admin_master_password"})
+        tok = t.json()["access_token"]
+        u = await client.get(f"{KEYCLOAK_URL}/admin/realms/blipp/users?username=test789@blipp.com",
+            headers={"Authorization": f"Bearer {tok}"})
+        print(u.json())
+asyncio.run(main())
 </file>
 
 <file path="test_upload.sh">
@@ -14613,6 +14727,25 @@ spec:
             failureThreshold: 3
 </file>
 
+<file path="k8s/auth/service.yaml">
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: auth
+    app.kubernetes.io/part-of: blipp
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8006
+      targetPort: 8006
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: auth
+</file>
+
 <file path="k8s/content-ingest/deployment.yaml">
 apiVersion: apps/v1
 kind: Deployment
@@ -17456,253 +17589,6 @@ GORSE_API_URL=http://gorse.blipp.svc.cluster.local:8088
 GORSE_API_KEY=
 </file>
 
-<file path="apps/blipp/lib/store/sessionStore.ts">
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { create } from 'zustand';
-import { ApiError, authApi } from '../api';
-import type { AuthFailure, SessionStatus, User } from '../types';
-
-// ─── Storage Keys ─────────────────────────────────────────────────────────────
-
-const KEY_ACCESS = 'blipp:access_token';
-const KEY_REFRESH = 'blipp:refresh_token';
-
-// ─── State ────────────────────────────────────────────────────────────────────
-
-interface SessionStore {
-  status: SessionStatus;
-  user: User | null;
-  accessToken: string | null;
-  refreshToken: string | null;
-  tokens: { accessToken: string; refreshToken?: string } | null;
-
-  // UI feedback
-  isSubmitting: boolean;
-  error: AuthFailure | null;
-
-  // Actions
-  initialize: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
-  signOut: () => Promise<void>;
-  setSessionTokens: (tokens: { accessToken: string; refreshToken?: string }, user?: User | null) => Promise<void>;
-  clearSession: () => void;
-  clearError: () => void;
-  refreshSession: () => Promise<boolean>;
-}
-
-// ─── Store ────────────────────────────────────────────────────────────────────
-
-export const useSessionStore = create<SessionStore>((set, get) => ({
-  status: 'loading',
-  user: null,
-  accessToken: null,
-  refreshToken: null,
-  tokens: null,
-  isSubmitting: false,
-  error: null,
-
-  async initialize() {
-    try {
-      const [access, refresh] = await AsyncStorage.multiGet([KEY_ACCESS, KEY_REFRESH]);
-      const accessToken = access[1];
-      const refreshToken = refresh[1];
-
-      if (!accessToken || !refreshToken) {
-        set({ status: 'unauthenticated', tokens: null });
-        return;
-      }
-
-      // Validate stored token
-      try {
-        const user = await authApi.me(accessToken);
-        set({
-          status: 'authenticated',
-          user,
-          accessToken,
-          refreshToken,
-          tokens: { accessToken, refreshToken },
-        });
-      } catch (err) {
-        // Try refresh
-        if (refreshToken) {
-          const ok = await get().refreshSession();
-          if (!ok) {
-            await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
-            set({ status: 'unauthenticated', accessToken: null, refreshToken: null, tokens: null });
-          }
-        } else {
-          set({ status: 'unauthenticated', tokens: null });
-        }
-      }
-    } catch {
-      set({ status: 'unauthenticated', tokens: null });
-    }
-  },
-
-  async signIn(email, password) {
-    set({ isSubmitting: true, error: null });
-    try {
-      // 1. Post to Keycloak token endpoint
-      const keycloakUrl = process.env.EXPO_PUBLIC_KEYCLOAK_URL?.replace(/\/+$/, '') || 'http://localhost:8419/keycloak';
-      const tokenEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/token`;
-      
-      const params = new URLSearchParams();
-      params.append('client_id', 'blipp-app');
-      params.append('grant_type', 'password');
-      params.append('username', email);
-      params.append('password', password);
-      params.append('scope', 'openid profile email');
-
-      const tokenRes = await fetch(tokenEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-      });
-
-      const tokenData = await tokenRes.json().catch(() => null);
-
-      if (!tokenRes.ok) {
-        throw new Error(tokenData?.error_description || 'Login failed');
-      }
-
-      const accessToken = tokenData.access_token;
-      const refreshToken = tokenData.refresh_token;
-
-      // 2. Fetch User Profile
-      const userinfoEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/userinfo`;
-      const userRes = await fetch(userinfoEndpoint, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      
-      const userData = await userRes.json().catch(() => null);
-      if (!userRes.ok) {
-        throw new Error('Failed to fetch user profile');
-      }
-
-      const displayName = userData.name || (userData.first_name ? `${userData.first_name} ${userData.last_name || ''}`.trim() : undefined);
-      const user: User = {
-        id: userData.sub || '',
-        email: userData.email || email,
-        username: userData.preferred_username || '',
-        displayName: displayName || userData.preferred_username || '',
-        avatarUrl: userData.picture,
-      };
-
-      await AsyncStorage.multiSet([
-        [KEY_ACCESS, accessToken],
-        [KEY_REFRESH, refreshToken],
-      ]);
-
-      set({
-        status: 'authenticated',
-        user,
-        accessToken,
-        refreshToken,
-        tokens: { accessToken, refreshToken },
-        isSubmitting: false,
-      });
-    } catch (err) {
-      set({ isSubmitting: false, error: toFailure(err) });
-    }
-  },
-
-  async signUpWithEmail(username, email, password) {
-    set({ isSubmitting: true, error: null });
-    try {
-      // In-app registration via API is disabled for security reasons
-      // Users should be redirected to the web portal or standard OIDC flow
-      throw new Error('In-app registration is disabled. Please sign up via the web portal.');
-    } catch (err) {
-      set({ isSubmitting: false, error: toFailure(err) });
-    }
-  },
-
-  async signOut() {
-    const { accessToken } = get();
-    if (accessToken) {
-      await authApi.logout(accessToken);
-    }
-    await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
-    set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null, tokens: null });
-  },
-
-  async setSessionTokens(tokens, user) {
-    await AsyncStorage.multiSet([
-      [KEY_ACCESS, tokens.accessToken],
-      ...(tokens.refreshToken ? [[KEY_REFRESH, tokens.refreshToken]] as const : []),
-    ]);
-    set({
-      status: 'authenticated',
-      user: user ?? { id: 'user_local', email: '', username: 'user', displayName: 'User' },
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken ?? null,
-      tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
-      isSubmitting: false,
-      error: null,
-    });
-  },
-
-  clearSession() {
-    void AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
-    set({
-      status: 'unauthenticated',
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      tokens: null,
-      error: null,
-    });
-  },
-
-  clearError() {
-    set({ error: null });
-  },
-
-  async refreshSession() {
-    const { refreshToken } = get();
-    if (!refreshToken) return false;
-    try {
-      const tokens = await authApi.refresh(refreshToken);
-      const user = await authApi.me(tokens.accessToken);
-      await AsyncStorage.multiSet([
-        [KEY_ACCESS, tokens.accessToken],
-        [KEY_REFRESH, tokens.refreshToken],
-      ]);
-      set({
-        status: 'authenticated',
-        user,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  },
-}));
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function toFailure(err: unknown): AuthFailure {
-  if (err instanceof Error) {
-    const msg = err.message.toLowerCase();
-    if (msg.includes('invalid credentials') || msg.includes('unauthorized') || msg.includes('invalid user credentials')) {
-      return { field: 'credentials', message: 'Invalid email or password.' };
-    }
-    if (msg.includes('email') && msg.includes('already')) {
-      return { field: 'email', message: 'An account with this email already exists.' };
-    }
-    if (msg.includes('username') && msg.includes('already')) {
-      return { field: 'username', message: 'This username is taken.' };
-    }
-    return { field: 'general', message: err.message };
-  }
-  return { field: 'general', message: 'Something went wrong. Please try again.' };
-}
-</file>
-
 <file path="apps/blipp/lib/palette.ts">
 export const darkTheme = {
   // New Theme Standard
@@ -18268,452 +18154,6 @@ const styles = StyleSheet.create({
 });
 </file>
 
-<file path="apps/blipp/app/auth/sign-in.tsx">
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { Link, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { api, profileApi } from '../../lib/api';
-import { useSessionStore } from '../../lib/store/sessionStore';
-import { StatusAlertMark } from '@/components/common/Icons';
-
-export default function SignInScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const status = useSessionStore((s) => s.status);
-  const error = useSessionStore((s) => s.error);
-  const isSubmitting = useSessionStore((s) => s.isSubmitting);
-  const signIn = useSessionStore((s) => s.signIn);
-  const user = useSessionStore((s) => s.user);
-
-  // Soundwave pulsation animation
-  const wave1 = useRef(new Animated.Value(0.4)).current;
-  const wave2 = useRef(new Animated.Value(0.8)).current;
-  const wave3 = useRef(new Animated.Value(0.5)).current;
-  const wave4 = useRef(new Animated.Value(0.9)).current;
-  const wave5 = useRef(new Animated.Value(0.3)).current;
-
-  useEffect(() => {
-    const createPulse = (val: Animated.Value, duration: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, {
-            toValue: 1,
-            duration,
-            useNativeDriver: true,
-          }),
-          Animated.timing(val, {
-            toValue: 0.25,
-            duration,
-            useNativeDriver: true,
-          }),
-        ]),
-      );
-
-    const a1 = createPulse(wave1, 550);
-    const a2 = createPulse(wave2, 420);
-    const a3 = createPulse(wave3, 620);
-    const a4 = createPulse(wave4, 480);
-    const a5 = createPulse(wave5, 590);
-
-    a1.start();
-    a2.start();
-    a3.start();
-    a4.start();
-    a5.start();
-
-    return () => {
-      a1.stop();
-      a2.stop();
-      a3.stop();
-      a4.stop();
-      a5.stop();
-    };
-  }, [wave1, wave2, wave3, wave4, wave5]);
-
-  useEffect(() => {
-    if (status === 'authenticated') {
-      const checkProfile = async () => {
-        try {
-          await profileApi.getMyProfile();
-        } catch (err: any) {
-          if (err.status === 404 && user) {
-            await profileApi.claimUsername({
-              username: user.username || user.email.split('@')[0],
-              display_name: user.displayName || user.email.split('@')[0],
-            });
-          }
-        }
-        router.replace('/(tabs)');
-      };
-      checkProfile();
-    }
-  }, [status, router, user]);
-
-  async function handleSignIn() {
-    if (!email.trim() || !password) {
-      setServerError('Please enter both email and password.');
-      return;
-    }
-
-    setServerError(null);
-    await signIn(email.trim(), password);
-  }
-
-  return (
-    <View style={styles.container}>
-      {/* Immersive Ambient Gradient Background */}
-      <LinearGradient
-        colors={['#07080B', '#11131F', '#07080B']}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-      />
-
-      <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
-        >
-          {/* Top 40%: App Branding & Pulsating Soundwave */}
-          <View style={styles.topBrandingSection}>
-            <View style={styles.soundwaveCluster}>
-              {[wave1, wave2, wave3, wave4, wave5].map((w, idx) => (
-                <Animated.View
-                  key={idx}
-                  style={[
-                    styles.soundwaveBar,
-                    {
-                      transform: [{ scaleY: w }],
-                      backgroundColor: idx % 2 === 0 ? '#8B5CF6' : '#EC4899',
-                    },
-                  ]}
-                />
-              ))}
-            </View>
-
-            <Text style={styles.brandTitle}>BLIPPS</Text>
-            <Text style={styles.brandTagline}>Drop in. Speak up.</Text>
-          </View>
-
-          {/* Bottom 60%: Sleek Modern Bottom Sheet Form */}
-          <View style={styles.bottomSheetCard}>
-            <View style={styles.sheetHandle} />
-
-            <Text style={styles.sheetTitle}>Sign In</Text>
-            <Text style={styles.sheetSubtitle}>Access your audio feed and community</Text>
-
-            {/* Clean Server Error Banner (Positioned above submit button) */}
-            {(serverError || error) && (
-              <View style={styles.errorContainer} accessibilityRole="alert">
-                <StatusAlertMark size={16} color="#EF4444" />
-                <Text style={styles.errorText}>{serverError || error?.message}</Text>
-              </View>
-            )}
-
-            {/* Email / Username Input */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email or Username</Text>
-              <TextInput
-                style={[
-                  styles.pillInput,
-                  focusedField === 'email' && styles.pillInputFocused,
-                ]}
-                value={email}
-                onChangeText={(text) => {
-                  setEmail(text);
-                  if (serverError) setServerError(null);
-                }}
-                onFocus={() => setFocusedField('email')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="name@blipp.com"
-                placeholderTextColor="rgba(255, 255, 255, 0.3)"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="next"
-              />
-            </View>
-
-            {/* Password Input */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <TextInput
-                style={[
-                  styles.pillInput,
-                  focusedField === 'password' && styles.pillInputFocused,
-                ]}
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  if (serverError) setServerError(null);
-                }}
-                onFocus={() => setFocusedField('password')}
-                onBlur={() => setFocusedField(null)}
-                placeholder="••••••••"
-                placeholderTextColor="rgba(255, 255, 255, 0.3)"
-                secureTextEntry
-                autoCapitalize="none"
-                returnKeyType="done"
-                onSubmitEditing={handleSignIn}
-              />
-            </View>
-
-            {/* Primary Action Button (Violet-to-Pink gradient) */}
-            <Pressable
-              onPress={handleSignIn}
-              disabled={isSubmitting}
-              style={({ pressed }) => [
-                styles.submitButtonWrapper,
-                pressed && styles.buttonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Sign In"
-            >
-              <LinearGradient
-                colors={['#8B5CF6', '#EC4899']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.submitGradient}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Sign In</Text>
-                )}
-              </LinearGradient>
-            </Pressable>
-
-            {/* Switch to Sign Up */}
-            <View style={styles.switchAuthRow}>
-              <Text style={styles.switchAuthPrompt}>New to Blipps? </Text>
-              <Link href="/auth/sign-up" asChild>
-                <Pressable hitSlop={8}>
-                  <Text style={styles.switchAuthLink}>Create Account</Text>
-                </Pressable>
-              </Link>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#07080B',
-  },
-  keyboardAvoid: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'space-between',
-  },
-
-  // Top 40% Branding
-  topBrandingSection: {
-    height: 240,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  soundwaveCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    gap: 6,
-    marginBottom: 16,
-  },
-  soundwaveBar: {
-    width: 6,
-    height: 40,
-    borderRadius: 3,
-  },
-  brandTitle: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 36,
-    color: '#FFFFFF',
-    letterSpacing: 4,
-    textShadowColor: 'rgba(139, 92, 246, 0.65)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 18,
-  },
-  brandTagline: {
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.65)',
-    marginTop: 6,
-    letterSpacing: 0.5,
-  },
-
-  // Bottom 60% Modern Sheet
-  bottomSheetCard: {
-    backgroundColor: '#0E111A',
-    borderTopLeftRadius: 36,
-    borderTopRightRadius: 36,
-    borderWidth: 1,
-    borderColor: '#1F2433',
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 36,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 24,
-    elevation: 20,
-  },
-  sheetHandle: {
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  sheetTitle: {
-    fontFamily: 'Sora_700Bold',
-    fontSize: 24,
-    color: '#FFFFFF',
-    letterSpacing: -0.5,
-  },
-  sheetSubtitle: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.5)',
-    marginTop: 4,
-    marginBottom: 20,
-  },
-
-  // Form Fields
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontFamily: 'PlusJakartaSans_600SemiBold',
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.75)',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  pillInput: {
-    backgroundColor: '#161922',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: '#262B3A',
-    height: 52,
-    paddingHorizontal: 20,
-    color: '#FFFFFF',
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 15,
-  },
-  pillInputFocused: {
-    borderColor: '#8B5CF6',
-    backgroundColor: '#191D28',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-  },
-
-  // Error Banner
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 16,
-    gap: 8,
-  },
-  errorText: {
-    flex: 1,
-    fontFamily: 'PlusJakartaSans_500Medium',
-    fontSize: 12,
-    color: '#F87171',
-  },
-
-  // Primary Action Button
-  submitButtonWrapper: {
-    marginTop: 8,
-    borderRadius: 24,
-    height: 54,
-    overflow: 'hidden',
-    shadowColor: '#8B5CF6',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  submitGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitButtonText: {
-    fontFamily: 'PlusJakartaSans_700Bold',
-    fontSize: 16,
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
-  buttonPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.985 }],
-  },
-
-  // Footer Navigation
-  switchAuthRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  switchAuthPrompt: {
-    fontFamily: 'PlusJakartaSans_400Regular',
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.55)',
-  },
-  switchAuthLink: {
-    fontFamily: 'PlusJakartaSans_700Bold',
-    fontSize: 14,
-    color: '#A78BFA',
-  },
-});
-</file>
-
 <file path="apps/blipp/lib/types.ts">
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
@@ -18902,6 +18342,53 @@ export interface SessionState {
 }
 </file>
 
+<file path="k8s/auth/deployment.yaml">
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: blipp
+  labels:
+    app.kubernetes.io/name: auth
+    app.kubernetes.io/part-of: blipp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth
+    spec:
+      containers:
+        - name: auth
+          image: blipp-auth:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8006
+          env:
+            - name: KEYCLOAK_URL
+              value: "http://keycloak.blipp.svc.cluster.local:8080/keycloak"
+            - name: KEYCLOAK_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: blipp-secrets
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: blipp-secrets
+                  key: KEYCLOAK_ADMIN_PASSWORD
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+</file>
+
 <file path="services/feed/app/api/v1/feed.py">
 import os
 import json
@@ -19054,37 +18541,60 @@ async def get_feed(
                 )
                 hydrated_rows = list(rows)
 
-            # Always fetch the chronological slice as well. Redis/Gorse can
-            # legitimately be empty on cold start, and the authoritative slice
-            # prevents recommendation ordering from skipping newly published
-            # records between cursor pages.
-            fallback_rows = await conn.fetch(
-                """
-                    SELECT 
-                        b.blipp_id, 
-                        b.creator_id, 
-                        b.title, 
-                        b.description,
-                        b.audio_url, 
-                        b.audio_variants, 
-                        b.duration_seconds,
-                        b.created_at,
-                        u.username,
-                        COALESCE(u.display_name, u.username, 'Creator') AS display_name,
-                        u.avatar_url
-                    FROM blipps b
-                    LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                    WHERE b.status = 'published'
-                      AND NOT (b.blipp_id = ANY($1::uuid[]))
-                      AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
-                    ORDER BY b.created_at DESC, b.blipp_id DESC
-                    LIMIT $4;
-                """,
-                [r["blipp_id"] for r in hydrated_rows],
-                cursor_created_at,
-                cursor_blipp_uuid,
-                fetch_limit,
-            )
+            if hydrated_rows:
+                fallback_rows = await conn.fetch(
+                    """
+                        SELECT 
+                            b.blipp_id, 
+                            b.creator_id, 
+                            b.title, 
+                            b.description,
+                            b.audio_url, 
+                            b.audio_variants, 
+                            b.duration_seconds,
+                            b.created_at,
+                            u.username,
+                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
+                            u.avatar_url
+                        FROM blipps b
+                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
+                        WHERE b.status = 'published'
+                          AND NOT (b.blipp_id = ANY($1::uuid[]))
+                          AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
+                        ORDER BY b.created_at DESC, b.blipp_id DESC
+                        LIMIT $4;
+                    """,
+                    [r["blipp_id"] for r in hydrated_rows],
+                    cursor_created_at,
+                    cursor_blipp_uuid,
+                    fetch_limit,
+                )
+            else:
+                fallback_rows = await conn.fetch(
+                    """
+                        SELECT 
+                            b.blipp_id, 
+                            b.creator_id, 
+                            b.title, 
+                            b.description,
+                            b.audio_url, 
+                            b.audio_variants, 
+                            b.duration_seconds,
+                            b.created_at,
+                            u.username,
+                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
+                            u.avatar_url
+                        FROM blipps b
+                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
+                        WHERE b.status = 'published'
+                          AND ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
+                        ORDER BY b.created_at DESC, b.blipp_id DESC
+                        LIMIT $3;
+                    """,
+                    cursor_created_at,
+                    cursor_blipp_uuid,
+                    fetch_limit,
+                )
             hydrated_rows.extend(fallback_rows)
 
     except Exception as e:
@@ -19609,7 +19119,7 @@ export default function UploadScreen() {
         setDuration(0);
         setSuccessMessage(null);
         resetUploadStore();
-        router.replace('/(tabs)');
+        router.push('/');
       }, 1000);
     } catch (err: unknown) {
       const msg =
@@ -20030,6 +19540,719 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
+</file>
+
+<file path="apps/blipp/app/auth/sign-in.tsx">
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Link, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { api, profileApi } from '../../lib/api';
+import { useSessionStore } from '../../lib/store/sessionStore';
+import { StatusAlertMark } from '@/components/common/Icons';
+
+export default function SignInScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const status = useSessionStore((s) => s.status);
+  const error = useSessionStore((s) => s.error);
+  const isSubmitting = useSessionStore((s) => s.isSubmitting);
+  const signIn = useSessionStore((s) => s.signIn);
+  const user = useSessionStore((s) => s.user);
+
+  // Soundwave pulsation animation
+  const wave1 = useRef(new Animated.Value(0.4)).current;
+  const wave2 = useRef(new Animated.Value(0.8)).current;
+  const wave3 = useRef(new Animated.Value(0.5)).current;
+  const wave4 = useRef(new Animated.Value(0.9)).current;
+  const wave5 = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const createPulse = (val: Animated.Value, duration: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(val, {
+            toValue: 1,
+            duration,
+            useNativeDriver: true,
+          }),
+          Animated.timing(val, {
+            toValue: 0.25,
+            duration,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+
+    const a1 = createPulse(wave1, 550);
+    const a2 = createPulse(wave2, 420);
+    const a3 = createPulse(wave3, 620);
+    const a4 = createPulse(wave4, 480);
+    const a5 = createPulse(wave5, 590);
+
+    a1.start();
+    a2.start();
+    a3.start();
+    a4.start();
+    a5.start();
+
+    return () => {
+      a1.stop();
+      a2.stop();
+      a3.stop();
+      a4.stop();
+      a5.stop();
+    };
+  }, [wave1, wave2, wave3, wave4, wave5]);
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      const checkProfile = async () => {
+        try {
+          await profileApi.getMyProfile();
+        } catch (err: any) {
+          if (err.status === 404 && user) {
+            await profileApi.claimUsername({
+              username: user.username || user.email.split('@')[0],
+              display_name: user.displayName || user.email.split('@')[0],
+            });
+          }
+        }
+        router.replace('/(tabs)');
+      };
+      checkProfile();
+    }
+  }, [status, router, user]);
+
+  async function handleSignIn() {
+    if (!email.trim() || !password) {
+      setServerError('Please enter both email and password.');
+      return;
+    }
+
+    setServerError(null);
+    await signIn(email.trim(), password);
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* Immersive Ambient Gradient Background */}
+      <LinearGradient
+        colors={['#07080B', '#11131F', '#07080B']}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+      />
+
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoid}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          bounces={false}
+        >
+          {/* Top 40%: App Branding & Pulsating Soundwave */}
+          <View style={styles.topBrandingSection}>
+            <View style={styles.soundwaveCluster}>
+              {[wave1, wave2, wave3, wave4, wave5].map((w, idx) => (
+                <Animated.View
+                  key={idx}
+                  style={[
+                    styles.soundwaveBar,
+                    {
+                      transform: [{ scaleY: w }],
+                      backgroundColor: idx % 2 === 0 ? '#8B5CF6' : '#EC4899',
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+
+            <Text style={styles.brandTitle}>BLIPPS</Text>
+            <Text style={styles.brandTagline}>Drop in. Speak up.</Text>
+          </View>
+
+          {/* Bottom 60%: Sleek Modern Bottom Sheet Form */}
+          <View style={styles.bottomSheetCard}>
+            <View style={styles.sheetHandle} />
+
+            <Text style={styles.sheetTitle}>Sign In</Text>
+            <Text style={styles.sheetSubtitle}>Access your audio feed and community</Text>
+
+            {/* Clean Server Error Banner (Positioned above submit button) */}
+            {(serverError || error) && (
+              <View style={styles.errorContainer} accessibilityRole="alert">
+                <StatusAlertMark size={16} color="#EF4444" />
+                <Text style={styles.errorText}>{serverError || error?.message}</Text>
+              </View>
+            )}
+
+            {/* Email / Username Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email or Username</Text>
+              <TextInput
+                style={[
+                  styles.pillInput,
+                  focusedField === 'email' && styles.pillInputFocused,
+                ]}
+                value={email}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  if (serverError) setServerError(null);
+                }}
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="name@blipp.com"
+                placeholderTextColor="rgba(255, 255, 255, 0.3)"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+              />
+            </View>
+
+            {/* Password Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={[
+                  styles.pillInput,
+                  focusedField === 'password' && styles.pillInputFocused,
+                ]}
+                value={password}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (serverError) setServerError(null);
+                }}
+                onFocus={() => setFocusedField('password')}
+                onBlur={() => setFocusedField(null)}
+                placeholder="••••••••"
+                placeholderTextColor="rgba(255, 255, 255, 0.3)"
+                secureTextEntry
+                autoCapitalize="none"
+                returnKeyType="done"
+                onSubmitEditing={handleSignIn}
+              />
+            </View>
+
+            {/* Primary Action Button (Violet-to-Pink gradient) */}
+            <Pressable
+              onPress={handleSignIn}
+              disabled={isSubmitting}
+              style={({ pressed }) => [
+                styles.submitButtonWrapper,
+                pressed && styles.buttonPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Sign In"
+            >
+              <LinearGradient
+                colors={['#8B5CF6', '#EC4899']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.submitGradient}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Sign In</Text>
+                )}
+              </LinearGradient>
+            </Pressable>
+
+            {/* Switch to Sign Up */}
+            <View style={styles.switchAuthRow}>
+              <Text style={styles.switchAuthPrompt}>New to Blipps? </Text>
+              <Link href="/auth/sign-up" asChild>
+                <Pressable hitSlop={8}>
+                  <Text style={styles.switchAuthLink}>Create Account</Text>
+                </Pressable>
+              </Link>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#07080B',
+  },
+  keyboardAvoid: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'space-between',
+  },
+
+  // Top 40% Branding
+  topBrandingSection: {
+    height: 240,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  soundwaveCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    gap: 6,
+    marginBottom: 16,
+  },
+  soundwaveBar: {
+    width: 6,
+    height: 40,
+    borderRadius: 3,
+  },
+  brandTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 36,
+    color: '#FFFFFF',
+    letterSpacing: 4,
+    textShadowColor: 'rgba(139, 92, 246, 0.65)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
+  },
+  brandTagline: {
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 15,
+    color: 'rgba(255, 255, 255, 0.65)',
+    marginTop: 6,
+    letterSpacing: 0.5,
+  },
+
+  // Bottom 60% Modern Sheet
+  bottomSheetCard: {
+    backgroundColor: '#0E111A',
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
+    borderWidth: 1,
+    borderColor: '#1F2433',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 36,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  sheetHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  sheetTitle: {
+    fontFamily: 'Sora_700Bold',
+    fontSize: 24,
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  sheetSubtitle: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.5)',
+    marginTop: 4,
+    marginBottom: 20,
+  },
+
+  // Form Fields
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontFamily: 'PlusJakartaSans_600SemiBold',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  pillInput: {
+    backgroundColor: '#161922',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#262B3A',
+    height: 52,
+    paddingHorizontal: 20,
+    color: '#FFFFFF',
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 15,
+  },
+  pillInputFocused: {
+    borderColor: '#8B5CF6',
+    backgroundColor: '#191D28',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+  },
+
+  // Error Banner
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    fontFamily: 'PlusJakartaSans_500Medium',
+    fontSize: 12,
+    color: '#F87171',
+  },
+
+  // Primary Action Button
+  submitButtonWrapper: {
+    marginTop: 8,
+    borderRadius: 24,
+    height: 54,
+    overflow: 'hidden',
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  submitGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitButtonText: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 16,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  buttonPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.985 }],
+  },
+
+  // Footer Navigation
+  switchAuthRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  switchAuthPrompt: {
+    fontFamily: 'PlusJakartaSans_400Regular',
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.55)',
+  },
+  switchAuthLink: {
+    fontFamily: 'PlusJakartaSans_700Bold',
+    fontSize: 14,
+    color: '#A78BFA',
+  },
+});
+</file>
+
+<file path="apps/blipp/lib/store/sessionStore.ts">
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { ApiError, authApi } from '../api';
+import type { AuthFailure, SessionStatus, User } from '../types';
+
+// ─── Storage Keys ─────────────────────────────────────────────────────────────
+
+const KEY_ACCESS = 'blipp:access_token';
+const KEY_REFRESH = 'blipp:refresh_token';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+interface SessionStore {
+  status: SessionStatus;
+  user: User | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  tokens: { accessToken: string; refreshToken?: string } | null;
+
+  // UI feedback
+  isSubmitting: boolean;
+  error: AuthFailure | null;
+
+  // Actions
+  initialize: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  setSessionTokens: (tokens: { accessToken: string; refreshToken?: string }, user?: User | null) => Promise<void>;
+  clearSession: () => void;
+  clearError: () => void;
+  refreshSession: () => Promise<boolean>;
+}
+
+// ─── Store ────────────────────────────────────────────────────────────────────
+
+export const useSessionStore = create<SessionStore>((set, get) => ({
+  status: 'loading',
+  user: null,
+  accessToken: null,
+  refreshToken: null,
+  tokens: null,
+  isSubmitting: false,
+  error: null,
+
+  async initialize() {
+    try {
+      const [access, refresh] = await AsyncStorage.multiGet([KEY_ACCESS, KEY_REFRESH]);
+      const accessToken = access[1];
+      const refreshToken = refresh[1];
+
+      if (!accessToken || !refreshToken) {
+        set({ status: 'unauthenticated', tokens: null });
+        return;
+      }
+
+      // Validate stored token
+      try {
+        const user = await authApi.me(accessToken);
+        set({
+          status: 'authenticated',
+          user,
+          accessToken,
+          refreshToken,
+          tokens: { accessToken, refreshToken },
+        });
+      } catch (err) {
+        // Try refresh
+        if (refreshToken) {
+          const ok = await get().refreshSession();
+          if (!ok) {
+            await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+            set({ status: 'unauthenticated', accessToken: null, refreshToken: null, tokens: null });
+          }
+        } else {
+          set({ status: 'unauthenticated', tokens: null });
+        }
+      }
+    } catch {
+      set({ status: 'unauthenticated', tokens: null });
+    }
+  },
+
+  async signIn(email, password) {
+    set({ isSubmitting: true, error: null });
+    try {
+      // 1. Post to Keycloak token endpoint
+      const keycloakUrl = process.env.EXPO_PUBLIC_KEYCLOAK_URL?.replace(/\/+$/, '') || 'http://localhost:8419/keycloak';
+      const tokenEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/token`;
+      
+      const params = new URLSearchParams();
+      params.append('client_id', 'blipp-app');
+      params.append('grant_type', 'password');
+      params.append('username', email);
+      params.append('password', password);
+      params.append('scope', 'openid profile email');
+
+      const tokenRes = await fetch(tokenEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+
+      const tokenData = await tokenRes.json().catch(() => null);
+
+      if (!tokenRes.ok) {
+        throw new Error(tokenData?.error_description || 'Login failed');
+      }
+
+      const accessToken = tokenData.access_token;
+      const refreshToken = tokenData.refresh_token;
+
+      // 2. Fetch User Profile
+      const userinfoEndpoint = `${keycloakUrl}/realms/blipp/protocol/openid-connect/userinfo`;
+      const userRes = await fetch(userinfoEndpoint, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      const userData = await userRes.json().catch(() => null);
+      if (!userRes.ok) {
+        throw new Error('Failed to fetch user profile');
+      }
+
+      const displayName = userData.name || (userData.first_name ? `${userData.first_name} ${userData.last_name || ''}`.trim() : undefined);
+      const user: User = {
+        id: userData.sub || '',
+        email: userData.email || email,
+        username: userData.preferred_username || '',
+        displayName: displayName || userData.preferred_username || '',
+        avatarUrl: userData.picture,
+      };
+
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, accessToken],
+        [KEY_REFRESH, refreshToken],
+      ]);
+
+      set({
+        status: 'authenticated',
+        user,
+        accessToken,
+        refreshToken,
+        tokens: { accessToken, refreshToken },
+        isSubmitting: false,
+      });
+    } catch (err) {
+      set({ isSubmitting: false, error: toFailure(err) });
+    }
+  },
+
+  async signUpWithEmail(username, email, password) {
+    set({ isSubmitting: true, error: null });
+    try {
+      const pwd = password || 'DefaultOtpPassword123!';
+      const res = await authApi.register({ username, email, password: pwd, displayName: username });
+      
+      const user: User = {
+        id: res.user.id,
+        email: res.user.email,
+        username: username,
+        displayName: username,
+      };
+
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, res.access_token],
+        [KEY_REFRESH, res.refresh_token],
+      ]);
+
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: res.access_token,
+        refreshToken: res.refresh_token,
+        tokens: { accessToken: res.access_token, refreshToken: res.refresh_token },
+        isSubmitting: false,
+      });
+    } catch (err) {
+      set({ isSubmitting: false, error: toFailure(err) });
+    }
+  },
+
+  async signOut() {
+    const { accessToken } = get();
+    if (accessToken) {
+      await authApi.logout(accessToken);
+    }
+    await AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+    set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null, tokens: null });
+  },
+
+  async setSessionTokens(tokens, user) {
+    await AsyncStorage.multiSet([
+      [KEY_ACCESS, tokens.accessToken],
+      ...(tokens.refreshToken ? [[KEY_REFRESH, tokens.refreshToken]] as const : []),
+    ]);
+    set({
+      status: 'authenticated',
+      user: user ?? { id: 'user_local', email: '', username: 'user', displayName: 'User' },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken ?? null,
+      tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+      isSubmitting: false,
+      error: null,
+    });
+  },
+
+  clearSession() {
+    void AsyncStorage.multiRemove([KEY_ACCESS, KEY_REFRESH]);
+    set({
+      status: 'unauthenticated',
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      tokens: null,
+      error: null,
+    });
+  },
+
+  clearError() {
+    set({ error: null });
+  },
+
+  async refreshSession() {
+    const { refreshToken } = get();
+    if (!refreshToken) return false;
+    try {
+      const tokens = await authApi.refresh(refreshToken);
+      const user = await authApi.me(tokens.accessToken);
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, tokens.accessToken],
+        [KEY_REFRESH, tokens.refreshToken],
+      ]);
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+}));
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function toFailure(err: unknown): AuthFailure {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    if (msg.includes('invalid credentials') || msg.includes('unauthorized') || msg.includes('invalid user credentials')) {
+      return { field: 'credentials', message: 'Invalid email or password.' };
+    }
+    if (msg.includes('email') && msg.includes('already')) {
+      return { field: 'email', message: 'An account with this email already exists.' };
+    }
+    if (msg.includes('username') && msg.includes('already')) {
+      return { field: 'username', message: 'This username is taken.' };
+    }
+    return { field: 'general', message: err.message };
+  }
+  return { field: 'general', message: 'Something went wrong. Please try again.' };
+}
 </file>
 
 <file path="apps/blipp/lib/upload/audioUpload.ts">
@@ -20723,8 +20946,6 @@ import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import type { AudioPost, FeedSort } from '@/lib/types';
 
-const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
-
 const SORTS: { value: FeedSort; label: string }[] = [
   { value: 'most_listened', label: 'Trending' },
   { value: 'newest', label: 'Newest' },
@@ -20746,6 +20967,7 @@ export default function FeedScreen() {
   const userId = useSessionStore((s) => s.user?.id ?? null);
 
   const [activeIndex, setActiveIndex] = useState(0);
+  const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<AudioPost>>(null);
 
   useEffect(() => {
@@ -20754,10 +20976,12 @@ export default function FeedScreen() {
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const idx = Math.round(e.nativeEvent.contentOffset.y / WINDOW_HEIGHT);
-      setActiveIndex(idx);
+      if (feedHeight > 0) {
+        const idx = Math.round(e.nativeEvent.contentOffset.y / feedHeight);
+        setActiveIndex(idx);
+      }
     },
-    [],
+    [feedHeight],
   );
 
   const handleAutoSkip = useCallback(
@@ -20780,18 +21004,18 @@ export default function FeedScreen() {
       <AudioReel
         post={item}
         isActive={index === activeIndex}
-        height={WINDOW_HEIGHT}
+        height={feedHeight}
         onLike={() => toggleLike(item.id)}
         onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
       />
     ),
-    [activeIndex, handleAutoSkip, posts, toggleLike],
+    [activeIndex, handleAutoSkip, posts, toggleLike, feedHeight],
   );
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={(e) => setFeedHeight(e.nativeEvent.layout.height)}>
       {/* Studio Header Bar & Stories Tray */}
       <View
         style={[
@@ -20847,7 +21071,7 @@ export default function FeedScreen() {
           onScroll={onScroll}
           scrollEventThrottle={16}
           pagingEnabled={true}
-          snapToInterval={WINDOW_HEIGHT}
+          snapToInterval={feedHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           showsVerticalScrollIndicator={false}
@@ -20872,8 +21096,8 @@ export default function FeedScreen() {
             </View>
           }
           getItemLayout={(_data, index) => ({
-            length: WINDOW_HEIGHT,
-            offset: WINDOW_HEIGHT * index,
+            length: feedHeight,
+            offset: feedHeight * index,
             index,
           })}
         />
@@ -21066,6 +21290,174 @@ const styles = StyleSheet.create({
   },
   "private": true
 }
+</file>
+
+<file path="services/auth/app/api/v1/auth.py">
+import logging
+import os
+import httpx
+from fastapi import APIRouter, status, HTTPException
+from app.models.schemas import UserRegisterRequest
+
+logger = logging.getLogger("auth.api")
+router = APIRouter(tags=["Auth"])
+
+KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://keycloak.blipp.svc.cluster.local:8080")
+KEYCLOAK_ADMIN_USER = os.environ.get("KEYCLOAK_ADMIN_USER", "admin")
+KEYCLOAK_ADMIN_PASSWORD = os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "admin_master_password")
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register_user(payload: UserRegisterRequest):
+    username = payload.email.split('@')[0]
+    
+    async with httpx.AsyncClient() as client:
+        # 1. Get Admin Token
+        token_url = f"{KEYCLOAK_URL}/realms/master/protocol/openid-connect/token"
+        try:
+            token_resp = await client.post(
+                token_url,
+                data={
+                    "client_id": "admin-cli",
+                    "grant_type": "password",
+                    "username": KEYCLOAK_ADMIN_USER,
+                    "password": KEYCLOAK_ADMIN_PASSWORD
+                }
+            )
+            token_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to get admin token: {e.response.text}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+        admin_data = token_resp.json()
+        access_token = admin_data.get("access_token")
+
+        # 2. Create User in Blipp Realm
+        create_url = f"{KEYCLOAK_URL}/admin/realms/blipp/users"
+        user_data = {
+            "username": payload.email,
+            "email": payload.email,
+            "enabled": True,
+            "emailVerified": True,
+            "firstName": payload.display_name or username,
+            "lastName": "User",
+            "credentials": [{"type": "password", "value": payload.password, "temporary": False}],
+            "requiredActions": []
+        }
+        
+        try:
+            create_resp = await client.post(
+                create_url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=user_data
+            )
+            create_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == status.HTTP_409_CONFLICT:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
+            logger.error(f"Failed to create user: {e.response.text}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user")
+
+        # Keycloak returns 201 with a Location header for the new user, we can extract the user ID if needed.
+        # But we can also just login directly to get the token and user profile via userinfo.
+        
+        # 3. Login as new user
+        login_url = f"{KEYCLOAK_URL}/realms/blipp/protocol/openid-connect/token"
+        try:
+            login_resp = await client.post(
+                login_url,
+                data={
+                    "client_id": "blipp-app",
+                    "grant_type": "password",
+                    "username": payload.email,
+                    "password": payload.password
+                }
+            )
+            login_resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to login newly created user: {e.response.text}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to login newly created user")
+
+        login_data = login_resp.json()
+        import base64
+        import json
+        user_id = ""
+        try:
+            payload_part = login_data['access_token'].split('.')[1]
+            payload_part += '=' * (-len(payload_part) % 4)
+            decoded = base64.urlsafe_b64decode(payload_part)
+            jwt_data = json.loads(decoded)
+            user_id = jwt_data.get("sub", "")
+        except Exception as e:
+            logger.error(f"Failed to extract sub from JWT: {e}")
+
+        return {
+            "access_token": login_data.get("access_token"),
+            "refresh_token": login_data.get("refresh_token"),
+            "expires_in": login_data.get("expires_in"),
+            "user": {
+                "id": user_id,
+                "email": payload.email
+            }
+        }
+</file>
+
+<file path="services/auth/Dockerfile">
+# ─── Stage 1: Build virtual environment ─────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+RUN /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+
+# Install service dependencies
+COPY services/auth/requirements.txt .
+RUN sed -i '/libs\/common/d' requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Install shared core library directly into site-packages
+COPY libs/common /libs/common
+RUN /opt/venv/bin/pip install --no-cache-dir --no-deps /libs/common && \
+    cp -r /libs/common/blipp_common /opt/venv/lib/python3.11/site-packages/
+
+# Re-point the symlink so /opt/venv/bin/python resolves correctly in distroless
+RUN ln -sf /usr/bin/python3 /opt/venv/bin/python && \
+    ln -sf /usr/bin/python3 /opt/venv/bin/python3
+
+# ─── Stage 2: Distroless Runtime ───────────────────────────────────────────────
+FROM gcr.io/distroless/python3-debian12
+
+WORKDIR /app
+
+ENV PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin" \
+    PYTHONPATH="/app:/opt/venv/lib/python3.11/site-packages" \
+    PYTHONUNBUFFERED=1
+
+# Copy installed virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code
+COPY services/auth/app/ ./app/
+
+EXPOSE 8006
+
+# Non-shell exec form entrypoint using direct binary execution
+ENTRYPOINT ["/opt/venv/bin/python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8006"]
+</file>
+
+<file path="services/auth/requirements.txt">
+-e ../../libs/common
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic[email]==2.10.4
+email-validator==2.2.0
+pydantic-settings==2.7.1
+httpx==0.28.1
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.20
 </file>
 
 <file path="apps/blipp/lib/store/feedStore.ts">
@@ -21317,6 +21709,17 @@ spec:
 
 ---
 apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-auth
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /auth
+
+---
+apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: blipp-ingress
@@ -21329,6 +21732,19 @@ spec:
     - web
   routes:
 
+    # 1. Auth Service (/auth, /v1/auth)
+    - match: PathPrefix(`/auth`)
+      kind: Rule
+      middlewares:
+        - name: strip-auth
+      services:
+        - name: auth-service
+          port: 8006
+    - match: PathPrefix(`/v1/auth`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8006
 
     # 2. Content Ingest Service (/ingest, /v1/uploads, /v1/blipps)
     - match: PathPrefix(`/ingest`)
@@ -21557,6 +21973,15 @@ cd "${APP_DIR}"
 exec npx expo start --offline --clear "$@"
 </file>
 
+<file path="services/auth/app/models/schemas.py">
+from pydantic import BaseModel, EmailStr, Field
+
+class UserRegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    display_name: str | None = None
+</file>
+
 <file path="Makefile">
 CLUSTER_NAME := blipp-cluster
 NAMESPACE    := blipp
@@ -21568,7 +21993,8 @@ IMAGES := blipp-content-ingest:latest \
           blipp-messaging:latest \
           blipp-moderation:latest \
           blipp-transcode-worker:latest \
-          blipp-analytics-worker:latest
+          blipp-analytics-worker:latest \
+          blipp-auth:latest
 
 .PHONY: help all upgrade destroy cluster-up k3d-import build-all build-auth build-ingest \
         build-feed build-social build-messaging build-moderation build-transcode build-analytics k8s-init k8s-deploy \
@@ -21606,6 +22032,7 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running application services
 	@echo "Applying updated manifests to namespace $(NAMESPACE)..."
 	@kubectl apply -f k8s/secrets.yaml
+	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -21615,6 +22042,7 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl apply -f k8s/analytics-worker/
 	@kubectl apply -f k8s/ingress/
 	@echo "Triggering zero-downtime rolling restart..."
+	@kubectl rollout restart deployment/auth -n $(NAMESPACE)
 	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
 	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
 	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
@@ -21658,6 +22086,9 @@ k3d-import: ## Import all locally built Docker images into the k3d cluster
 # Container Builds (Context pinned to repository root for libs/common)
 # ==============================================================================
 
+build-auth:
+	docker build -t blipp-auth:latest -f services/auth/Dockerfile .
+
 build-ingest:
 	docker build -t blipp-content-ingest:latest -f services/content_ingest/Dockerfile .
 
@@ -21679,7 +22110,7 @@ build-transcode:
 build-analytics:
 	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
-build-all: build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
+build-all: build-auth build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
 
 # ==============================================================================
 # Kubernetes Infrastructure & Deployments
@@ -21708,6 +22139,7 @@ k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifes
 	@kubectl apply -f k8s/keycloak/
 	@kubectl apply -f k8s/gorse/
 	# Core microservices
+	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -21778,8 +22210,6 @@ import { useAudioPlayer } from '@/lib/audio/useAudioPlayer';
 import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
-
-const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -22033,7 +22463,7 @@ export function AudioReel({
 
   // Scrub bar interaction
   const handleScrub = (event: any) => {
-    const layoutWidth = event.nativeEvent.layout?.width || WINDOW_WIDTH;
+    const layoutWidth = event.nativeEvent.layout?.width || Dimensions.get('window').width;
     const clickX = event.nativeEvent.locationX;
     const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
     const targetSeconds = Math.floor(ratio * (durationSeconds || 30));
@@ -22042,7 +22472,7 @@ export function AudioReel({
 
   const displayDuration = durationSeconds || item?.duration || 0;
 
-  const reelHeight = height || WINDOW_HEIGHT;
+  const reelHeight = height || Dimensions.get('window').height;
 
   return (
     <View style={[styles.root, { height: reelHeight }]} testID="audio-reel-card">
@@ -22423,7 +22853,7 @@ export function AudioReel({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    width: WINDOW_WIDTH,
+    width: '100%',
     position: 'relative',
     backgroundColor: '#000000',
     overflow: 'hidden',
@@ -22493,7 +22923,7 @@ const styles = StyleSheet.create({
   floatingActionColumn: {
     position: 'absolute',
     right: 16,
-    bottom: 108,
+    bottom: 100,
     alignItems: 'center',
     gap: 16,
     zIndex: 10,
@@ -22554,10 +22984,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
 
-  // Bottom Metadata Dock
   bottomMetadataDock: {
     position: 'absolute',
-    bottom: 100,
+    bottom: 20,
     left: 16,
     right: 80,
     zIndex: 10,
@@ -22893,6 +23322,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
+</file>
+
+<file path="services/auth/app/main.py">
+import logging
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.v1.auth import router as auth_router
+
+logging.basicConfig(level=logging.INFO)
+
+app = FastAPI(title="Blipp Auth Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router, prefix="/v1/auth")
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 </file>
 
 <file path="apps/blipp/lib/api.ts">
@@ -23312,6 +23766,7 @@ export const api = {
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
 
   login: apiLogin,
+  register: (req: RegisterRequest) => requestRaw('/v1/auth/register', { method: 'POST', body: req }).then(r => r.data),
   followUser,
   unfollowUser,
   likeBlipp,
@@ -23430,6 +23885,16 @@ function toUser(r: MeResponse): User {
 
 export const authApi = {
   login: apiLogin,
+  
+  async register(req: RegisterRequest): Promise<{ access_token: string; refresh_token: string; user: { id: string; email: string } }> {
+    const payload = {
+      email: req.email,
+      password: req.password,
+      display_name: req.displayName || req.username
+    };
+    const res = await requestRaw('/v1/auth/register', { method: 'POST', body: payload });
+    return res.data;
+  },
 
   async me(token: string): Promise<User> {
     const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/userinfo`, {

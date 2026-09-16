@@ -123,7 +123,7 @@ async def handle_user_account_suspended(data: Dict[str, Any]) -> None:
     logger.info(f"Processing user.account.suspended for user {user_id}")
     
     admin_user = settings.KEYCLOAK_ADMIN
-    admin_password = os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "admin_master_password")
+    admin_password = os.environ["KEYCLOAK_ADMIN_PASSWORD"]
     kc_url = settings.KEYCLOAK_INTERNAL_URL.replace("/keycloak", "")
     
     try:

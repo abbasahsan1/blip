@@ -19,8 +19,6 @@ import { useSessionStore } from '@/lib/store/sessionStore';
 import { PALETTE } from '@/lib/palette';
 import type { AudioPost, FeedSort } from '@/lib/types';
 
-const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
-
 const SORTS: { value: FeedSort; label: string }[] = [
   { value: 'most_listened', label: 'Trending' },
   { value: 'newest', label: 'Newest' },
@@ -42,6 +40,7 @@ export default function FeedScreen() {
   const userId = useSessionStore((s) => s.user?.id ?? null);
 
   const [activeIndex, setActiveIndex] = useState(0);
+  const [feedHeight, setFeedHeight] = useState(0);
   const listRef = useRef<FlatList<AudioPost>>(null);
 
   useEffect(() => {
@@ -50,10 +49,12 @@ export default function FeedScreen() {
 
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const idx = Math.round(e.nativeEvent.contentOffset.y / WINDOW_HEIGHT);
-      setActiveIndex(idx);
+      if (feedHeight > 0) {
+        const idx = Math.round(e.nativeEvent.contentOffset.y / feedHeight);
+        setActiveIndex(idx);
+      }
     },
-    [],
+    [feedHeight],
   );
 
   const handleAutoSkip = useCallback(
@@ -76,18 +77,18 @@ export default function FeedScreen() {
       <AudioReel
         post={item}
         isActive={index === activeIndex}
-        height={WINDOW_HEIGHT}
+        height={feedHeight}
         onLike={() => toggleLike(item.id)}
         onAutoSkip={() => handleAutoSkip(index)}
         feedItems={posts}
         activeIndex={index}
       />
     ),
-    [activeIndex, handleAutoSkip, posts, toggleLike],
+    [activeIndex, handleAutoSkip, posts, toggleLike, feedHeight],
   );
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={(e) => setFeedHeight(e.nativeEvent.layout.height)}>
       {/* Studio Header Bar & Stories Tray */}
       <View
         style={[
@@ -143,7 +144,7 @@ export default function FeedScreen() {
           onScroll={onScroll}
           scrollEventThrottle={16}
           pagingEnabled={true}
-          snapToInterval={WINDOW_HEIGHT}
+          snapToInterval={feedHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           showsVerticalScrollIndicator={false}
@@ -168,8 +169,8 @@ export default function FeedScreen() {
             </View>
           }
           getItemLayout={(_data, index) => ({
-            length: WINDOW_HEIGHT,
-            offset: WINDOW_HEIGHT * index,
+            length: feedHeight,
+            offset: feedHeight * index,
             index,
           })}
         />

@@ -9,7 +9,7 @@ router = APIRouter(tags=["Auth"])
 
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://keycloak.blipp.svc.cluster.local:8080")
 KEYCLOAK_ADMIN_USER = os.environ.get("KEYCLOAK_ADMIN_USER", "admin")
-KEYCLOAK_ADMIN_PASSWORD = os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "admin_master_password")
+KEYCLOAK_ADMIN_PASSWORD = os.environ["KEYCLOAK_ADMIN_PASSWORD"]
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register_user(payload: UserRegisterRequest):

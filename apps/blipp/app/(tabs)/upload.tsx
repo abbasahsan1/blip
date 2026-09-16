@@ -145,7 +145,7 @@ export default function UploadScreen() {
         setDuration(0);
         setSuccessMessage(null);
         resetUploadStore();
-        router.replace('/(tabs)');
+        router.push('/');
       }, 1000);
     } catch (err: unknown) {
       const msg =

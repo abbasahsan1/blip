@@ -149,37 +149,60 @@ async def get_feed(
                 )
                 hydrated_rows = list(rows)
 
-            # Always fetch the chronological slice as well. Redis/Gorse can
-            # legitimately be empty on cold start, and the authoritative slice
-            # prevents recommendation ordering from skipping newly published
-            # records between cursor pages.
-            fallback_rows = await conn.fetch(
-                """
-                    SELECT 
-                        b.blipp_id, 
-                        b.creator_id, 
-                        b.title, 
-                        b.description,
-                        b.audio_url, 
-                        b.audio_variants, 
-                        b.duration_seconds,
-                        b.created_at,
-                        u.username,
-                        COALESCE(u.display_name, u.username, 'Creator') AS display_name,
-                        u.avatar_url
-                    FROM blipps b
-                    LEFT JOIN users_profile u ON b.creator_id = u.user_id
-                    WHERE b.status = 'published'
-                      AND NOT (b.blipp_id = ANY($1::uuid[]))
-                      AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
-                    ORDER BY b.created_at DESC, b.blipp_id DESC
-                    LIMIT $4;
-                """,
-                [r["blipp_id"] for r in hydrated_rows],
-                cursor_created_at,
-                cursor_blipp_uuid,
-                fetch_limit,
-            )
+            if hydrated_rows:
+                fallback_rows = await conn.fetch(
+                    """
+                        SELECT 
+                            b.blipp_id, 
+                            b.creator_id, 
+                            b.title, 
+                            b.description,
+                            b.audio_url, 
+                            b.audio_variants, 
+                            b.duration_seconds,
+                            b.created_at,
+                            u.username,
+                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
+                            u.avatar_url
+                        FROM blipps b
+                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
+                        WHERE b.status = 'published'
+                          AND NOT (b.blipp_id = ANY($1::uuid[]))
+                          AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
+                        ORDER BY b.created_at DESC, b.blipp_id DESC
+                        LIMIT $4;
+                    """,
+                    [r["blipp_id"] for r in hydrated_rows],
+                    cursor_created_at,
+                    cursor_blipp_uuid,
+                    fetch_limit,
+                )
+            else:
+                fallback_rows = await conn.fetch(
+                    """
+                        SELECT 
+                            b.blipp_id, 
+                            b.creator_id, 
+                            b.title, 
+                            b.description,
+                            b.audio_url, 
+                            b.audio_variants, 
+                            b.duration_seconds,
+                            b.created_at,
+                            u.username,
+                            COALESCE(u.display_name, u.username, 'Creator') AS display_name,
+                            u.avatar_url
+                        FROM blipps b
+                        LEFT JOIN users_profile u ON b.creator_id = u.user_id
+                        WHERE b.status = 'published'
+                          AND ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
+                        ORDER BY b.created_at DESC, b.blipp_id DESC
+                        LIMIT $3;
+                    """,
+                    cursor_created_at,
+                    cursor_blipp_uuid,
+                    fetch_limit,
+                )
             hydrated_rows.extend(fallback_rows)
 
     except Exception as e:

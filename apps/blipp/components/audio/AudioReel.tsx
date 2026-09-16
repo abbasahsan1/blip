@@ -30,8 +30,6 @@ import { useAudioPrefetch } from '@/lib/audio/useAudioPrefetch';
 import { api, resolveMediaUrl } from '@/lib/api';
 import type { AudioPost, Blipp, DMThreadItem } from '@/lib/types';
 
-const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
-
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function formatDuration(secs: number): string {
@@ -284,7 +282,7 @@ export function AudioReel({
 
   // Scrub bar interaction
   const handleScrub = (event: any) => {
-    const layoutWidth = event.nativeEvent.layout?.width || WINDOW_WIDTH;
+    const layoutWidth = event.nativeEvent.layout?.width || Dimensions.get('window').width;
     const clickX = event.nativeEvent.locationX;
     const ratio = Math.max(0, Math.min(1, clickX / layoutWidth));
     const targetSeconds = Math.floor(ratio * (durationSeconds || 30));
@@ -293,7 +291,7 @@ export function AudioReel({
 
   const displayDuration = durationSeconds || item?.duration || 0;
 
-  const reelHeight = height || WINDOW_HEIGHT;
+  const reelHeight = height || Dimensions.get('window').height;
 
   return (
     <View style={[styles.root, { height: reelHeight }]} testID="audio-reel-card">
@@ -674,7 +672,7 @@ export function AudioReel({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    width: WINDOW_WIDTH,
+    width: '100%',
     position: 'relative',
     backgroundColor: '#000000',
     overflow: 'hidden',
@@ -744,7 +742,7 @@ const styles = StyleSheet.create({
   floatingActionColumn: {
     position: 'absolute',
     right: 16,
-    bottom: 108,
+    bottom: 100,
     alignItems: 'center',
     gap: 16,
     zIndex: 10,
@@ -805,10 +803,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
 
-  // Bottom Metadata Dock
   bottomMetadataDock: {
     position: 'absolute',
-    bottom: 100,
+    bottom: 20,
     left: 16,
     right: 80,
     zIndex: 10,
