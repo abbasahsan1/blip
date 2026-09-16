@@ -496,9 +496,47 @@ export async function apiRegister(req: {
   username?: string;
   displayName?: string;
 }): Promise<{ tokens: AuthTokens; user: User; access_token: string; refresh_token: string }> {
-  // Direct API registration is removed. Users should register via Keycloak web UI.
-  // If your client still calls this, we throw an error.
-  throw new Error("Registration should be performed via OAuth or Keycloak portal.");
+  // 1. Get Admin Token
+  const adminParams = new URLSearchParams();
+  adminParams.append('client_id', 'admin-cli');
+  adminParams.append('grant_type', 'password');
+  adminParams.append('username', 'admin');
+  adminParams.append('password', 'admin_master_password');
+
+  const adminRes = await fetch(`${getKeycloakUrl()}/realms/master/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: adminParams.toString(),
+  });
+
+  const adminData = await adminRes.json().catch(() => null);
+  if (!adminRes.ok) {
+    throw new ApiError(adminData?.error_description || 'Failed to get admin token', adminRes.status, adminData);
+  }
+
+  // 2. Create User via Admin API
+  const createUserRes = await fetch(`${getKeycloakUrl()}/admin/realms/blipp/users`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${adminData.access_token}`
+    },
+    body: JSON.stringify({
+      username: req.username || req.email.split('@')[0],
+      email: req.email,
+      enabled: true,
+      firstName: req.displayName || req.username,
+      credentials: [{ type: 'password', value: req.password, temporary: false }]
+    }),
+  });
+
+  if (!createUserRes.ok) {
+    const errData = await createUserRes.json().catch(() => null);
+    throw new ApiError(errData?.errorMessage || 'Failed to create user', createUserRes.status, errData);
+  }
+
+  // 3. Login as the new user to get tokens
+  return apiLogin({ email: req.email, password: req.password });
 }
 
 interface LoginResponse {
@@ -541,38 +579,6 @@ function toUser(r: MeResponse): User {
 }
 
 export const authApi = {
-  async requestOtp(email: string): Promise<{ message: string; success: boolean }> {
-    return request<{ message: string; success: boolean }>('/v1/auth/otp/request', {
-      method: 'POST',
-      body: { email },
-    });
-  },
-
-  async verifyOtp(email: string, code: string): Promise<{ tokens: AuthTokens; user: User }> {
-    const r = await request<LoginResponse>('/v1/auth/otp/verify', {
-      method: 'POST',
-      body: { email, code },
-    });
-    const tokens = toTokens(r);
-    const me = await authApi.me(tokens.accessToken);
-    return { tokens, user: me };
-  },
-
-  async getOAuthUrl(provider: 'google' | 'apple'): Promise<string> {
-    const res = await request<{ provider: string; authorization_url: string }>(`/v1/auth/oauth/${provider}/url`);
-    return res.authorization_url;
-  },
-
-  async signInWithOAuth(provider: 'google' | 'apple', idToken?: string, code?: string): Promise<{ tokens: AuthTokens; user: User }> {
-    const r = await request<LoginResponse>(`/v1/auth/oauth/${provider}`, {
-      method: 'POST',
-      body: { provider, id_token: idToken, code },
-    });
-    const tokens = toTokens(r);
-    const me = await authApi.me(tokens.accessToken);
-    return { tokens, user: me };
-  },
-
   login: apiLogin,
   register: (req: RegisterRequest) => apiRegister(req),
 

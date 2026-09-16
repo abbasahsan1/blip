@@ -23,9 +23,6 @@ interface SessionStore {
 
   // Actions
   initialize: () => Promise<void>;
-  requestOtp: (email: string) => Promise<boolean>;
-  verifyOtp: (email: string, code: string) => Promise<void>;
-  signInWithOAuth: (provider: 'google' | 'apple', idToken?: string, code?: string) => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (username: string, email: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -84,60 +81,6 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }
   },
 
-  async requestOtp(email: string) {
-    set({ isSubmitting: true, error: null });
-    try {
-      await authApi.requestOtp(email);
-      set({ isSubmitting: false });
-      return true;
-    } catch (err) {
-      set({ isSubmitting: false, error: toFailure(err) });
-      return false;
-    }
-  },
-
-  async verifyOtp(email: string, code: string) {
-    set({ isSubmitting: true, error: null });
-    try {
-      const { tokens, user } = await authApi.verifyOtp(email, code);
-      await AsyncStorage.multiSet([
-        [KEY_ACCESS, tokens.accessToken],
-        [KEY_REFRESH, tokens.refreshToken],
-      ]);
-      set({
-        status: 'authenticated',
-        user,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
-        isSubmitting: false,
-      });
-    } catch (err) {
-      set({ isSubmitting: false, error: toFailure(err) });
-    }
-  },
-
-  async signInWithOAuth(provider: 'google' | 'apple', idToken?: string, code?: string) {
-    set({ isSubmitting: true, error: null });
-    try {
-      const { tokens, user } = await authApi.signInWithOAuth(provider, idToken, code);
-      await AsyncStorage.multiSet([
-        [KEY_ACCESS, tokens.accessToken],
-        [KEY_REFRESH, tokens.refreshToken],
-      ]);
-      set({
-        status: 'authenticated',
-        user,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken },
-        isSubmitting: false,
-      });
-    } catch (err) {
-      set({ isSubmitting: false, error: toFailure(err) });
-    }
-  },
-
   async signInWithEmail(email, password) {
     set({ isSubmitting: true, error: null });
     try {
@@ -164,7 +107,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     set({ isSubmitting: true, error: null });
     try {
       const pwd = password || 'DefaultOtpPassword123!';
-      const { tokens, user } = await authApi.register({ username, email, password: pwd });
+      const { tokens, user } = await authApi.register({ username, email, password: pwd, displayName: username });
       await AsyncStorage.multiSet([
         [KEY_ACCESS, tokens.accessToken],
         [KEY_REFRESH, tokens.refreshToken],

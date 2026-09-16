@@ -33,7 +33,9 @@ export default function SignUpScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   const status = useSessionStore((s) => s.status);
-  const setSessionTokens = useSessionStore((s) => s.setSessionTokens);
+  const error = useSessionStore((s) => s.error);
+  const isSubmitting = useSessionStore((s) => s.isSubmitting);
+  const signUpWithEmail = useSessionStore((s) => s.signUpWithEmail);
 
   // Soundwave animation
   const wave1 = useRef(new Animated.Value(0.35)).current;
@@ -101,31 +103,7 @@ export default function SignUpScreen() {
     }
 
     setServerError(null);
-    setIsLoading(true);
-
-    try {
-      const authResult = await api.register({
-        email: email.trim(),
-        password,
-        username: username.trim(),
-        displayName: (displayName.trim() || username.trim()),
-      });
-
-      if (authResult?.tokens) {
-        await setSessionTokens(authResult.tokens, authResult.user);
-        router.replace('/(tabs)');
-      } else {
-        setServerError('Registration failed. Please try again.');
-      }
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Failed to register account. Please check your details and try again.';
-      setServerError(msg);
-    } finally {
-      setIsLoading(false);
-    }
+    await signUpWithEmail(username.trim(), email.trim(), password);
   }
 
   return (
@@ -179,10 +157,10 @@ export default function SignUpScreen() {
             <Text style={styles.sheetSubtitle}>Join the next-gen audio-social community</Text>
 
             {/* Error Banner */}
-            {serverError && (
+            {(serverError || error) && (
               <View style={styles.errorContainer} accessibilityRole="alert">
                 <StatusAlertMark size={16} color="#EF4444" />
-                <Text style={styles.errorText}>{serverError}</Text>
+                <Text style={styles.errorText}>{serverError || error?.message}</Text>
               </View>
             )}
 
@@ -281,7 +259,7 @@ export default function SignUpScreen() {
             {/* Primary Action Button (Violet-to-Pink gradient) */}
             <Pressable
               onPress={handleSignUp}
-              disabled={isLoading}
+              disabled={isSubmitting}
               style={({ pressed }) => [
                 styles.submitButtonWrapper,
                 pressed && styles.buttonPressed,
@@ -295,7 +273,7 @@ export default function SignUpScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.submitGradient}
               >
-                {isLoading ? (
+                {isSubmitting ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
                   <Text style={styles.submitButtonText}>Create Account</Text>

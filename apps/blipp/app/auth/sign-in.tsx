@@ -29,7 +29,10 @@ export default function SignInScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   const status = useSessionStore((s) => s.status);
-  const setSessionTokens = useSessionStore((s) => s.setSessionTokens);
+  const error = useSessionStore((s) => s.error);
+  const isSubmitting = useSessionStore((s) => s.isSubmitting);
+  const signInWithEmail = useSessionStore((s) => s.signInWithEmail);
+  const user = useSessionStore((s) => s.user);
 
   // Soundwave pulsation animation
   const wave1 = useRef(new Animated.Value(0.4)).current;
@@ -78,9 +81,22 @@ export default function SignInScreen() {
 
   useEffect(() => {
     if (status === 'authenticated') {
-      router.replace('/(tabs)');
+      const checkProfile = async () => {
+        try {
+          await profileApi.getMyProfile();
+        } catch (err: any) {
+          if (err.status === 404 && user) {
+            await profileApi.claimUsername({
+              username: user.username || user.email.split('@')[0],
+              display_name: user.displayName || user.email.split('@')[0],
+            });
+          }
+        }
+        router.replace('/(tabs)');
+      };
+      checkProfile();
     }
-  }, [status, router]);
+  }, [status, router, user]);
 
   async function handleSignIn() {
     if (!email.trim() || !password) {
@@ -89,39 +105,7 @@ export default function SignInScreen() {
     }
 
     setServerError(null);
-    setIsLoading(true);
-
-    try {
-      const authResult = await api.login(email.trim(), password);
-      if (authResult?.tokens) {
-        await setSessionTokens(authResult.tokens, authResult.user);
-        
-        // First-login profile check
-        try {
-          await profileApi.getMyProfile();
-        } catch (err: any) {
-          // If profile does not exist (e.g. 404), claim it
-          if (err.status === 404) {
-            await profileApi.claimUsername({
-              username: authResult.user.username || email.split('@')[0],
-              display_name: authResult.user.displayName || email.split('@')[0],
-            });
-          }
-        }
-        
-        router.replace('/(tabs)');
-      } else {
-        setServerError('Authentication failed. Please check credentials.');
-      }
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Unable to sign in. Please verify your email and password.';
-      setServerError(msg);
-    } finally {
-      setIsLoading(false);
-    }
+    await signInWithEmail(email.trim(), password);
   }
 
   return (
@@ -175,10 +159,10 @@ export default function SignInScreen() {
             <Text style={styles.sheetSubtitle}>Access your audio feed and community</Text>
 
             {/* Clean Server Error Banner (Positioned above submit button) */}
-            {serverError && (
+            {(serverError || error) && (
               <View style={styles.errorContainer} accessibilityRole="alert">
                 <StatusAlertMark size={16} color="#EF4444" />
-                <Text style={styles.errorText}>{serverError}</Text>
+                <Text style={styles.errorText}>{serverError || error?.message}</Text>
               </View>
             )}
 
@@ -233,7 +217,7 @@ export default function SignInScreen() {
             {/* Primary Action Button (Violet-to-Pink gradient) */}
             <Pressable
               onPress={handleSignIn}
-              disabled={isLoading}
+              disabled={isSubmitting}
               style={({ pressed }) => [
                 styles.submitButtonWrapper,
                 pressed && styles.buttonPressed,
@@ -247,7 +231,7 @@ export default function SignInScreen() {
                 end={{ x: 1, y: 1 }}
                 style={styles.submitGradient}
               >
-                {isLoading ? (
+                {isSubmitting ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
                   <Text style={styles.submitButtonText}>Sign In</Text>

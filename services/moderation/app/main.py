@@ -29,7 +29,7 @@ from blipp_common.exceptions import (
 from app.api.v1.reports import router as reports_router
 from app.api.v1.moderation import router as moderation_router
 from app.models.moderation import HealthResponse
-from app.event_handlers import run_copyright_consumer, stop_event_handlers
+from app.event_handlers import run_copyright_consumer, run_account_suspension_consumer, stop_event_handlers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,13 +61,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"NATS startup connection warning: {e}")
 
-    consumer_task = asyncio.create_task(run_copyright_consumer())
+    copyright_task = asyncio.create_task(run_copyright_consumer())
+    suspension_task = asyncio.create_task(run_account_suspension_consumer())
 
     yield
 
     stop_event_handlers()
-    consumer_task.cancel()
-    await asyncio.gather(consumer_task, return_exceptions=True)
+    copyright_task.cancel()
+    suspension_task.cancel()
+    await asyncio.gather(copyright_task, suspension_task, return_exceptions=True)
 
     try:
         await event_bus.close()
