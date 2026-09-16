@@ -17,6 +17,8 @@ data:
     SELECT 'CREATE DATABASE blipp_analytics' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_analytics')\gexec
     SELECT 'CREATE DATABASE blipp_messaging' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_messaging')\gexec
     SELECT 'CREATE DATABASE blipp_moderation' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_moderation')\gexec
+    -- T11: Gorse recommender database
+    SELECT 'CREATE DATABASE blipp_gorse'       WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='blipp_gorse')\gexec
 
     -- Grant connection and administrative privileges to keycloak user
     GRANT ALL PRIVILEGES ON DATABASE blipp_auth TO keycloak;
@@ -26,3 +28,5 @@ data:
     GRANT ALL PRIVILEGES ON DATABASE blipp_analytics TO keycloak;
     GRANT ALL PRIVILEGES ON DATABASE blipp_messaging TO keycloak;
     GRANT ALL PRIVILEGES ON DATABASE blipp_moderation TO keycloak;
+    -- T11: Gorse DB access (T13 will scope this to a dedicated gorse_db_user)
+    GRANT ALL PRIVILEGES ON DATABASE blipp_gorse TO keycloak;

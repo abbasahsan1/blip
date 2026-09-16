@@ -80,7 +80,10 @@ export function AudioReel({
         },
       }
     : rawItem;
-  const isAd = Boolean(item?.is_ad || item?.is_sponsored);
+  // T17: isAd/isAdFallback logic removed -- ad feature is not active product requirement.
+  // Blipp.is_ad and Blipp.is_sponsored fields exist in types.ts but are never populated
+  // by the backend. Remove this comment once ads are either properly implemented or
+  // fully removed from the type system.
   const blippId = item?.blipp_id || item?.id;
   const creatorId = item?.creator?.id || item?.creator_id || item?.authorId;
   const creatorDisplayName =
@@ -300,9 +303,12 @@ export function AudioReel({
           <Text style={styles.creatorHandle} numberOfLines={1}>
             @{creatorHandle}
           </Text>
-          <Feather name="check-circle" size={14} color={theme.colors.primary} />
+          {/* T18: Verification checkmark gated on is_verified field from backend */}
+          {Boolean((item as any)?.is_verified) && (
+            <Feather name="check-circle" size={14} color={theme.colors.primary} />
+          )}
           
-          {!isAd && creatorId && (
+          {creatorId && (
             <Pressable
               style={styles.followButton}
               onPress={handleFollowToggle}
@@ -327,19 +333,7 @@ export function AudioReel({
           </Text>
         ) : null}
 
-        {isAd && (
-          <View style={styles.adPill}>
-            <Text style={styles.adPillText}>SPONSORED</Text>
-            {item?.sponsor?.cta_url && (
-              <Pressable
-                style={styles.adCta}
-                onPress={() => item.sponsor?.cta_url && Linking.openURL(item.sponsor.cta_url)}
-              >
-                <Text style={styles.adCtaText}>{item.sponsor.cta_text || 'Learn More'}</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
+        {/* T17: Sponsored ad block removed — ad feature not active. */}
       </View>
 
       {/* Scrubber */}

@@ -87,7 +87,14 @@ async def process_message(js: JetStreamContext, msg) -> None:
     description = data.get("description")
     scheduled_at = data.get("scheduled_at")
     blipp_id_str = data.get("blipp_id")
-    blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else uuid.uuid4()
+    if not blipp_id_str:
+        # T6: blipp_id must be set at upload time and passed through the pipeline.
+        # A missing blipp_id indicates a malformed/legacy event. Log and skip.
+        logger.error(f"upload.received event missing blipp_id for upload {upload_id_str}. "
+                     "This indicates a producer bug — blipp_id must be set at upload time.")
+        await msg.ack()
+        return
+    blipp_id = uuid.UUID(blipp_id_str)
 
     author_username = data.get("author_username") or ""
     author_display_name = data.get("author_display_name") or ""

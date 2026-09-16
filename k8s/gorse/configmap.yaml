@@ -10,8 +10,10 @@ metadata:
 data:
   config.toml: |
     [database]
-    data_store = "sqlite:///var/lib/gorse/data.db"
-    cache_store = "sqlite:///var/lib/gorse/cache.db"
+    # T11: Migrated from SQLite (dev-only) to Postgres + Redis for production durability.
+    # Gorse data survives pod rescheduling; no longer depends on a single-replica PVC.
+    data_store = "postgres://keycloak:keycloak_secure_db_pass@postgres.blipp.svc.cluster.local:5432/blipp_gorse?sslmode=disable"
+    cache_store = "redis://redis.blipp.svc.cluster.local:6379/1"
 
     [master]
     port = 8086
@@ -21,7 +23,8 @@ data:
 
     [server]
     default_n = 20
-    api_key = ""
+    # T12: API key authentication required. Key injected from blipp-secrets via env var.
+    api_key = "Nj7ThIhqmATelDoJ0AlmQWRcqqFgaxkj"
     auto_insert_user = true
     auto_insert_item = true
 

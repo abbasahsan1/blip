@@ -33,6 +33,9 @@ async def upload_media(
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Smart clip uploads are not implemented")
 
     upload_id = uuid.uuid4()
+    # T6: blipp_id is established HERE at upload time and flows through the entire pipeline.
+    # No downstream service (transcode worker, content ingest, feed) should generate a new one.
+    blipp_id = uuid.uuid4()
     extension = os.path.splitext(file.filename or "")[1].lower() or ".mp3"
     storage_key = f"{current_user.user_id}/{upload_id}{extension}"
     content_type = file.content_type or storage_service.normalize_mime_type(file.filename or storage_key)
@@ -49,6 +52,7 @@ async def upload_media(
     now = datetime.now(timezone.utc)
     upload_payload = {
         "upload_id": str(upload_id),
+        "blipp_id": str(blipp_id),  # Canonical aggregate identity, set once at upload time
         "creator_id": str(current_user.user_id),
         "raw_file_url": raw_file_url,
         "upload_type": upload_type,
@@ -66,10 +70,11 @@ async def upload_media(
             async with conn.transaction():
                 await conn.execute(
                     """
-                    INSERT INTO uploads (upload_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at)
-                    VALUES ($1, $2, $3, $4, 'created', $5, $6, $7)
+                    INSERT INTO uploads (upload_id, blipp_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at)
+                    VALUES ($1, $2, $3, $4, $5, 'created', $6, $7, $8)
+                    ON CONFLICT (upload_id) DO NOTHING
                     """,
-                    upload_id, current_user.user_id, raw_file_url, upload_type, title, description, now,
+                    upload_id, blipp_id, current_user.user_id, raw_file_url, upload_type, title, description, now,
                 )
                 from blipp_common.outbox import record_outbox_event
                 await record_outbox_event(conn, "upload.received", upload_payload)

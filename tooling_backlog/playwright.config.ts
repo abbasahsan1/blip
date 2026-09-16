@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// T20: BASE_URL supports three configuration modes:
+// 1. Local dev (default):       http://localhost:8419
+// 2. LAN/Tailscale (mobile):   set BASE_URL=http://<tailscale-ip>:8419
+// 3. CI:                        set BASE_URL=http://<cluster-ingress>
+//
+// When running dev-mobile.sh, export BASE_URL to the Tailscale/LAN address
+// so Playwright tests target the same host as the mobile app.
+// Example: BASE_URL=http://100.122.207.32:8419 npx playwright test
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8419';
 
 export default defineConfig({

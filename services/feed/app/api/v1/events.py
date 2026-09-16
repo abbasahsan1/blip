@@ -25,6 +25,12 @@ class EngagementEvent(BaseModel):
 import uuid
 
 async def publish_events(events: List[EngagementEvent], user_id: str) -> None:
+    # DURABILITY CONTRACT: Telemetry/engagement events are published DIRECTLY to NATS
+    # (best-effort, fire-and-forget). They are NOT routed through the transactional outbox.
+    # This means: if the NATS publish fails or the process crashes, the event is LOST.
+    # This is an intentional design tradeoff -- telemetry data loss is acceptable.
+    # If guaranteed delivery is ever required (e.g. for billing), route through
+    # record_outbox_event() in blipp_common.outbox instead.
     for event in events:
         if not _EVENT_TYPE.fullmatch(event.event_type):
             continue

@@ -246,6 +246,12 @@ export function useAudioPlayer({
     if (!isActive && !audio.paused) {
       audio.pause();
     } else if (isActive && audio.paused) {
+// T19: autoplay() may be rejected by browser autoplay policy.
+// When rejected, audio stays paused. The paused-state affordance
+// (e.g. a visible play button) MUST be validated via manual UX testing
+// to ensure users understand they need to tap play.
+// See: https://developer.mozilla.org/en-US/docs/Web/Media/Autoplay_guide
+
       audio.play().catch((err) => {
         // Autoplay may be blocked by browser policy until first interaction
         console.warn('[useAudioPlayer] Auto-play blocked or rejected:', err);

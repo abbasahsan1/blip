@@ -1,38 +1,66 @@
+/**
+ * T20: Auth flow E2E test
+ *
+ * Verifies the complete browser -> gateway -> Keycloak -> token -> protected API path.
+ *
+ * Prerequisites:
+ *   - Cluster running (or BASE_URL pointing to a running instance)
+ *   - KEYCLOAK_TEST_USER and KEYCLOAK_TEST_PASSWORD env vars set
+ *
+ * Run with:
+ *   BASE_URL=http://100.122.207.32:8419 \
+ *   KEYCLOAK_TEST_USER=testuser@blipp.io \
+ *   KEYCLOAK_TEST_PASSWORD=testpassword \
+ *   npx playwright test e2e/tests/auth.spec.ts
+ */
+
 import { test, expect } from '@playwright/test';
-import { loginAsTestUser, TEST_USER } from '../helpers/auth';
 
-test.describe('Authentication & Session Initialization', () => {
-  test('should display validation errors or failure on invalid credentials', async ({ page }) => {
+const TEST_USER = process.env.KEYCLOAK_TEST_USER || 'testuser@blipp.io';
+const TEST_PASSWORD = process.env.KEYCLOAK_TEST_PASSWORD || 'testpassword';
+
+test.describe('Auth flow', () => {
+  test('sign in and access protected feed API', async ({ page, request }) => {
+    // 1. Navigate to sign-in page
     await page.goto('/auth/sign-in');
-    await page.waitForLoadState('domcontentloaded');
+    await expect(page).toHaveTitle(/blipp/i, { timeout: 10000 });
 
-    const emailInput = page.locator('#sign-in-email, input[type="email"], input[placeholder*="operator"]');
-    await expect(emailInput.first()).toBeVisible({ timeout: 15000 });
-    await emailInput.first().fill(TEST_USER.username);
+    // 2. Fill credentials
+    await page.getByLabel(/email/i).fill(TEST_USER);
+    await page.getByLabel(/password/i).fill(TEST_PASSWORD);
+    await page.getByRole('button', { name: /sign in/i }).click();
 
-    const passwordInput = page.locator('#sign-in-password, input[type="password"]');
-    await passwordInput.first().fill('WrongPassword999!');
+    // 3. Assert redirect to feed (authenticated state)
+    await expect(page).toHaveURL(/\/(feed|home|index)?$/, { timeout: 15000 });
 
-    const submitButton = page.locator('#sign-in-submit, [aria-label="Sign In"]');
-    await submitButton.first().click();
+    // 4. Extract token from localStorage (set by sessionStore)
+    const token = await page.evaluate(() => {
+      try {
+        const raw = localStorage.getItem('blipp-session') || localStorage.getItem('session');
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed?.state?.tokens?.accessToken || parsed?.state?.accessToken || null;
+      } catch {
+        return null;
+      }
+    });
 
-    // Verify error banner is rendered
-    const errorBanner = page.locator('[role="alert"]').or(page.getByText(/invalid|failed|unauthorized/i));
-    await expect(errorBanner.first()).toBeVisible({ timeout: 10000 });
+    expect(token, 'Access token should be stored in sessionStore after sign-in').toBeTruthy();
+
+    // 5. Call protected API directly with the token
+    const feedResponse = await request.get('/v1/feed', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(feedResponse.status(), 'Protected feed API should return 200 with valid token').toBe(200);
+
+    const feedData = await feedResponse.json();
+    expect(feedData).toHaveProperty('items');
   });
 
-  test('should sign in successfully with seeded credentials and display profile', async ({ page }) => {
-    await loginAsTestUser(page);
-
-    // Verify user is in main app tabs
-    await expect(page).toHaveURL(/\/(tabs)?/);
-
-    // Navigate to Profile tab
-    const profileTab = page.locator('div[role="tab"], a[role="tab"]').filter({ hasText: /profile/i }).or(page.getByLabel(/profile/i));
-    await profileTab.first().click();
-
-    // Verify operator handle / display name appears
-    const profileHandle = page.locator('[data-testid="profile-username"]').or(page.getByText('@testuser')).or(page.getByText('testuser'));
-    await expect(profileHandle.first()).toBeVisible({ timeout: 10000 });
+  test('unauthenticated request to protected API returns 401', async ({ request }) => {
+    const feedResponse = await request.get('/v1/feed');
+    // Should be 401 or 403 — not 200
+    expect([401, 403]).toContain(feedResponse.status());
   });
 });

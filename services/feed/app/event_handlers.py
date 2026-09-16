@@ -104,24 +104,29 @@ async def handle_like_event(data: Dict[str, Any], is_like: bool) -> None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             if is_like:
-                await conn.execute(
+                # Idempotent: only increment likes_count when the row is actually inserted.
+                # RETURNING detects the no-op case (ON CONFLICT DO NOTHING returns no rows).
+                inserted = await conn.fetchrow(
                     """
                     INSERT INTO user_likes_projection (user_id, blipp_id)
                     VALUES ($1, $2)
                     ON CONFLICT (user_id, blipp_id) DO NOTHING
+                    RETURNING blipp_id
                     """,
                     user_id,
                     blipp_id,
                 )
-                await conn.execute(
-                    """
-                    INSERT INTO feed_item_stats (blipp_id, likes_count)
-                    VALUES ($1, 1)
-                    ON CONFLICT (blipp_id) DO UPDATE
-                    SET likes_count = feed_item_stats.likes_count + 1
-                    """,
-                    blipp_id,
-                )
+                if inserted is not None:
+                    # Row actually inserted (not a duplicate) -- safe to increment counter.
+                    await conn.execute(
+                        """
+                        INSERT INTO feed_item_stats (blipp_id, likes_count)
+                        VALUES ($1, 1)
+                        ON CONFLICT (blipp_id) DO UPDATE
+                        SET likes_count = feed_item_stats.likes_count + 1
+                        """,
+                        blipp_id,
+                    )
             else:
                 res = await conn.execute(
                     "DELETE FROM user_likes_projection WHERE user_id = $1 AND blipp_id = $2",

@@ -379,6 +379,12 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 )
 
             if is_positive and blipp_id_str:
+                # BEST-EFFORT: Gorse feedback is fire-and-forget via asyncio.create_task.
+                # If this task is dropped (process crash, event loop shutdown before task runs),
+                # the recommendation signal is SILENTLY LOST. This is intentional by design.
+                # Gorse operates as a best-effort signal source, not a durable domain event.
+                # If guaranteed delivery to Gorse becomes a product requirement, route this
+                # through a durable outbox/queue rather than a background task.
                 asyncio.create_task(
                     push_gorse_feedback(
                         user_id=str(user_id),

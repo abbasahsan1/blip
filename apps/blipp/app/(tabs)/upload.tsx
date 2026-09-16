@@ -40,7 +40,6 @@ export default function UploadScreen() {
   const [selectedFile, setSelectedFile] = useState<UploadableFile | null>(null);
   const [duration, setDuration] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [isDescFocused, setIsDescFocused] = useState(false);
 
@@ -136,17 +135,17 @@ export default function UploadScreen() {
         },
       });
 
-      setSuccessMessage('Published successfully!');
+      // Upload confirmed published by backend (pollUploadStatus returned 'published').
+      // Do NOT show success here — derive banner from uploadStatus === 'published' in the store.
       await refreshFeed();
       setTimeout(() => {
         setTitle('');
         setDescription('');
         setSelectedFile(null);
         setDuration(0);
-        setSuccessMessage(null);
         resetUploadStore();
         router.push('/');
-      }, 1000);
+      }, 1500);
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -208,10 +207,10 @@ export default function UploadScreen() {
         </View>
       )}
 
-      {successMessage && (
+      {uploadStatus === 'published' && !isUploading && (
         <View style={styles.successBanner} accessibilityRole="alert" testID="upload-success-banner">
           <StatusCheckMark size={16} color={PALETTE.success} />
-          <Text style={styles.successText}>{successMessage}</Text>
+          <Text style={styles.successText}>Your blipp is live! 🎙</Text>
         </View>
       )}
 
