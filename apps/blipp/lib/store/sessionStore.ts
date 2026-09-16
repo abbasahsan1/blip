@@ -151,9 +151,29 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   async signUpWithEmail(username, email, password) {
     set({ isSubmitting: true, error: null });
     try {
-      // In-app registration via API is disabled for security reasons
-      // Users should be redirected to the web portal or standard OIDC flow
-      throw new Error('In-app registration is disabled. Please sign up via the web portal.');
+      const pwd = password || 'DefaultOtpPassword123!';
+      const res = await authApi.register({ username, email, password: pwd, displayName: username });
+      
+      const user: User = {
+        id: res.user.id,
+        email: res.user.email,
+        username: username,
+        displayName: username,
+      };
+
+      await AsyncStorage.multiSet([
+        [KEY_ACCESS, res.access_token],
+        [KEY_REFRESH, res.refresh_token],
+      ]);
+
+      set({
+        status: 'authenticated',
+        user,
+        accessToken: res.access_token,
+        refreshToken: res.refresh_token,
+        tokens: { accessToken: res.access_token, refreshToken: res.refresh_token },
+        isSubmitting: false,
+      });
     } catch (err) {
       set({ isSubmitting: false, error: toFailure(err) });
     }

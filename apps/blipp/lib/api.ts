@@ -414,6 +414,7 @@ export const api = {
     requestRaw<T>(path, { ...options, method: 'DELETE' }),
 
   login: apiLogin,
+  register: (req: RegisterRequest) => requestRaw('/v1/auth/register', { method: 'POST', body: req }).then(r => r.data),
   followUser,
   unfollowUser,
   likeBlipp,
@@ -532,6 +533,16 @@ function toUser(r: MeResponse): User {
 
 export const authApi = {
   login: apiLogin,
+  
+  async register(req: RegisterRequest): Promise<{ access_token: string; refresh_token: string; user: { id: string; email: string } }> {
+    const payload = {
+      email: req.email,
+      password: req.password,
+      display_name: req.displayName || req.username
+    };
+    const res = await requestRaw('/v1/auth/register', { method: 'POST', body: payload });
+    return res.data;
+  },
 
   async me(token: string): Promise<User> {
     const res = await fetch(`${getKeycloakUrl()}/realms/blipp/protocol/openid-connect/userinfo`, {

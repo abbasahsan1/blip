@@ -8,7 +8,8 @@ IMAGES := blipp-content-ingest:latest \
           blipp-messaging:latest \
           blipp-moderation:latest \
           blipp-transcode-worker:latest \
-          blipp-analytics-worker:latest
+          blipp-analytics-worker:latest \
+          blipp-auth:latest
 
 .PHONY: help all upgrade destroy cluster-up k3d-import build-all build-auth build-ingest \
         build-feed build-social build-messaging build-moderation build-transcode build-analytics k8s-init k8s-deploy \
@@ -46,6 +47,7 @@ all: cluster-up build-all k3d-import k8s-init k8s-deploy ## Setup everything fro
 upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running application services
 	@echo "Applying updated manifests to namespace $(NAMESPACE)..."
 	@kubectl apply -f k8s/secrets.yaml
+	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/
@@ -55,6 +57,7 @@ upgrade: build-all k3d-import ## Non-blocking rolling upgrade of running applica
 	@kubectl apply -f k8s/analytics-worker/
 	@kubectl apply -f k8s/ingress/
 	@echo "Triggering zero-downtime rolling restart..."
+	@kubectl rollout restart deployment/auth -n $(NAMESPACE)
 	@kubectl rollout restart deployment/content-ingest -n $(NAMESPACE)
 	@kubectl rollout restart deployment/feed -n $(NAMESPACE)
 	@kubectl rollout restart deployment/social-graph -n $(NAMESPACE)
@@ -98,6 +101,9 @@ k3d-import: ## Import all locally built Docker images into the k3d cluster
 # Container Builds (Context pinned to repository root for libs/common)
 # ==============================================================================
 
+build-auth:
+	docker build -t blipp-auth:latest -f services/auth/Dockerfile .
+
 build-ingest:
 	docker build -t blipp-content-ingest:latest -f services/content_ingest/Dockerfile .
 
@@ -119,7 +125,7 @@ build-transcode:
 build-analytics:
 	docker build -t blipp-analytics-worker:latest -f services/analytics_worker/Dockerfile .
 
-build-all: build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
+build-all: build-auth build-ingest build-feed build-social build-messaging build-moderation build-transcode build-analytics ## Build all Docker images
 
 # ==============================================================================
 # Kubernetes Infrastructure & Deployments
@@ -148,6 +154,7 @@ k8s-deploy: ## Apply infrastructure, microservices, workers, and ingress manifes
 	@kubectl apply -f k8s/keycloak/
 	@kubectl apply -f k8s/gorse/
 	# Core microservices
+	@kubectl apply -f k8s/auth/
 	@kubectl apply -f k8s/content-ingest/
 	@kubectl apply -f k8s/feed/
 	@kubectl apply -f k8s/social-graph/

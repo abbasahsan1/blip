@@ -92,6 +92,17 @@ spec:
 
 ---
 apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-auth
+  namespace: blipp
+spec:
+  stripPrefix:
+    prefixes:
+      - /auth
+
+---
+apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: blipp-ingress
@@ -104,6 +115,19 @@ spec:
     - web
   routes:
 
+    # 1. Auth Service (/auth, /v1/auth)
+    - match: PathPrefix(`/auth`)
+      kind: Rule
+      middlewares:
+        - name: strip-auth
+      services:
+        - name: auth-service
+          port: 8006
+    - match: PathPrefix(`/v1/auth`)
+      kind: Rule
+      services:
+        - name: auth-service
+          port: 8006
 
     # 2. Content Ingest Service (/ingest, /v1/uploads, /v1/blipps)
     - match: PathPrefix(`/ingest`)
