@@ -15,7 +15,6 @@ class Blipp(Base):
     blipp_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     creator_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users_profile.user_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -46,27 +45,5 @@ class Blipp(Base):
     )
 
 
-class BlippSave(Base):
-    """
-    SQLAlchemy model representing a saved/bookmarked audio reel matching Section 5.3.
-    """
-    __tablename__ = "saves"
+__all__ = ["Blipp"]
 
-    user_id = Column(UUID(as_uuid=True), primary_key=True)
-    blipp_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("blipps.blipp_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "blipp_id", name="uq_user_blipp_save"),
-    )
-
-
-__all__ = ["Blipp", "BlippSave"]

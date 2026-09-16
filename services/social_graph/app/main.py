@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from blipp_common.config import settings
 from blipp_common.database import close_db_pool, get_db_pool, init_db_pool
 from blipp_common.events import event_bus
+from blipp_common.outbox import run_outbox_publisher, stop_outbox_publisher
 from blipp_common.exceptions import (
     AppException,
     CODE_FORBIDDEN,
@@ -20,9 +21,11 @@ from blipp_common.exceptions import (
     CODE_UNAUTHORIZED,
     CODE_VALIDATION_ERROR,
 )
+from app.database import init_social_db
 from app.api.v1.profiles import router as profiles_router
 from app.api.v1.relationships import router as relationships_router
 from app.api.v1.likes import router as likes_router
+from app.api.v1.saves import router as saves_router
 from app.models.profile import HealthResponse
 
 logging.basicConfig(
@@ -36,8 +39,9 @@ logger = logging.getLogger("social-graph.main")
 async def lifespan(app: FastAPI):
     logger.info(f"Starting Blipp Social Graph Service v{settings.APP_VERSION}")
     try:
-        await init_db_pool()
-        logger.info("Database connection pool initialized")
+        pool = await init_db_pool()
+        await init_social_db()
+        logger.info("Database connection pool initialized and schema verified")
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
 
@@ -47,7 +51,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"NATS startup connection error: {e}")
 
+    pool = await get_db_pool()
+    outbox_task = asyncio.create_task(run_outbox_publisher(pool, service_name="social-graph"))
+
     yield
+
+    stop_outbox_publisher()
+    outbox_task.cancel()
+    try:
+        await outbox_task
+    except asyncio.CancelledError:
+        pass
 
     try:
         await event_bus.close()
@@ -203,9 +217,12 @@ async def docs_redirect():
 app.include_router(profiles_router, prefix="/v1")
 app.include_router(relationships_router, prefix="/v1")
 app.include_router(likes_router, prefix="/v1")
+app.include_router(saves_router, prefix="/v1")
 app.include_router(profiles_router, prefix="/api")
 app.include_router(relationships_router, prefix="/api")
 app.include_router(likes_router, prefix="/api")
+app.include_router(saves_router, prefix="/api")
+app.include_router(saves_router)
 
 
 # ─── Health & Readiness Probes ───────────────────────────────────────────────

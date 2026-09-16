@@ -26,6 +26,10 @@ class FeedItemResponse(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     creator: Optional[Dict[str, Any]] = None
+    likes_count: int = 0
+    is_liked: bool = False
+    is_saved: bool = False
+    is_following: bool = False
 
 
 class FeedResponse(BaseModel):
@@ -34,10 +38,21 @@ class FeedResponse(BaseModel):
     has_more: bool = True
 
 
+class BatchFeedItemsRequest(BaseModel):
+    blipp_ids: List[Union[uuid.UUID, str]]
+
+
+class BatchFeedItemsResponse(BaseModel):
+    items: List[FeedItemResponse] = Field(default_factory=list)
+
+
 __all__ = [
     "HealthResponse",
     "FeedItemResponse",
     "FeedResponse",
+    "BatchFeedItemsRequest",
+    "BatchFeedItemsResponse",
     "AuthenticatedUser",
     "TokenData",
 ]
+

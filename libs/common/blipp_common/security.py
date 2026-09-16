@@ -148,20 +148,21 @@ async def verify_token(token: str) -> Dict[str, Any]:
         if jti or sub:
             try:
                 redis_client = await get_redis_client()
-                if jti and await redis_client.get(f"blocklist:jti:{jti}"):
-                    raise AppException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        code="UNAUTHORIZED",
-                        message="Token has been revoked",
-                        headers={"WWW-Authenticate": "Bearer"}
-                    )
-                if sub and await redis_client.get(f"blocklist:sub:{sub}"):
-                    raise AppException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        code="UNAUTHORIZED",
-                        message="Account is suspended or blocked",
-                        headers={"WWW-Authenticate": "Bearer"}
-                    )
+                if redis_client is not None:
+                    if jti and await redis_client.get(f"blocklist:jti:{jti}"):
+                        raise AppException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            code="UNAUTHORIZED",
+                            message="Token has been revoked",
+                            headers={"WWW-Authenticate": "Bearer"}
+                        )
+                    if sub and await redis_client.get(f"blocklist:sub:{sub}"):
+                        raise AppException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            code="UNAUTHORIZED",
+                            message="Account is suspended or blocked",
+                            headers={"WWW-Authenticate": "Bearer"}
+                        )
             except AppException:
                 raise
             except Exception as e:

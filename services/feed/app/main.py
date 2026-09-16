@@ -39,7 +39,10 @@ logger = logging.getLogger("feed-service.main")
 async def lifespan(app: FastAPI):
     logger.info(f"Starting Feed Service v{settings.APP_VERSION}")
     try:
-        await init_db_pool()
+        pool = await init_db_pool()
+        from app.database import init_feed_db
+        await init_feed_db()
+        logger.info("Feed database initialized and projections verified")
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
     try:

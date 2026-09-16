@@ -15,8 +15,8 @@ from blipp_common.database import (
     close_db_pool,
     get_db_pool,
     init_db_pool,
-    CREATE_TABLES_SQL,
 )
+from app.database import init_moderation_db
 from blipp_common.events import event_bus
 from blipp_common.exceptions import (
     AppException,
@@ -45,13 +45,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting Blipp Moderation Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
-        logger.info("Database connection pool initialized")
-        # Ensure schema tables exist in blipp_moderation
-        pool = await get_db_pool()
-        if pool:
-            async with pool.acquire() as conn:
-                await conn.execute(CREATE_TABLES_SQL)
-                logger.info("Ensured moderation tables and indexes exist")
+        await init_moderation_db()
+        logger.info("Database connection pool initialized and moderation schema verified")
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
 

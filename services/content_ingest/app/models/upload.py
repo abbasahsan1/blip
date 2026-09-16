@@ -15,7 +15,6 @@ class Upload(Base):
     upload_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     creator_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users_profile.user_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

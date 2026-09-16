@@ -81,19 +81,8 @@ async def follow_user(
                 fallback_display,
             )
 
-        # 3. Insert follow relationship idempotently
-        insert_res = await conn.execute(
-            """
-            INSERT INTO follows (follower_id, followee_id, created_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (follower_id, followee_id) DO NOTHING
-            """,
-            current_user.user_id,
-            user_id,
-        )
+        from blipp_common.outbox import record_outbox_event
 
-    # 4. If newly inserted, publish event to NATS JetStream ENGAGEMENT stream (§5.8)
-    if insert_res == "INSERT 0 1":
         event_payload = {
             "event_id": str(uuid.uuid4()),
             "event_type": "follow",
@@ -104,11 +93,28 @@ async def follow_user(
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "position_seconds": 0.0,
         }
+
+        # 3. Insert follow relationship idempotently
+        async with conn.transaction():
+            insert_res = await conn.execute(
+                """
+                INSERT INTO follows (follower_id, followee_id, created_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (follower_id, followee_id) DO NOTHING
+                """,
+                current_user.user_id,
+                user_id,
+            )
+            if insert_res == "INSERT 0 1":
+                await record_outbox_event(conn, "engagement.follow", event_payload)
+
+    # 4. If newly inserted, eagerly publish event to NATS JetStream ENGAGEMENT stream (§5.8)
+    if insert_res == "INSERT 0 1":
         try:
             await event_bus.publish("engagement.follow", event_payload)
             logger.info(f"Published engagement.follow: {current_user.user_id} -> {user_id}")
         except Exception as e:
-            logger.warning(f"Failed to publish engagement.follow event to NATS: {e}")
+            logger.warning(f"Eager publish of engagement.follow delayed (outbox will deliver): {e}")
 
     return FollowActionResponse(
         success=True,
@@ -134,28 +140,34 @@ async def unfollow_user(
             message="Database connection pool unavailable",
         )
 
+    from blipp_common.outbox import record_outbox_event
+
+    event_payload = {
+        "event_id": str(uuid.uuid4()),
+        "event_type": "unfollow",
+        "user_id": str(current_user.user_id),
+        "blipp_id": None,
+        "session_id": str(uuid.uuid4()),
+        "target_user_id": str(user_id),
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "position_seconds": 0.0,
+    }
+
     async with pool.acquire() as conn:
-        res = await conn.execute(
-            "DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2",
-            current_user.user_id,
-            user_id,
-        )
+        async with conn.transaction():
+            res = await conn.execute(
+                "DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2",
+                current_user.user_id,
+                user_id,
+            )
+            if res == "DELETE 1":
+                await record_outbox_event(conn, "engagement.unfollow", event_payload)
 
     if res == "DELETE 1":
-        event_payload = {
-            "event_id": str(uuid.uuid4()),
-            "event_type": "unfollow",
-            "user_id": str(current_user.user_id),
-            "blipp_id": None,
-            "session_id": str(uuid.uuid4()),
-            "target_user_id": str(user_id),
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
-            "position_seconds": 0.0,
-        }
         try:
             await event_bus.publish("engagement.unfollow", event_payload)
         except Exception as e:
-            logger.warning(f"Failed to publish engagement.unfollow event to NATS: {e}")
+            logger.warning(f"Eager publish of engagement.unfollow delayed (outbox will deliver): {e}")
 
     return FollowActionResponse(
         success=True,

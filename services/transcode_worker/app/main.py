@@ -89,6 +89,10 @@ async def process_message(js: JetStreamContext, msg) -> None:
     blipp_id_str = data.get("blipp_id")
     blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else uuid.uuid4()
 
+    author_username = data.get("author_username") or ""
+    author_display_name = data.get("author_display_name") or ""
+    author_avatar_url = data.get("author_avatar_url")
+
     with tempfile.TemporaryDirectory(prefix=f"transcode_{upload_id}_") as tmpdir:
         input_filename = os.path.basename(storage_manager.extract_storage_key(raw_file_url)) or "input.bin"
         local_input_path = os.path.join(tmpdir, input_filename)
@@ -133,6 +137,9 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 "duration_seconds": float(duration_seconds),
                 "source_type": detected_source_type or "direct_upload",
                 "scheduled_at": scheduled_at,
+                "author_username": author_username,
+                "author_display_name": author_display_name,
+                "author_avatar_url": author_avatar_url,
             }
             await js.publish(
                 subject="media.transcode.completed",

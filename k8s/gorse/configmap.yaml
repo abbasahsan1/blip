@@ -11,7 +11,7 @@ data:
   config.toml: |
     [database]
     data_store = "sqlite:///var/lib/gorse/data.db"
-    cache_store = "redis://redis.blipp.svc.cluster.local:6379/0"
+    cache_store = "sqlite:///var/lib/gorse/cache.db"
 
     [master]
     port = 8086

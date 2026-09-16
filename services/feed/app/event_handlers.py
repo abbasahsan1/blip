@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-from typing import Dict, Any
+import uuid
+from typing import Any, Dict
 
 import nats
 from nats.js.api import RetentionPolicy, StorageType
@@ -24,13 +25,13 @@ def stop_event_handlers() -> None:
 
 async def handle_blipp_published(data: Dict[str, Any]) -> None:
     """
-    Project published blipps into feed_items table for Feed isolation.
+    Project published blipps into feed_items table strictly from event payload
+    without cross-service database access.
     """
     blipp_id_str = data.get("blipp_id")
     if not blipp_id_str:
         return
 
-    import uuid
     try:
         blipp_id = uuid.UUID(str(blipp_id_str))
         creator_id_str = data.get("creator_id")
@@ -44,36 +45,168 @@ async def handle_blipp_published(data: Dict[str, Any]) -> None:
         logger.error("Database pool unavailable to process event")
         return
 
-    title = data.get("title")
+    title = data.get("title") or "Untitled Blipp"
+    description = data.get("description")
     audio_url = data.get("audio_url", "")
+    audio_variants = data.get("audio_variants") or {}
     duration_seconds = float(data.get("duration_seconds", 0.0))
-    published_at = data.get("published_at")
-    
-    # We may need to get user profile details for author_username etc.
-    # In a fully decoupled system, we'd hydrate this. Since we share the db for now, 
-    # we can fetch them from users_profile.
-    
-    async with pool.acquire() as conn:
-        profile = await conn.fetchrow("SELECT username, display_name, avatar_url FROM users_profile WHERE user_id = $1", creator_id)
-        
-        username = profile["username"] if profile else "unknown"
-        display_name = profile["display_name"] if profile and profile["display_name"] else username
-        avatar_url = profile["avatar_url"] if profile else None
+    username = data.get("author_username") or "creator"
+    display_name = data.get("author_display_name") or username
+    avatar_url = data.get("author_avatar_url")
 
+    async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO feed_items (
-                blipp_id, creator_id, title, audio_url, duration_seconds, 
-                author_username, author_display_name, author_avatar_url
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                blipp_id, creator_id, title, description, audio_url, audio_variants,
+                duration_seconds, author_username, author_display_name, author_avatar_url
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
             ON CONFLICT (blipp_id) DO UPDATE SET
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
                 audio_url = EXCLUDED.audio_url,
-                duration_seconds = EXCLUDED.duration_seconds
+                audio_variants = EXCLUDED.audio_variants,
+                duration_seconds = EXCLUDED.duration_seconds,
+                author_username = EXCLUDED.author_username,
+                author_display_name = EXCLUDED.author_display_name,
+                author_avatar_url = EXCLUDED.author_avatar_url
             """,
-            blipp_id, creator_id, title, audio_url, duration_seconds,
-            username, display_name, avatar_url
+            blipp_id,
+            creator_id,
+            title,
+            description,
+            audio_url,
+            json.dumps(audio_variants),
+            duration_seconds,
+            username,
+            display_name,
+            avatar_url,
         )
-        logger.info(f"Projected blipp {blipp_id} to feed_items")
+        logger.info(f"Projected blipp {blipp_id} to feed_items (author snapshot included)")
+
+
+async def handle_like_event(data: Dict[str, Any], is_like: bool) -> None:
+    user_id_str = data.get("user_id")
+    blipp_id_str = data.get("blipp_id")
+    if not user_id_str or not blipp_id_str:
+        return
+
+    try:
+        user_id = uuid.UUID(str(user_id_str))
+        blipp_id = uuid.UUID(str(blipp_id_str))
+    except (ValueError, TypeError):
+        return
+
+    pool = await get_db_pool()
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if is_like:
+                await conn.execute(
+                    """
+                    INSERT INTO user_likes_projection (user_id, blipp_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (user_id, blipp_id) DO NOTHING
+                    """,
+                    user_id,
+                    blipp_id,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO feed_item_stats (blipp_id, likes_count)
+                    VALUES ($1, 1)
+                    ON CONFLICT (blipp_id) DO UPDATE
+                    SET likes_count = feed_item_stats.likes_count + 1
+                    """,
+                    blipp_id,
+                )
+            else:
+                res = await conn.execute(
+                    "DELETE FROM user_likes_projection WHERE user_id = $1 AND blipp_id = $2",
+                    user_id,
+                    blipp_id,
+                )
+                if res == "DELETE 1":
+                    await conn.execute(
+                        """
+                        UPDATE feed_item_stats
+                        SET likes_count = GREATEST(0, likes_count - 1)
+                        WHERE blipp_id = $1
+                        """,
+                        blipp_id,
+                    )
+
+
+async def handle_save_event(data: Dict[str, Any], is_save: bool) -> None:
+    user_id_str = data.get("user_id")
+    blipp_id_str = data.get("blipp_id")
+    if not user_id_str or not blipp_id_str:
+        return
+
+    try:
+        user_id = uuid.UUID(str(user_id_str))
+        blipp_id = uuid.UUID(str(blipp_id_str))
+    except (ValueError, TypeError):
+        return
+
+    pool = await get_db_pool()
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        if is_save:
+            await conn.execute(
+                """
+                INSERT INTO user_saves_projection (user_id, blipp_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, blipp_id) DO NOTHING
+                """,
+                user_id,
+                blipp_id,
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM user_saves_projection WHERE user_id = $1 AND blipp_id = $2",
+                user_id,
+                blipp_id,
+            )
+
+
+async def handle_follow_event(data: Dict[str, Any], is_follow: bool) -> None:
+    follower_id_str = data.get("user_id")
+    followee_id_str = data.get("target_user_id")
+    if not follower_id_str or not followee_id_str:
+        return
+
+    try:
+        follower_id = uuid.UUID(str(follower_id_str))
+        followee_id = uuid.UUID(str(followee_id_str))
+    except (ValueError, TypeError):
+        return
+
+    pool = await get_db_pool()
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        if is_follow:
+            await conn.execute(
+                """
+                INSERT INTO user_follows_projection (follower_id, followee_id)
+                VALUES ($1, $2)
+                ON CONFLICT (follower_id, followee_id) DO NOTHING
+                """,
+                follower_id,
+                followee_id,
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM user_follows_projection WHERE follower_id = $1 AND followee_id = $2",
+                follower_id,
+                followee_id,
+            )
 
 
 async def run_event_consumer() -> None:
@@ -88,7 +221,6 @@ async def run_event_consumer() -> None:
 
         js = event_bus.js
         try:
-            # We must ensure the stream exists
             try:
                 await js.add_stream(
                     name=settings.NATS_STREAM_ENGAGEMENT,
@@ -98,24 +230,40 @@ async def run_event_consumer() -> None:
                 )
             except Exception:
                 pass
-                
+
             psub = await js.pull_subscribe(
-                subject="engagement.blipp.published",
+                subject="engagement.>",
                 durable=CONSUMER_NAME,
                 stream=settings.NATS_STREAM_ENGAGEMENT,
             )
-            logger.info(f"Durable pull consumer '{CONSUMER_NAME}' subscribed to 'engagement.blipp.published'")
+            logger.info(f"Durable pull consumer '{CONSUMER_NAME}' subscribed to 'engagement.>'")
 
             while _running:
                 try:
-                    msgs = await psub.fetch(batch=5, timeout=2.0)
+                    msgs = await psub.fetch(batch=10, timeout=2.0)
                     for msg in msgs:
                         try:
                             payload = json.loads(msg.data.decode("utf-8"))
-                            await handle_blipp_published(payload)
+                            subject = msg.subject
+
+                            if subject == "engagement.blipp.published":
+                                await handle_blipp_published(payload)
+                            elif subject == "engagement.like":
+                                await handle_like_event(payload, is_like=True)
+                            elif subject == "engagement.unlike":
+                                await handle_like_event(payload, is_like=False)
+                            elif subject == "engagement.save":
+                                await handle_save_event(payload, is_save=True)
+                            elif subject == "engagement.unsave":
+                                await handle_save_event(payload, is_save=False)
+                            elif subject == "engagement.follow":
+                                await handle_follow_event(payload, is_follow=True)
+                            elif subject == "engagement.unfollow":
+                                await handle_follow_event(payload, is_follow=False)
+
                             await msg.ack()
                         except Exception as msg_err:
-                            logger.exception(f"Error handling msg: {msg_err}")
+                            logger.exception(f"Error handling msg on '{msg.subject}': {msg_err}")
                             await msg.nak(delay=2.0)
                 except (nats.errors.TimeoutError, asyncio.TimeoutError):
                     continue

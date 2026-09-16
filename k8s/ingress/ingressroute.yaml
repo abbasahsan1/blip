@@ -129,6 +129,13 @@ spec:
         - name: auth-service
           port: 8006
 
+    # 2a. Saves & Bookmarks routed to Social Graph Service
+    - match: PathPrefix(`/v1/blipps/saved`) || PathPrefix(`/v1/saves`) || (PathPrefix(`/v1/blipps`) && PathRegexp(`^/v1/blipps/[^/]+/save$`))
+      kind: Rule
+      services:
+        - name: social-graph-service
+          port: 8003
+
     # 2. Content Ingest Service (/ingest, /v1/uploads, /v1/blipps)
     - match: PathPrefix(`/ingest`)
       kind: Rule
@@ -157,7 +164,7 @@ spec:
         - name: feed-service
           port: 8002
 
-    # 4. Social Graph Service (/social, /v1/profiles, /v1/social, /v1/likes)
+    # 4. Social Graph Service (/social, /v1/profiles, /v1/social, /v1/likes, /v1/saves)
     - match: PathPrefix(`/social`)
       kind: Rule
       middlewares:
@@ -165,7 +172,7 @@ spec:
       services:
         - name: social-graph-service
           port: 8003
-    - match: PathPrefix(`/v1/profiles`) || PathPrefix(`/v1/social`) || PathPrefix(`/v1/likes`)
+    - match: PathPrefix(`/v1/profiles`) || PathPrefix(`/v1/social`) || PathPrefix(`/v1/likes`) || PathPrefix(`/v1/saves`)
       kind: Rule
       services:
         - name: social-graph-service

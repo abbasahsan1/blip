@@ -142,23 +142,10 @@ async def get_stories(
     # De-duplicate IDs
     unique_creator_ids = list({uid for uid in target_creator_ids})
 
+    if not unique_creator_ids:
+        return StoryListResponse(items=[], total=0)
+
     async with pool.acquire() as conn:
-        # If no follows were retrieved from social graph service, try reading from follows table if it exists in db
-        if len(unique_creator_ids) <= (1 if include_self else 0):
-            try:
-                follow_rows = await conn.fetch(
-                    "SELECT followee_id FROM follows WHERE follower_id = $1",
-                    current_user.user_id,
-                )
-                for fr in follow_rows:
-                    unique_creator_ids.append(fr["followee_id"])
-                unique_creator_ids = list({uid for uid in unique_creator_ids})
-            except Exception:
-                pass
-
-        if not unique_creator_ids:
-            return StoryListResponse(items=[], total=0)
-
         rows = await conn.fetch(
             """
             SELECT story_id, creator_id, audio_url, duration_seconds, expires_at, created_at

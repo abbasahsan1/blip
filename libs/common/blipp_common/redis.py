@@ -13,19 +13,27 @@ if "async_timeout" not in sys.modules:
         _at.timeout = getattr(asyncio, "timeout", None)
         sys.modules["async_timeout"] = _at
 
-import redis.asyncio as aioredis
+try:
+    import redis.asyncio as aioredis
+except ImportError:
+    aioredis = None
+
 from blipp_common.config import settings
 
 logger = logging.getLogger("blipp_common.redis")
 
-_redis_pool: Optional[aioredis.ConnectionPool] = None
-_redis_client: Optional[aioredis.Redis] = None
+_redis_pool = None
+_redis_client = None
 
 
-async def get_redis_client(redis_url: Optional[str] = None) -> aioredis.Redis:
+async def get_redis_client(redis_url: Optional[str] = None):
     """
     Returns the singleton asynchronous Redis client with pooled connections.
     """
+    if aioredis is None:
+        logger.warning("Redis library is not installed in the current environment.")
+        return None
+
     global _redis_pool, _redis_client
     if _redis_client is None:
         url = redis_url or settings.REDIS_URL

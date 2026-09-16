@@ -110,7 +110,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting Blipp Messaging & Stories Service v{settings.APP_VERSION}")
     try:
         await init_db_pool()
-        logger.info("Database connection pool initialized")
+        from app.database import init_messaging_db
+        await init_messaging_db()
+        logger.info("Database connection pool initialized and schema verified")
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
 

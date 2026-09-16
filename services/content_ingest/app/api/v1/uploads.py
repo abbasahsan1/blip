@@ -47,42 +47,40 @@ async def upload_media(
         content_type=content_type,
     )
     now = datetime.now(timezone.utc)
+    upload_payload = {
+        "upload_id": str(upload_id),
+        "creator_id": str(current_user.user_id),
+        "raw_file_url": raw_file_url,
+        "upload_type": upload_type,
+        "title": title or "",
+        "description": description or "",
+        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
+        "author_username": current_user.username or "",
+        "author_display_name": current_user.first_name or current_user.username or "",
+        "author_avatar_url": getattr(current_user, "avatar_url", None),
+        "timestamp": now.isoformat(),
+    }
+
     try:
         async with pool.acquire() as conn:
-            username = current_user.username or str(current_user.user_id)
-            await conn.execute(
-                """
-                INSERT INTO users_profile (user_id, username, display_name)
-                VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING
-                """,
-                current_user.user_id,
-                username,
-                current_user.first_name or username,
-            )
-            await conn.execute(
-                """
-                INSERT INTO uploads (upload_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at)
-                VALUES ($1, $2, $3, $4, 'created', $5, $6, $7)
-                """,
-                upload_id, current_user.user_id, raw_file_url, upload_type, title, description, now,
-            )
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO uploads (upload_id, creator_id, raw_file_url, upload_type, processing_status, title, description, created_at)
+                    VALUES ($1, $2, $3, $4, 'created', $5, $6, $7)
+                    """,
+                    upload_id, current_user.user_id, raw_file_url, upload_type, title, description, now,
+                )
+                from blipp_common.outbox import record_outbox_event
+                await record_outbox_event(conn, "upload.received", upload_payload)
     except Exception as exc:
         logger.exception("Could not persist upload %s", upload_id)
         raise AppException(status_code=500, code="DATABASE_ERROR", message="Failed to persist upload record") from exc
 
     try:
-        await event_bus.publish("upload.received", {
-            "upload_id": str(upload_id),
-            "creator_id": str(current_user.user_id),
-            "raw_file_url": raw_file_url,
-            "upload_type": upload_type,
-            "title": title or "",
-            "description": description or "",
-            "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
-            "timestamp": now.isoformat(),
-        })
+        await event_bus.publish("upload.received", upload_payload)
     except Exception as exc:
-        logger.warning("Could not publish upload.received for %s: %s", upload_id, exc)
+        logger.warning("Eager publish of upload.received for %s delayed (outbox will deliver): %s", upload_id, exc)
 
     return UploadResponse(upload_id=upload_id, status="queued", message="Upload received and queued for processing")
 

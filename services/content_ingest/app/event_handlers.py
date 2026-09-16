@@ -97,79 +97,103 @@ async def handle_transcode_completed(data: Dict[str, Any]) -> None:
     else:
         blipp_status = "published"
 
+    author_username = data.get("author_username") or ""
+    author_display_name = data.get("author_display_name") or author_username or "Creator"
+    author_avatar_url = data.get("author_avatar_url")
+
+    published_payload = {
+        "blipp_id": str(blipp_id),
+        "creator_id": str(creator_id),
+        "title": title,
+        "description": description,
+        "audio_url": audio_url,
+        "audio_variants": audio_variants,
+        "duration_seconds": duration_seconds,
+        "published_at": now_utc.isoformat(),
+        "author_username": author_username,
+        "author_display_name": author_display_name,
+        "author_avatar_url": author_avatar_url,
+    }
+
+    copyright_payload = {
+        "blipp_id": str(blipp_id),
+        "upload_id": str(upload_id),
+        "audio_url": audio_url,
+        "duration_seconds": duration_seconds,
+        "requested_at": now_utc.isoformat(),
+    }
+
+    from blipp_common.outbox import record_outbox_event
+
     async with pool.acquire() as conn:
-        # 1. Update source upload record
-        await conn.execute(
-            """
-            UPDATE uploads
-            SET processing_status = $1
-            WHERE upload_id = $2
-            """,
-            blipp_status,
-            upload_id,
-        )
+        async with conn.transaction():
+            # 1. Update source upload record
+            await conn.execute(
+                """
+                UPDATE uploads
+                SET processing_status = $1
+                WHERE upload_id = $2
+                """,
+                blipp_status,
+                upload_id,
+            )
 
-        # 2. Upsert blipps record
-        await conn.execute(
-            """
-            INSERT INTO blipps (
-                blipp_id, creator_id, title, description, audio_url, audio_variants,
-                duration_seconds, language, status, scheduled_at, source_type, parent_upload_id, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'en', $8, $9, $10, $11, $12)
-            ON CONFLICT (blipp_id) DO UPDATE
-                SET audio_url = EXCLUDED.audio_url,
-                    audio_variants = EXCLUDED.audio_variants,
-                    duration_seconds = EXCLUDED.duration_seconds,
-                    status = EXCLUDED.status,
-                    scheduled_at = EXCLUDED.scheduled_at
-            """,
-            blipp_id,
-            creator_id,
-            title,
-            description,
-            audio_url,
-            json.dumps(audio_variants),
-            duration_seconds,
-            blipp_status,
-            scheduled_at_dt,
-            source_type,
-            upload_id,
-            now_utc,
-        )
-        logger.info(f"Persisted blipp {blipp_id} (upload={upload_id}, status={blipp_status})")
+            # 2. Upsert blipps record
+            await conn.execute(
+                """
+                INSERT INTO blipps (
+                    blipp_id, creator_id, title, description, audio_url, audio_variants,
+                    duration_seconds, language, status, scheduled_at, source_type, parent_upload_id, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'en', $8, $9, $10, $11, $12)
+                ON CONFLICT (blipp_id) DO UPDATE
+                    SET audio_url = EXCLUDED.audio_url,
+                        audio_variants = EXCLUDED.audio_variants,
+                        duration_seconds = EXCLUDED.duration_seconds,
+                        status = EXCLUDED.status,
+                        scheduled_at = EXCLUDED.scheduled_at
+                """,
+                blipp_id,
+                creator_id,
+                title,
+                description,
+                audio_url,
+                json.dumps(audio_variants),
+                duration_seconds,
+                blipp_status,
+                scheduled_at_dt,
+                source_type,
+                upload_id,
+                now_utc,
+            )
 
-    # 3. Publish downstream event
+            # 3. Record outbox event within the same atomic transaction
+            if blipp_status == "published":
+                await record_outbox_event(conn, "engagement.blipp.published", published_payload)
+            elif blipp_status == "processing":
+                await record_outbox_event(conn, "copyright.scan.requested", copyright_payload)
+
+            logger.info(f"Persisted blipp {blipp_id} and recorded outbox (status={blipp_status})")
+
+    # 4. Eager downstream publish
     if blipp_status == "published":
         try:
             await event_bus.publish(
                 subject="engagement.blipp.published",
-                payload={
-                    "blipp_id": str(blipp_id),
-                    "creator_id": str(creator_id),
-                    "title": title,
-                    "audio_url": audio_url,
-                    "duration_seconds": duration_seconds,
-                    "published_at": now_utc.isoformat(),
-                },
+                payload=published_payload,
             )
             logger.info(f"Published engagement.blipp.published for blipp {blipp_id}")
         except Exception as e:
-            logger.warning(f"Failed to publish engagement.blipp.published: {e}")
+            logger.warning(f"Eager publish of engagement.blipp.published delayed (outbox will deliver): {e}")
 
     elif blipp_status == "processing":
         try:
             await event_bus.publish(
                 subject="copyright.scan.requested",
-                payload={
-                    "blipp_id": str(blipp_id),
-                    "upload_id": str(upload_id),
-                    "audio_url": audio_url,
-                    "requested_at": now_utc.isoformat(),
-                },
+                payload=copyright_payload,
             )
             logger.info(f"Published copyright.scan.requested for blipp {blipp_id}")
         except Exception as e:
-            logger.warning(f"Failed to publish copyright.scan.requested: {e}")
+            logger.warning(f"Eager publish of copyright.scan.requested delayed (outbox will deliver): {e}")
 
 
 async def handle_transcode_failed(data: Dict[str, Any]) -> None:

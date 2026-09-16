@@ -23,8 +23,9 @@ from blipp_common.exceptions import (
 from blipp_common.database import init_db_pool, close_db_pool, get_db_pool
 from blipp_common.storage import storage_service
 from blipp_common.events import event_bus
+from blipp_common.outbox import run_outbox_publisher, stop_outbox_publisher
+from app.database import init_ingest_db
 from app.api.v1.uploads import router as uploads_router
-from app.api.v1.saves import router as saves_router
 from app.models.schemas import HealthResponse
 from app.event_handlers import (
     run_transcode_consumer,
@@ -44,7 +45,8 @@ logger = logging.getLogger("content-ingest.main")
 async def lifespan(app: FastAPI):
     logger.info(f"Starting Content Ingest Service v{settings.APP_VERSION}")
     try:
-        await init_db_pool()
+        pool = await init_db_pool()
+        await init_ingest_db()
     except Exception as e:
         logger.error(f"Database pool startup error: {e}")
     try:
@@ -52,18 +54,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Event bus startup connection error: {e}")
 
-    # Launch transcode event consumer, scheduled post publisher, & content takedown background workers
+    # Launch transcode event consumer, scheduled post publisher, content takedown, & outbox background workers
     consumer_task = asyncio.create_task(run_transcode_consumer())
     publisher_task = asyncio.create_task(run_scheduled_publisher())
     takedown_task = asyncio.create_task(run_takedown_consumer())
+    pool = await get_db_pool()
+    outbox_task = asyncio.create_task(run_outbox_publisher(pool, service_name="content-ingest"))
 
     yield
 
     stop_event_handlers()
+    stop_outbox_publisher()
     consumer_task.cancel()
     publisher_task.cancel()
     takedown_task.cancel()
-    await asyncio.gather(consumer_task, publisher_task, takedown_task, return_exceptions=True)
+    outbox_task.cancel()
+    await asyncio.gather(consumer_task, publisher_task, takedown_task, outbox_task, return_exceptions=True)
 
     try:
         await event_bus.close()
@@ -250,8 +256,6 @@ async def docs_redirect():
 # Mount routes under /v1/uploads and /uploads
 app.include_router(uploads_router, prefix="/v1/uploads")
 app.include_router(uploads_router, prefix="/uploads")
-app.include_router(saves_router, prefix="/v1")
-app.include_router(saves_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

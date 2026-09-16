@@ -1,21 +1,20 @@
-import json
-import uuid
-import signal
 import asyncio
+import json
 import logging
-from typing import Optional, Dict, Any
-from datetime import datetime, timezone, date
+import signal
+import uuid
+from datetime import date, datetime, timezone
+from typing import Any, Dict, Optional
 
 import httpx
 import nats
 from nats.aio.client import Client as NATSClient
+from nats.js.api import RetentionPolicy, StorageType
 from nats.js.client import JetStreamContext
-from nats.js.api import StreamConfig, StorageType, RetentionPolicy
 
 from blipp_common.config import settings
-from blipp_common.database import get_db_pool, init_db, close_db
+from blipp_common.database import close_db, get_db_pool, init_db
 
-# Worker-specific NATS consumer group (overrides blipp_common default "blipp-workers")
 NATS_CONSUMER_GROUP = "analytics-workers"
 
 logging.basicConfig(
@@ -26,6 +25,45 @@ logger = logging.getLogger("analytics-worker")
 
 _running = True
 _http_client: Optional[httpx.AsyncClient] = None
+
+ANALYTICS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS processed_events (
+    event_id UUID PRIMARY KEY,
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS analytics_blipp_metadata (
+    blipp_id UUID PRIMARY KEY,
+    creator_id UUID NOT NULL,
+    duration_seconds DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    title VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_meta_creator ON analytics_blipp_metadata (creator_id);
+
+CREATE TABLE IF NOT EXISTS listening_session_agg (
+    session_id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    blipp_id UUID NOT NULL,
+    total_seconds_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    drop_off_position_seconds DOUBLE PRECISION,
+    session_date DATE NOT NULL DEFAULT CURRENT_DATE
+);
+CREATE INDEX IF NOT EXISTS idx_listening_session_user ON listening_session_agg (user_id, session_date DESC);
+CREATE INDEX IF NOT EXISTS idx_listening_session_blipp ON listening_session_agg (blipp_id);
+
+CREATE TABLE IF NOT EXISTS creator_minutes_agg (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    creator_id UUID NOT NULL,
+    blipp_id UUID NOT NULL,
+    total_minutes_listened DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    CONSTRAINT uq_creator_blipp_date UNIQUE (creator_id, blipp_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_creator_minutes_creator_date ON creator_minutes_agg (creator_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_creator_minutes_blipp ON creator_minutes_agg (blipp_id);
+"""
 
 
 def handle_shutdown(sig, frame):
@@ -41,7 +79,11 @@ async def get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-# ─── Business SQL helper ──────────────────────────────────────────────────────
+async def init_analytics_db() -> None:
+    pool = await get_db_pool(settings)
+    async with pool.acquire() as conn:
+        await conn.execute(ANALYTICS_SCHEMA_SQL)
+        logger.info("Initialized Analytics isolated database schema")
 
 
 async def record_playback_engagement(
@@ -54,18 +96,13 @@ async def record_playback_engagement(
     event_type: str,
     device_signal: str,
     timestamp_str: Optional[str] = None,
+    creator_id_fallback: Optional[uuid.UUID] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Applies Section 6.5 aggregation business logic atomically:
-    1. Treats background listening ('screen_off', 'bluetooth_connected', 'app_backgrounded')
-       as active playback engagement.
-    2. Aggregates total_seconds_listened and drop_off_position_seconds.
-    3. Checks completion threshold (>= 0.9 * duration).
-    4. Increments CreatorMinutesAgg.total_minutes_listened for the blipp's creator.
+    Applies Section 6.5 aggregation business logic using isolated analytics metadata projection.
     """
     pool = await get_db_pool(settings)
 
-    # Determine session date
     session_date = date.today()
     if timestamp_str:
         try:
@@ -75,21 +112,7 @@ async def record_playback_engagement(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # 1. Guarantee user profile row exists to satisfy foreign key
-            await conn.execute(
-                """
-            )
-
-            # Idempotency check via processed_events table
-            await conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS processed_events (
-                    event_id UUID PRIMARY KEY,
-                    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                )
-                """
-            )
-
+            # 1. Idempotency check via processed_events table
             if event_id:
                 try:
                     await conn.execute(
@@ -100,29 +123,44 @@ async def record_playback_engagement(
                     # Unique violation -> already processed
                     return None
 
-            # 2. Lookup blipp details (creator_id, official duration)
             if not blipp_id:
-                # E.g. follow events do not have a blipp_id
                 return {"user_id": user_id, "event_type": event_type}
 
-            blipp_row = await conn.fetchrow(
+            # 2. Lookup blipp details from local metadata projection
+            meta_row = await conn.fetchrow(
                 """
                 SELECT creator_id, duration_seconds
-                FROM blipps
+                FROM analytics_blipp_metadata
                 WHERE blipp_id = $1
                 """,
                 blipp_id,
             )
 
-            if not blipp_row:
-                logger.warning(f"Blipp {blipp_id} not found in database. Skipping engagement event.")
+            if meta_row:
+                creator_id = meta_row["creator_id"]
+                effective_duration = float(meta_row["duration_seconds"] or duration_seconds or 1.0)
+            elif creator_id_fallback:
+                creator_id = creator_id_fallback
+                effective_duration = max(float(duration_seconds), 1.0)
+                await conn.execute(
+                    """
+                    INSERT INTO analytics_blipp_metadata (blipp_id, creator_id, duration_seconds)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (blipp_id) DO NOTHING
+                    """,
+                    blipp_id,
+                    creator_id,
+                    effective_duration,
+                )
+            else:
+                logger.warning(
+                    f"Blipp {blipp_id} not found in analytics projection or event fallback. Skipping aggregation."
+                )
                 return None
 
-            creator_id = blipp_row["creator_id"]
-            effective_duration = float(blipp_row["duration_seconds"]) if blipp_row["duration_seconds"] else float(duration_seconds)
             effective_duration = max(effective_duration, 1.0)
 
-            # If it's a non-playback event, we don't aggregate seconds.
+            # Non-playback engagement
             if event_type in ("like", "unlike", "save", "unsave", "share"):
                 return {
                     "user_id": user_id,
@@ -143,61 +181,52 @@ async def record_playback_engagement(
                     session_id,
                 )
 
-            prev_seconds = float(existing_session["total_seconds_listened"]) if existing_session else 0.0
+            current_listened = float(existing_session["total_seconds_listened"]) if existing_session else 0.0
             was_completed = bool(existing_session["completed"]) if existing_session else False
 
-            # Calculate new seconds listened
-            current_pos = max(0.0, float(position_seconds))
-            if event_type == "play_complete":
-                new_seconds = max(prev_seconds, effective_duration)
-                is_completed = True
-                drop_off = None
-            elif event_type == "skip":
-                new_seconds = max(prev_seconds, current_pos)
-                is_completed = was_completed or (new_seconds >= 0.9 * effective_duration)
-                drop_off = current_pos
-            else:
-                # Normal play_progress event (including active screen_off / bluetooth signals)
-                new_seconds = max(prev_seconds, current_pos)
-                is_completed = was_completed or (new_seconds >= 0.9 * effective_duration)
-                drop_off = current_pos
+            delta_seconds = 0.0
+            if event_type == "play_progress":
+                if existing_session and position_seconds > float(existing_session.get("drop_off_position_seconds") or 0.0):
+                    delta_seconds = position_seconds - float(existing_session["drop_off_position_seconds"] or 0.0)
+                elif not existing_session:
+                    delta_seconds = min(position_seconds, 15.0)
 
-            delta_seconds = max(0.0, new_seconds - prev_seconds)
+            new_total_listened = current_listened + max(delta_seconds, 0.0)
+            new_completed = was_completed or (new_total_listened >= 0.9 * effective_duration)
 
-            # 4. Upsert ListeningSessionAgg
+            # 4. Upsert session aggregation
             if session_id:
                 await conn.execute(
                     """
                     INSERT INTO listening_session_agg (
-                        session_id, user_id, blipp_id, total_seconds_listened, completed, drop_off_position_seconds, session_date
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        session_id, user_id, blipp_id, total_seconds_listened,
+                        completed, drop_off_position_seconds, session_date
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     ON CONFLICT (session_id) DO UPDATE SET
                         total_seconds_listened = EXCLUDED.total_seconds_listened,
-                        completed = listening_session_agg.completed OR EXCLUDED.completed,
-                        drop_off_position_seconds = EXCLUDED.drop_off_position_seconds,
-                        session_date = EXCLUDED.session_date
+                        completed = EXCLUDED.completed,
+                        drop_off_position_seconds = EXCLUDED.drop_off_position_seconds
                     """,
                     session_id,
                     user_id,
                     blipp_id,
-                    new_seconds,
-                    is_completed,
-                    drop_off,
+                    new_total_listened,
+                    new_completed,
+                    position_seconds,
                     session_date,
                 )
 
-            # 5. Upsert CreatorMinutesAgg if incremental seconds > 0 and creator known
-            delta_minutes = delta_seconds / 60.0
-            if creator_id and delta_minutes > 0.0:
+            # 5. Creator minutes aggregation
+            if delta_seconds > 0:
+                delta_minutes = delta_seconds / 60.0
                 await conn.execute(
                     """
-                    INSERT INTO creator_minutes_agg (
-                        id, creator_id, blipp_id, total_minutes_listened, date
-                    ) VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO creator_minutes_agg (creator_id, blipp_id, total_minutes_listened, date)
+                    VALUES ($1, $2, $3, $4)
                     ON CONFLICT (creator_id, blipp_id, date) DO UPDATE SET
                         total_minutes_listened = creator_minutes_agg.total_minutes_listened + EXCLUDED.total_minutes_listened
                     """,
-                    uuid.uuid4(),
                     creator_id,
                     blipp_id,
                     delta_minutes,
@@ -205,48 +234,34 @@ async def record_playback_engagement(
                 )
 
             return {
-                "session_id": session_id,
                 "user_id": user_id,
                 "blipp_id": blipp_id,
+                "session_id": session_id,
+                "event_type": event_type,
                 "creator_id": creator_id,
-                "total_seconds_listened": new_seconds,
+                "total_seconds_listened": new_total_listened,
+                "completed": new_completed,
                 "delta_seconds": delta_seconds,
-                "delta_minutes": delta_minutes,
-                "completed": is_completed,
-                "drop_off_position_seconds": drop_off,
             }
 
 
-# ─── Gorse feedback / stream helpers ─────────────────────────────────────────
-
-
-async def push_gorse_feedback(
-    user_id: str, blipp_id: str, timestamp_str: Optional[str] = None, feedback_type: str = "listen"
-) -> None:
-    """
-    Sends positive engagement feedback to the Gorse REST API (POST /api/feedback).
-    Schema: [{"FeedbackType": "listen", "UserId": user_id, "ItemId": blipp_id, "Timestamp": ISO8601}]
-    Executed in an async task to prevent HTTP network latency from blocking NATS acks.
-    """
+async def push_gorse_feedback(user_id: str, blipp_id: str, timestamp_str: Optional[str], feedback_type: str) -> None:
+    gorse_base = getattr(settings, "GORSE_API_URL", "http://gorse.blipp.svc.cluster.local:8088").rstrip("/")
+    url = f"{gorse_base}/api/feedback"
+    client = await get_http_client()
+    payload = [{
+        "FeedbackType": feedback_type,
+        "UserId": user_id,
+        "ItemId": blipp_id,
+        "Timestamp": timestamp_str or datetime.now(timezone.utc).isoformat(),
+    }]
+    headers = {"Content-Type": "application/json"}
+    if getattr(settings, "GORSE_API_KEY", ""):
+        headers["X-API-Key"] = settings.GORSE_API_KEY
     try:
-        client = await get_http_client()
-        url = f"{settings.GORSE_API_URL.rstrip('/')}/api/feedback"
-        ts = timestamp_str or datetime.now(timezone.utc).isoformat()
-        payload = [
-            {
-                "FeedbackType": feedback_type,
-                "UserId": user_id,
-                "ItemId": blipp_id,
-                "Timestamp": ts,
-            }
-        ]
-        headers = {"Content-Type": "application/json"}
-        if settings.GORSE_API_KEY:
-            headers["X-API-Key"] = settings.GORSE_API_KEY
-
         resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code < 300:
-            logger.debug(f"Pushed Gorse feedback: user={user_id} blipp={blipp_id}")
+        if resp.status_code in (200, 201):
+            logger.debug(f"Pushed Gorse feedback: user={user_id} blipp={blipp_id} type={feedback_type}")
         else:
             logger.warning(f"Gorse feedback rejected ({resp.status_code}): {resp.text}")
     except Exception as e:
@@ -254,16 +269,12 @@ async def push_gorse_feedback(
 
 
 async def ensure_streams(js: JetStreamContext) -> None:
-    """
-    Ensures that stream ENGAGEMENT exists with subject engagement.>
-    """
     stream_name = settings.NATS_STREAM_ENGAGEMENT
     subjects = [settings.NATS_SUBJECT_ENGAGEMENT]
     try:
         await js.stream_info(stream_name)
         try:
             await js.update_stream(name=stream_name, subjects=subjects)
-            logger.info(f"Updated stream '{stream_name}' subjects to {subjects}")
         except Exception:
             pass
     except Exception:
@@ -274,18 +285,44 @@ async def ensure_streams(js: JetStreamContext) -> None:
                 storage=StorageType.FILE,
                 retention=RetentionPolicy.LIMITS,
             )
-            logger.info(f"Created stream '{stream_name}' with subjects {subjects}")
         except Exception as e:
             logger.warning(f"Could not create stream '{stream_name}': {e}")
 
 
 async def process_message(js: JetStreamContext, msg) -> None:
     raw_data = msg.data.decode("utf-8")
-    logger.debug(f"Processing engagement event on subject '{msg.subject}': {raw_data}")
     try:
         data = json.loads(raw_data)
     except Exception as e:
-        logger.error(f"Malformed JSON in engagement message: {e}")
+        logger.error(f"Malformed JSON in engagement event: {e}")
+        await msg.ack()
+        return
+
+    # Handle blipp published event to update local metadata projection
+    if msg.subject == "engagement.blipp.published":
+        blipp_id_str = data.get("blipp_id")
+        creator_id_str = data.get("creator_id")
+        duration = float(data.get("duration_seconds", 0.0))
+        title = data.get("title", "")
+        if blipp_id_str and creator_id_str:
+            try:
+                bid = uuid.UUID(str(blipp_id_str))
+                cid = uuid.UUID(str(creator_id_str))
+                pool = await get_db_pool(settings)
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO analytics_blipp_metadata (blipp_id, creator_id, duration_seconds, title)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (blipp_id) DO UPDATE SET
+                            duration_seconds = EXCLUDED.duration_seconds,
+                            title = EXCLUDED.title
+                        """,
+                        bid, cid, duration, title,
+                    )
+                logger.info(f"Analytics projection recorded blipp {bid} (creator={cid})")
+            except Exception as e:
+                logger.warning(f"Failed to record blipp metadata projection in analytics: {e}")
         await msg.ack()
         return
 
@@ -293,6 +330,7 @@ async def process_message(js: JetStreamContext, msg) -> None:
         event_id_str = data.get("event_id")
         user_id_str = data.get("user_id")
         blipp_id_str = data.get("blipp_id")
+        creator_id_str = data.get("creator_id")
         session_id_str = data.get("session_id")
         event_type = data.get("event_type", "play_progress")
         device_signal = data.get("device_signal", "screen_on")
@@ -308,9 +346,9 @@ async def process_message(js: JetStreamContext, msg) -> None:
         event_id = uuid.UUID(event_id_str) if event_id_str else None
         user_id = uuid.UUID(user_id_str)
         blipp_id = uuid.UUID(blipp_id_str) if blipp_id_str else None
+        creator_id = uuid.UUID(creator_id_str) if creator_id_str else None
         session_id = uuid.UUID(session_id_str) if session_id_str else None
 
-        # Section 6.5: Aggregate session & creator analytics
         res = await record_playback_engagement(
             event_id=event_id,
             session_id=session_id,
@@ -321,14 +359,10 @@ async def process_message(js: JetStreamContext, msg) -> None:
             event_type=event_type,
             device_signal=device_signal,
             timestamp_str=timestamp,
+            creator_id_fallback=creator_id,
         )
 
         if res:
-            logger.info(
-                f"Processed event {event_type} for user {user_id_str}. "
-                f"Stats: completed={res.get('completed', False)}"
-            )
-
             is_positive = False
             feedback_type = "listen"
 
@@ -336,10 +370,8 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 is_positive = True
                 feedback_type = event_type
             elif event_type in ("unlike", "unsave"):
-                # We could delete feedback in Gorse, but for now we'll just skip sending positive
                 pass
             else:
-                # Playback threshold
                 is_positive = (
                     bool(res.get("completed", False)) or
                     float(res.get("total_seconds_listened", 0.0)) >= 30.0 or
@@ -374,6 +406,7 @@ async def run_worker() -> None:
 
     logger.info("Initializing analytics worker database pool...")
     await init_db(settings)
+    await init_analytics_db()
 
     logger.info(f"Connecting to NATS at {settings.NATS_URL}...")
     nc: NATSClient = await nats.connect(
