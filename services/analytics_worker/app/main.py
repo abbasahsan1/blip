@@ -112,6 +112,17 @@ async def record_playback_engagement(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # T36 INVARIANT — DO NOT BREAK:
+            # The processed_events INSERT and ALL aggregation writes below MUST remain
+            # inside this single transaction. This is what makes the idempotency correct:
+            # - If aggregation fails later, the whole tx rolls back including the
+            #   processed_events row, so the event will be reprocessed on the next delivery.
+            # - If this INSERT is moved outside the transaction (e.g. for performance),
+            #   a crash between "marked processed" and "aggregation committed" would
+            #   silently drop the event — exactly-once-effective semantics would break.
+            # If you need to add external I/O (e.g. calling Gorse), do it BEFORE entering
+            # this transaction block, not inside it.
+            #
             # 1. Idempotency check via processed_events table
             if event_id:
                 try:
