@@ -42,7 +42,7 @@ async def ensure_streams(js: JetStreamContext) -> None:
     Ensures that stream UPLOADS exists and includes upload.>, transcode.>, and media.>
     """
     stream_name = settings.NATS_STREAM_UPLOADS
-    subjects = ["upload.>", "transcode.>", "media.>"]
+    subjects = [settings.NATS_SUBJECT_UPLOADS, "transcode.>", "media.>", "copyright.>", "content.>"]
     try:
         await js.stream_info(stream_name)
         try:
@@ -125,6 +125,7 @@ async def process_message(js: JetStreamContext, msg) -> None:
                 variant_url = await storage_manager.upload_file(
                     data=tier_file,
                     storage_key=variant_key,
+                    bucket_name=storage_manager.variants_bucket,
                     content_type="audio/mp4",
                 )
                 uploaded_variants[tier] = variant_url

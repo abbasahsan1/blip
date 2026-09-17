@@ -206,7 +206,7 @@ spec:
         - name: moderation-service
           port: 8005
 
-    # 7. MinIO S3 Storage (/minio, /blipp-uploads, /blipp-variants, /blipp-stories)
+    # 7. MinIO S3 Storage (/minio, /blipp-uploads, /blipp-variants, /blipp-stories, /blipp-audio-variants, /blipp-raw-uploads)
     - match: PathPrefix(`/minio`)
       kind: Rule
       middlewares:
@@ -214,7 +214,7 @@ spec:
       services:
         - name: minio
           port: 9000
-    - match: PathPrefix(`/blipp-uploads`) || PathPrefix(`/blipp-variants`) || PathPrefix(`/blipp-stories`)
+    - match: PathPrefix(`/blipp-uploads`) || PathPrefix(`/blipp-variants`) || PathPrefix(`/blipp-stories`) || PathPrefix(`/blipp-audio-variants`) || PathPrefix(`/blipp-raw-uploads`)
       kind: Rule
       services:
         - name: minio
@@ -223,8 +223,6 @@ spec:
     # 8. Keycloak Identity Provider (/keycloak, /realms, /resources, /js)
     - match: PathPrefix(`/keycloak`)
       kind: Rule
-      middlewares:
-        - name: strip-keycloak
       services:
         - name: keycloak
           port: 8080

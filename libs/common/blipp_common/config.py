@@ -78,7 +78,7 @@ class BaseCommonSettings(BaseSettings):
     @property
     def s3_public_endpoint_url(self) -> str:
         """Externally reachable S3 URL for client presigned URLs and public media playback."""
-        return self.S3_PUBLIC_ENDPOINT_URL or "http://localhost:9000"
+        return self.S3_PUBLIC_ENDPOINT_URL or "http://localhost:8419"
 
     # Local storage fallback directory & public URL
     STORAGE_LOCAL_DIR: str = "/app/data/uploads"

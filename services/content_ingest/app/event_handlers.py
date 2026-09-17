@@ -49,7 +49,10 @@ async def handle_transcode_completed(data: Dict[str, Any]) -> None:
         creator_id = uuid.UUID(str(creator_id_str)) if creator_id_str else None
 
         blipp_id_str = data.get("blipp_id")
-        blipp_id = uuid.UUID(str(blipp_id_str)) if blipp_id_str else uuid.uuid4()
+        if not blipp_id_str:
+            logger.error(f"Missing blipp_id in transcode completed event: {data}")
+            return
+        blipp_id = uuid.UUID(str(blipp_id_str))
     except (ValueError, TypeError):
         logger.error(f"Invalid UUID in transcode completed event: {data}")
         return

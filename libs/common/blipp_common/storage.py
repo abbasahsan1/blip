@@ -124,7 +124,8 @@ class StorageService:
                     )
                     return self.get_s3_uri(safe_key, bucket_name=bucket)
                 except Exception as e:
-                    logger.error(f"S3 upload_file path error: {e}. Falling back to local disk.")
+                    logger.error(f"S3 upload_file path error: {e}")
+                    raise
 
             # Local copy fallback
             local_path = self.local_dir / safe_key.lstrip("/")
@@ -156,7 +157,8 @@ class StorageService:
                     )
                 return self.get_playback_url(safe_key, bucket_name=bucket)
             except Exception as e:
-                logger.error(f"Async S3 upload error: {e}. Falling back to local disk.")
+                logger.error(f"Async S3 upload error: {e}")
+                raise
 
         # Local storage fallback
         local_path = self.local_dir / safe_key.lstrip("/")
@@ -212,7 +214,8 @@ class StorageService:
                 )
                 return self.get_s3_uri(safe_key, bucket_name=bucket)
             except Exception as e:
-                logger.error(f"S3 upload_stream error: {e}. Falling back to local disk.")
+                logger.error(f"S3 upload_stream error: {e}")
+                raise
 
         # Local storage fallback
         local_path = self.local_dir / safe_key.lstrip("/")
@@ -355,7 +358,8 @@ class StorageService:
                 )
                 return self.get_playback_url(unique_key, bucket_name=bucket)
             except Exception as e:
-                logger.error(f"Failed to upload to S3: {e}. Falling back to local disk.")
+                logger.error(f"Failed to upload to S3: {e}")
+                raise
 
         # Local storage fallback
         file_obj.seek(0)

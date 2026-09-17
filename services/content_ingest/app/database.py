@@ -8,6 +8,7 @@ CONTENT_INGEST_SCHEMA_SQL = f"""
 -- Uploads table (Content Ingest boundary)
 CREATE TABLE IF NOT EXISTS uploads (
     upload_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    blipp_id UUID,
     creator_id UUID NOT NULL,
     raw_file_url VARCHAR(1024) NOT NULL,
     upload_type VARCHAR(50) NOT NULL DEFAULT 'audio',
@@ -16,6 +17,8 @@ CREATE TABLE IF NOT EXISTS uploads (
     description TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS blipp_id UUID;
 
 CREATE INDEX IF NOT EXISTS idx_uploads_creator_id ON uploads (creator_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_processing_status ON uploads (processing_status);

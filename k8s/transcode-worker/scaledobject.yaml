@@ -10,7 +10,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: transcode-worker
-  minReplicaCount: 0
+  minReplicaCount: 1
   maxReplicaCount: 5
   cooldownPeriod: 60
   triggers:

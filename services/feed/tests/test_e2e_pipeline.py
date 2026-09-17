@@ -16,17 +16,18 @@ import json
 import os
 import uuid
 import pytest
+import pytest_asyncio
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("INTEGRATION_TEST"),
     reason="Set INTEGRATION_TEST=1 to run real-infra e2e tests",
 )
 
-CONTENT_INGEST_URL = os.environ.get("CONTENT_INGEST_URL", "http://localhost:8001")
-FEED_URL = os.environ.get("FEED_URL", "http://localhost:8002")
+CONTENT_INGEST_URL = os.environ.get("CONTENT_INGEST_URL", os.environ.get("GATEWAY_URL", "http://localhost:8419"))
+FEED_URL = os.environ.get("FEED_URL", os.environ.get("GATEWAY_URL", "http://localhost:8419"))
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def auth_token():
     """
     Obtain a valid auth token from Keycloak for the test user.
@@ -35,9 +36,10 @@ async def auth_token():
     import httpx
     from blipp_common.config import settings
 
-    user = os.environ.get("KEYCLOAK_TEST_USER", "testuser@blipp.io")
-    password = os.environ.get("KEYCLOAK_TEST_PASSWORD", "testpassword")
-    token_url = f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token"
+    user = os.environ.get("KEYCLOAK_TEST_USER", "testuser")
+    password = os.environ.get("KEYCLOAK_TEST_PASSWORD", "TestPassword123!")
+    keycloak_base = os.environ.get("KEYCLOAK_URL", settings.KEYCLOAK_URL).rstrip("/")
+    token_url = f"{keycloak_base}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token"
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(token_url, data={
@@ -52,12 +54,15 @@ async def auth_token():
     return resp.json()["access_token"]
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def feed_db():
-    """Acquire the feed service DB pool for assertions."""
-    from blipp_common.database import get_db_pool, init_db_pool
-    await init_db_pool()
-    return await get_db_pool()
+    """Acquire the feed service DB pool for assertions if available."""
+    try:
+        from blipp_common.database import get_db_pool, init_db_pool
+        await init_db_pool()
+        return await get_db_pool()
+    except Exception:
+        return None
 
 
 @pytest.mark.asyncio
@@ -67,6 +72,7 @@ async def test_upload_appears_in_feed(auth_token, feed_db):
     1. POST /v1/uploads with a real audio file
     2. Poll upload status until published (transcode -> moderation -> publish)
     3. Assert the blipp appears in GET /v1/feed
+    4. Assert the audio variant URL is reachable and streams real audio bytes
 
     This validates the complete event-driven path without any mocking.
     """
@@ -74,7 +80,6 @@ async def test_upload_appears_in_feed(auth_token, feed_db):
 
     headers = {"Authorization": f"Bearer {auth_token}"}
 
-    # Use a minimal valid MP3 (44 bytes — just enough to pass format detection)
     # In a real CI environment, use a fixture audio file
     test_audio_path = os.environ.get(
         "TEST_AUDIO_FILE",
@@ -115,18 +120,19 @@ async def test_upload_appears_in_feed(auth_token, feed_db):
             if status_resp.status_code == 200:
                 status_data = status_resp.json()
                 final_status = status_data.get("processing_status")
-                if final_status in ("published", "completed"):
+                if final_status == "published":
                     break
                 if final_status in ("failed", "rejected"):
                     pytest.fail(f"Upload {upload_id} processing failed: {status_data}")
 
-    assert final_status in ("published", "completed"), (
+    assert final_status == "published", (
         f"Upload {upload_id} did not reach published state within 120s. "
         f"Final status: {final_status}"
     )
 
     # Step 3: Assert blipp appears in feed
     blipp_in_feed = False
+    matched_item = None
     async with httpx.AsyncClient(timeout=10.0) as client:
         for _ in range(10):
             await asyncio.sleep(1.0)
@@ -137,11 +143,26 @@ async def test_upload_appears_in_feed(auth_token, feed_db):
             if feed_resp.status_code == 200:
                 feed_data = feed_resp.json()
                 items = feed_data.get("items", [])
-                if any(item.get("title") == blipp_title for item in items):
-                    blipp_in_feed = True
+                for item in items:
+                    if item.get("title") == blipp_title:
+                        blipp_in_feed = True
+                        matched_item = item
+                        break
+                if blipp_in_feed:
                     break
 
-    assert blipp_in_feed, (
+    assert blipp_in_feed and matched_item is not None, (
         f"Blipp with title '{blipp_title}' did not appear in GET /v1/feed within 10s "
         "after reaching published state. Check feed projection consumer."
     )
+
+    # Step 4: Playback assertion - fetch audio_url and verify playable bytes
+    audio_url = matched_item.get("audio_url")
+    assert audio_url, f"Feed item missing audio_url: {matched_item}"
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        audio_resp = await client.get(audio_url)
+        assert audio_resp.status_code in (200, 206), (
+            f"Failed to fetch audio from {audio_url}: {audio_resp.status_code} {audio_resp.text}"
+        )
+        assert len(audio_resp.content) > 0, "Audio response body is empty"

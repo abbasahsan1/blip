@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     last_error TEXT
 );
 
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS publish_attempted_at TIMESTAMP WITH TIME ZONE;
+
 CREATE INDEX IF NOT EXISTS idx_outbox_events_unpublished 
     ON outbox_events (created_at) 
     WHERE published_at IS NULL;
