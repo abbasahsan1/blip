@@ -8,7 +8,11 @@ import asyncpg
 
 from blipp_common.events import event_bus
 
+from datetime import datetime, timezone
+
 logger = logging.getLogger("blipp_common.outbox")
+
+RESERVED_ENVELOPE_FIELDS = ("event_id", "event_type", "occurred_at")
 
 OUTBOX_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS outbox_events (
@@ -37,30 +41,42 @@ async def record_outbox_event(
     Inserts an event into the local transactional outbox table within the caller's transaction.
     Guarantees atomicity between domain state mutation and event recording.
 
-    Canonical event envelope injected automatically:
-      - event_id   = outbox row id (the DB-generated UUID IS the canonical event_id)
-      - event_type = subject
-      - occurred_at = insertion timestamp
-    Callers MUST NOT generate their own event_id — the outbox row id is the single
-    authoritative identity for deduplication by downstream consumers.
+    Canonical event envelope contract:
+      - event_id    = single canonical UUID, matches both outbox_events.id and payload['event_id']
+      - event_type  = event subject string (e.g. 'upload.received', 'engagement.like')
+      - occurred_at = ISO-8601 UTC timestamp of outbox insertion, matches outbox_events.created_at
+
+    Reserved envelope fields (event_id, event_type, occurred_at) cannot be overridden
+    by caller-supplied payload values. Callers must not generate producer-side event IDs.
+    Returns the canonical UUID (outbox_events.id == payload.event_id).
     """
     eid = uuid.uuid4()
-    # Inject canonical envelope fields into payload so consumers can always rely on them.
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
+    # Filter out reserved envelope fields so callers cannot override them
+    domain_payload = {
+        k: v for k, v in payload.items()
+        if k not in RESERVED_ENVELOPE_FIELDS
+    }
+
+    # Inject canonical envelope fields into payload so consumers can always rely on them
     enriched_payload = {
+        **domain_payload,
         "event_id": str(eid),
         "event_type": subject,
-        "occurred_at": None,  # will be set by DB default, consumers read from outbox metadata
-        **{k: v for k, v in payload.items() if k not in ("event_id", "event_type")},
+        "occurred_at": now_iso,
     }
     payload_json = json.dumps(enriched_payload, default=str)
     await conn.execute(
         """
-        INSERT INTO outbox_events (id, subject, payload)
-        VALUES ($1, $2, $3::jsonb)
+        INSERT INTO outbox_events (id, subject, payload, created_at)
+        VALUES ($1, $2, $3::jsonb, $4)
         """,
         eid,
         subject,
         payload_json,
+        now,
     )
     return eid
 
@@ -202,6 +218,7 @@ async def run_outbox_publisher(
 
 __all__ = [
     "OUTBOX_TABLE_SQL",
+    "RESERVED_ENVELOPE_FIELDS",
     "record_outbox_event",
     "run_outbox_publisher",
     "stop_outbox_publisher",
