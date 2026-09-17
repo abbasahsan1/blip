@@ -114,6 +114,31 @@ async def get_feed(
     candidate_start_pos = 0
     using_ranked_source = False
 
+    # T29: If a ranked cursor arrived but candidate_ids is empty (Redis cache expired
+    # mid-session), re-fetch Gorse candidates so page 2+ continues in ranked order
+    # rather than silently falling back to chronological.
+    if ranked_cursor is not None and not candidate_ids:
+        logger.info(f"Ranked cursor present but cache expired — re-fetching Gorse for user {user_id_str}")
+        try:
+            gorse_url = f"{settings.GORSE_API_URL.rstrip('/')}/api/recommend/{user_id_str}?n=200"
+            headers_refetch: dict = {}
+            if settings.GORSE_API_KEY:
+                headers_refetch["X-API-Key"] = settings.GORSE_API_KEY
+
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(gorse_url, headers=headers_refetch)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidate_ids = [str(item) for item in data] if isinstance(data, list) else []
+                    if candidate_ids and redis_client is not None:
+                        try:
+                            await redis_client.setex(cache_key, 300, json.dumps(candidate_ids))
+                        except Exception:
+                            pass
+                    logger.info(f"Re-fetched {len(candidate_ids)} Gorse candidates on cache miss")
+        except Exception as e:
+            logger.warning(f"Gorse re-fetch on ranked cursor cache miss failed: {e}")
+
     if candidate_ids and (ranked_cursor is not None or cursor is None):
         # Ranked path: slice candidates from cursor position or start
         if ranked_cursor is not None:
@@ -145,6 +170,7 @@ async def get_feed(
                             b.author_avatar_url as avatar_url
                         FROM feed_items b
                         WHERE b.blipp_id = ANY($1::uuid[])
+                          AND b.taken_down_at IS NULL
                         """,
                         valid_candidate_uuids,
                     )
@@ -199,6 +225,7 @@ async def get_feed(
                             b.author_avatar_url as avatar_url
                         FROM feed_items b
                         WHERE NOT (b.blipp_id = ANY($1::uuid[]))
+                          AND b.taken_down_at IS NULL
                           AND ($2::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($2, $3::uuid))
                         ORDER BY b.created_at DESC, b.blipp_id DESC
                         LIMIT $4
@@ -219,7 +246,8 @@ async def get_feed(
                             b.author_display_name as display_name,
                             b.author_avatar_url as avatar_url
                         FROM feed_items b
-                        WHERE ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
+                        WHERE b.taken_down_at IS NULL
+                          AND ($1::timestamptz IS NULL OR (b.created_at, b.blipp_id) < ($1, $2::uuid))
                         ORDER BY b.created_at DESC, b.blipp_id DESC
                         LIMIT $3
                         """,

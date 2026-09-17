@@ -84,11 +84,9 @@ async def follow_user(
         from blipp_common.outbox import record_outbox_event
 
         event_payload = {
-            "event_id": str(uuid.uuid4()),
-            "event_type": "follow",
+            "event_type": "follow",  # T22: event_id injected by record_outbox_event()
             "user_id": str(current_user.user_id),
             "blipp_id": None,
-            "session_id": str(uuid.uuid4()),
             "target_user_id": str(user_id),
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "position_seconds": 0.0,
@@ -108,13 +106,9 @@ async def follow_user(
             if insert_res == "INSERT 0 1":
                 await record_outbox_event(conn, "engagement.follow", event_payload)
 
-    # 4. If newly inserted, eagerly publish event to NATS JetStream ENGAGEMENT stream (§5.8)
+    # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
     if insert_res == "INSERT 0 1":
-        try:
-            await event_bus.publish("engagement.follow", event_payload)
-            logger.info(f"Published engagement.follow: {current_user.user_id} -> {user_id}")
-        except Exception as e:
-            logger.warning(f"Eager publish of engagement.follow delayed (outbox will deliver): {e}")
+        logger.info(f"Recorded engagement.follow: {current_user.user_id} -> {user_id}")
 
     return FollowActionResponse(
         success=True,
@@ -143,11 +137,9 @@ async def unfollow_user(
     from blipp_common.outbox import record_outbox_event
 
     event_payload = {
-        "event_id": str(uuid.uuid4()),
-        "event_type": "unfollow",
+        "event_type": "unfollow",  # T22: event_id injected by record_outbox_event()
         "user_id": str(current_user.user_id),
         "blipp_id": None,
-        "session_id": str(uuid.uuid4()),
         "target_user_id": str(user_id),
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "position_seconds": 0.0,
@@ -163,12 +155,7 @@ async def unfollow_user(
             if res == "DELETE 1":
                 await record_outbox_event(conn, "engagement.unfollow", event_payload)
 
-    if res == "DELETE 1":
-        try:
-            await event_bus.publish("engagement.unfollow", event_payload)
-        except Exception as e:
-            logger.warning(f"Eager publish of engagement.unfollow delayed (outbox will deliver): {e}")
-
+    # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
     return FollowActionResponse(
         success=True,
         follower_id=current_user.user_id,

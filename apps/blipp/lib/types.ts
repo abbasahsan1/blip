@@ -46,7 +46,7 @@ export interface AdMetadata {
   click_url?: string;
 }
 
-export type UploadStatus = 'idle' | 'created' | 'uploading' | 'processing' | 'transcoding' | 'copyright_check' | 'moderation' | 'completed' | 'published' | 'failed' | 'rejected';
+export type UploadStatus = 'idle' | 'created' | 'uploading' | 'processing' | 'transcoding' | 'copyright_check' | 'blocked_on_copyright' | 'moderation' | 'scheduled' | 'completed' | 'published' | 'failed' | 'rejected';  // T-UI1: all backend states covered
 
 export interface Blipp {
   id: string;

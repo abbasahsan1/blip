@@ -82,11 +82,8 @@ async def upload_media(
         logger.exception("Could not persist upload %s", upload_id)
         raise AppException(status_code=500, code="DATABASE_ERROR", message="Failed to persist upload record") from exc
 
-    try:
-        await event_bus.publish("upload.received", upload_payload)
-    except Exception as exc:
-        logger.warning("Eager publish of upload.received for %s delayed (outbox will deliver): %s", upload_id, exc)
-
+    # T21: Outbox is the ONLY publisher — the outbox background task publishes upload.received.
+    # Removing the duplicate eager event_bus.publish() that caused double delivery.
     return UploadResponse(upload_id=upload_id, status="queued", message="Upload received and queued for processing")
 
 

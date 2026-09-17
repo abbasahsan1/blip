@@ -65,35 +65,35 @@ async def save_blipp(
         )
 
     now = datetime.now(timezone.utc)
+    # T22: Do NOT pre-generate event_id — record_outbox_event() mints the canonical
+    # event_id and injects it into the payload automatically.
     event_payload = {
-        "event_id": str(uuid.uuid4()),
         "event_type": "save",
         "user_id": str(current_user.user_id),
         "blipp_id": str(blipp_id),
-        "session_id": str(uuid.uuid4()),
         "occurred_at": now.isoformat(),
         "position_seconds": 0.0,
     }
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute(
+            # T23: Use RETURNING to detect an actual insert vs. a conflict no-op.
+            # Only emit an outbox event when the save is a new state transition
+            # (absent → present). Repeated saves of the same blipp produce zero events.
+            inserted = await conn.fetchrow(
                 """
                 INSERT INTO saves (user_id, blipp_id, created_at)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (user_id, blipp_id) DO NOTHING
+                RETURNING blipp_id
                 """,
                 current_user.user_id,
                 blipp_id,
                 now,
             )
-            await record_outbox_event(conn, "engagement.save", event_payload)
-
-    # Eager publish
-    try:
-        await event_bus.publish(subject="engagement.save", payload=event_payload)
-    except Exception as e:
-        logger.warning(f"Eager publish of engagement.save delayed (outbox will deliver): {e}")
+            if inserted is not None:
+                # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
+                await record_outbox_event(conn, "engagement.save", event_payload)
 
     return SaveActionResponse(status="saved", blipp_id=blipp_id)
 
@@ -116,12 +116,11 @@ async def unsave_blipp(
         )
 
     now = datetime.now(timezone.utc)
+    # T22: No pre-generated event_id — record_outbox_event() injects the canonical one.
     event_payload = {
-        "event_id": str(uuid.uuid4()),
         "event_type": "unsave",
         "user_id": str(current_user.user_id),
         "blipp_id": str(blipp_id),
-        "session_id": str(uuid.uuid4()),
         "occurred_at": now.isoformat(),
         "position_seconds": 0.0,
     }
@@ -136,11 +135,7 @@ async def unsave_blipp(
             if res == "DELETE 1":
                 await record_outbox_event(conn, "engagement.unsave", event_payload)
 
-    try:
-        await event_bus.publish(subject="engagement.unsave", payload=event_payload)
-    except Exception as e:
-        logger.warning(f"Eager publish of engagement.unsave delayed (outbox will deliver): {e}")
-
+    # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
     logger.info(f"Removed saved blipp {blipp_id} for user {current_user.user_id}")
     return SaveActionResponse(status="unsaved", blipp_id=blipp_id)
 

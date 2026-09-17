@@ -15,17 +15,28 @@ CREATE TABLE IF NOT EXISTS feed_items (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     author_username VARCHAR(255),
     author_display_name VARCHAR(255),
-    author_avatar_url TEXT
+    author_avatar_url TEXT,
+    -- T30: Soft-delete for content takedowns. NULL = active; NOT NULL = taken down.
+    -- Feed queries MUST filter WHERE taken_down_at IS NULL.
+    taken_down_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE INDEX IF NOT EXISTS idx_feed_items_created_at ON feed_items (created_at DESC, blipp_id DESC);
-CREATE INDEX IF NOT EXISTS idx_feed_items_creator_id ON feed_items (creator_id);
+CREATE INDEX IF NOT EXISTS idx_feed_items_created_at ON feed_items (created_at DESC, blipp_id DESC) WHERE taken_down_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_feed_items_creator_id ON feed_items (creator_id) WHERE taken_down_at IS NULL;
+-- Separate index for the taken_down_at column for efficient soft-delete filtering
+CREATE INDEX IF NOT EXISTS idx_feed_items_taken_down ON feed_items (taken_down_at) WHERE taken_down_at IS NOT NULL;
+
+-- T30: ALTER to add column on existing tables (safe for both fresh and existing deployments)
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS taken_down_at TIMESTAMP WITH TIME ZONE;
 
 -- Engagement read projections
 CREATE TABLE IF NOT EXISTS feed_item_stats (
     blipp_id UUID PRIMARY KEY,
-    likes_count INTEGER NOT NULL DEFAULT 0
+    likes_count INTEGER NOT NULL DEFAULT 0,
+    -- T24: saves_count for idempotent save projection counter
+    saves_count INTEGER NOT NULL DEFAULT 0
 );
+ALTER TABLE feed_item_stats ADD COLUMN IF NOT EXISTS saves_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS user_likes_projection (
     user_id UUID NOT NULL,

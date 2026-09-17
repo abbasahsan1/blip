@@ -174,26 +174,13 @@ async def handle_transcode_completed(data: Dict[str, Any]) -> None:
 
             logger.info(f"Persisted blipp {blipp_id} and recorded outbox (status={blipp_status})")
 
-    # 4. Eager downstream publish
+    # T21: Outbox is the ONLY publisher.
+    # Removed eager event_bus.publish() for both engagement.blipp.published and
+    # copyright.scan.requested. The outbox background task handles delivery.
     if blipp_status == "published":
-        try:
-            await event_bus.publish(
-                subject="engagement.blipp.published",
-                payload=published_payload,
-            )
-            logger.info(f"Published engagement.blipp.published for blipp {blipp_id}")
-        except Exception as e:
-            logger.warning(f"Eager publish of engagement.blipp.published delayed (outbox will deliver): {e}")
-
+        logger.info(f"Recorded engagement.blipp.published in outbox for blipp {blipp_id}")
     elif blipp_status == "processing":
-        try:
-            await event_bus.publish(
-                subject="copyright.scan.requested",
-                payload=copyright_payload,
-            )
-            logger.info(f"Published copyright.scan.requested for blipp {blipp_id}")
-        except Exception as e:
-            logger.warning(f"Eager publish of copyright.scan.requested delayed (outbox will deliver): {e}")
+        logger.info(f"Recorded copyright.scan.requested in outbox for blipp {blipp_id}")
 
 
 async def handle_transcode_failed(data: Dict[str, Any]) -> None:
@@ -291,12 +278,17 @@ async def publish_due_scheduled_blipps() -> int:
     published_count = 0
     now_utc = datetime.now(timezone.utc)
 
+    # T26: Route through the transactional outbox — NOT direct event_bus.publish().
+    # This guarantees the engagement.blipp.published event is delivered even if NATS
+    # is temporarily unavailable at the moment the scheduler runs.
     try:
+        from blipp_common.outbox import record_outbox_event
         async with pool.acquire() as conn:
             async with conn.transaction():
                 rows = await conn.fetch(
                     """
-                    SELECT blipp_id, creator_id, title, audio_url, duration_seconds, scheduled_at
+                    SELECT blipp_id, creator_id, title, description, audio_url,
+                           audio_variants, duration_seconds, scheduled_at
                     FROM blipps
                     WHERE status = 'scheduled' AND scheduled_at <= NOW()
                     FOR UPDATE SKIP LOCKED
@@ -316,22 +308,26 @@ async def publish_due_scheduled_blipps() -> int:
 
                     for r in rows:
                         published_count += 1
-                        try:
-                            await event_bus.publish(
-                                subject="engagement.blipp.published",
-                                payload={
-                                    "blipp_id": str(r["blipp_id"]),
-                                    "creator_id": str(r["creator_id"]),
-                                    "title": r["title"] or "",
-                                    "audio_url": r["audio_url"],
-                                    "duration_seconds": float(r["duration_seconds"] or 0.0),
-                                    "published_at": now_utc.isoformat(),
-                                },
-                            )
-                        except Exception as pub_err:
-                            logger.warning(f"Failed to publish scheduled event for blipp {r['blipp_id']}: {pub_err}")
+                        published_payload = {
+                            "blipp_id": str(r["blipp_id"]),
+                            "creator_id": str(r["creator_id"]),
+                            "title": r["title"] or "",
+                            "description": r.get("description") or "",
+                            "audio_url": r["audio_url"],
+                            "audio_variants": r.get("audio_variants") or {},
+                            "duration_seconds": float(r["duration_seconds"] or 0.0),
+                            "published_at": now_utc.isoformat(),
+                            "source": "scheduled_publisher",
+                        }
+                        # Record in outbox WITHIN the same transaction — atomically
+                        # with the status UPDATE. The outbox publisher delivers to NATS.
+                        await record_outbox_event(
+                            conn,
+                            "engagement.blipp.published",
+                            published_payload,
+                        )
 
-                    logger.info(f"Scheduled publisher released {published_count} blipp(s) to 'published' status")
+                    logger.info(f"Scheduled publisher released {published_count} blipp(s) via outbox")
 
     except Exception as e:
         logger.exception(f"Error during scheduled publisher execution: {e}")
@@ -390,16 +386,33 @@ async def handle_content_takedown(data: Dict[str, Any]) -> None:
 
     reason = data.get("reason", "moderation_action")
 
+    from blipp_common.outbox import record_outbox_event
+
     async with pool.acquire() as conn:
-        res = await conn.execute(
-            """
-            UPDATE blipps
-            SET status = 'taken_down'
-            WHERE blipp_id = $1
-            """,
-            blipp_id,
-        )
-        logger.info(f"Processed content takedown for blipp {blipp_id} (reason='{reason}'): {res}")
+        async with conn.transaction():
+            res = await conn.execute(
+                """
+                UPDATE blipps
+                SET status = 'taken_down'
+                WHERE blipp_id = $1
+                """,
+                blipp_id,
+            )
+            if res == "UPDATE 1":
+                # T30: Emit a takedown event through the outbox so the Feed service
+                # receives it and removes the blipp from feed_items projection.
+                # The outbox guarantees at-least-once delivery even if NATS is down.
+                await record_outbox_event(
+                    conn,
+                    "content.takedown",
+                    {
+                        "blipp_id": str(blipp_id),
+                        "reason": reason,
+                    },
+                )
+                logger.info(f"Processed content takedown for blipp {blipp_id} (reason='{reason}'): {res}. Outbox event recorded.")
+            else:
+                logger.warning(f"Content takedown for blipp {blipp_id}: no row updated (blipp not found?): {res}")
 
 
 async def run_takedown_consumer() -> None:

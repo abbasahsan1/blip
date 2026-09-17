@@ -36,12 +36,11 @@ async def like_blipp(
 
     from blipp_common.outbox import record_outbox_event
 
+    # T22: No pre-generated event_id — record_outbox_event() injects the canonical one.
     event_payload = {
-        "event_id": str(uuid.uuid4()),
         "event_type": "like",
         "user_id": str(current_user.user_id),
         "blipp_id": str(blipp_id),
-        "session_id": "",
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "position_seconds": 0.0,
     }
@@ -60,12 +59,7 @@ async def like_blipp(
             if inserted == "INSERT 0 1":
                 await record_outbox_event(conn, "engagement.like", event_payload)
 
-    if inserted == "INSERT 0 1":
-        try:
-            await event_bus.publish("engagement.like", event_payload)
-        except Exception as exc:
-            logger.warning("Eager publish of engagement.like delayed (outbox will deliver): %s", exc)
-
+    # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
     return LikeActionResponse(success=True, blipp_id=blipp_id, is_liked=True)
 
 
@@ -85,12 +79,11 @@ async def unlike_blipp(
 
     from blipp_common.outbox import record_outbox_event
 
+    # T22: No pre-generated event_id — record_outbox_event() injects the canonical one.
     event_payload = {
-        "event_id": str(uuid.uuid4()),
         "event_type": "unlike",
         "user_id": str(current_user.user_id),
         "blipp_id": str(blipp_id),
-        "session_id": str(uuid.uuid4()),
         "occurred_at": datetime.now(timezone.utc).isoformat(),
         "position_seconds": 0.0,
     }
@@ -105,11 +98,6 @@ async def unlike_blipp(
             if res == "DELETE 1":
                 await record_outbox_event(conn, "engagement.unlike", event_payload)
 
-    if res == "DELETE 1":
-        try:
-            await event_bus.publish("engagement.unlike", event_payload)
-        except Exception as exc:
-            logger.warning("Eager publish of engagement.unlike delayed (outbox will deliver): %s", exc)
-
+    # T21: Outbox is the ONLY publisher — no eager event_bus.publish().
     logger.info("User %s unliked blipp %s", current_user.user_id, blipp_id)
     return LikeActionResponse(success=True, blipp_id=blipp_id, is_liked=False)

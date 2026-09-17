@@ -161,22 +161,45 @@ async def handle_save_event(data: Dict[str, Any], is_save: bool) -> None:
         return
 
     async with pool.acquire() as conn:
-        if is_save:
-            await conn.execute(
-                """
-                INSERT INTO user_saves_projection (user_id, blipp_id)
-                VALUES ($1, $2)
-                ON CONFLICT (user_id, blipp_id) DO NOTHING
-                """,
-                user_id,
-                blipp_id,
-            )
-        else:
-            await conn.execute(
-                "DELETE FROM user_saves_projection WHERE user_id = $1 AND blipp_id = $2",
-                user_id,
-                blipp_id,
-            )
+        async with conn.transaction():
+            if is_save:
+                # T24: Idempotent — use RETURNING to detect actual insert vs. conflict no-op.
+                # Duplicate engagement.save deliveries leave saves_count unchanged.
+                inserted = await conn.fetchrow(
+                    """
+                    INSERT INTO user_saves_projection (user_id, blipp_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (user_id, blipp_id) DO NOTHING
+                    RETURNING blipp_id
+                    """,
+                    user_id,
+                    blipp_id,
+                )
+                if inserted is not None:
+                    await conn.execute(
+                        """
+                        INSERT INTO feed_item_stats (blipp_id, saves_count)
+                        VALUES ($1, 1)
+                        ON CONFLICT (blipp_id) DO UPDATE
+                        SET saves_count = feed_item_stats.saves_count + 1
+                        """,
+                        blipp_id,
+                    )
+            else:
+                res = await conn.execute(
+                    "DELETE FROM user_saves_projection WHERE user_id = $1 AND blipp_id = $2",
+                    user_id,
+                    blipp_id,
+                )
+                if res == "DELETE 1":
+                    await conn.execute(
+                        """
+                        UPDATE feed_item_stats
+                        SET saves_count = GREATEST(0, saves_count - 1)
+                        WHERE blipp_id = $1
+                        """,
+                        blipp_id,
+                    )
 
 
 async def handle_follow_event(data: Dict[str, Any], is_follow: bool) -> None:
@@ -196,22 +219,67 @@ async def handle_follow_event(data: Dict[str, Any], is_follow: bool) -> None:
         return
 
     async with pool.acquire() as conn:
-        if is_follow:
-            await conn.execute(
-                """
-                INSERT INTO user_follows_projection (follower_id, followee_id)
-                VALUES ($1, $2)
-                ON CONFLICT (follower_id, followee_id) DO NOTHING
-                """,
-                follower_id,
-                followee_id,
-            )
+        async with conn.transaction():
+            if is_follow:
+                # T24: Idempotent — RETURNING detects actual insert vs. conflict no-op.
+                inserted = await conn.fetchrow(
+                    """
+                    INSERT INTO user_follows_projection (follower_id, followee_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (follower_id, followee_id) DO NOTHING
+                    RETURNING follower_id
+                    """,
+                    follower_id,
+                    followee_id,
+                )
+                # Note: follow projections don't maintain a numeric count in feed_items,
+                # so no counter update is needed. The projection row itself is the state.
+            else:
+                await conn.execute(
+                    "DELETE FROM user_follows_projection WHERE follower_id = $1 AND followee_id = $2",
+                    follower_id,
+                    followee_id,
+                )
+
+
+async def handle_blipp_takedown(data: Dict[str, Any]) -> None:
+    """
+    T30: Handles content.takedown events by soft-deleting the blipp from feed_items.
+    Sets taken_down_at = NOW() so the feed query filters it out immediately.
+    The row is preserved for audit purposes (hard delete can be scheduled separately).
+    """
+    blipp_id_str = data.get("blipp_id")
+    if not blipp_id_str:
+        logger.warning(f"handle_blipp_takedown: missing blipp_id in event: {data}")
+        return
+
+    try:
+        blipp_id = uuid.UUID(str(blipp_id_str))
+    except (ValueError, TypeError):
+        logger.error(f"handle_blipp_takedown: invalid blipp_id UUID: {blipp_id_str}")
+        return
+
+    pool = await get_db_pool()
+    if not pool:
+        logger.error("handle_blipp_takedown: database pool unavailable")
+        return
+
+    async with pool.acquire() as conn:
+        res = await conn.execute(
+            """
+            UPDATE feed_items
+            SET taken_down_at = CURRENT_TIMESTAMP
+            WHERE blipp_id = $1
+              AND taken_down_at IS NULL
+            """,
+            blipp_id,
+        )
+        if res == "UPDATE 1":
+            logger.info(f"Feed: blipp {blipp_id} marked taken_down (removed from feed)")
+        elif res == "UPDATE 0":
+            logger.info(f"Feed: blipp {blipp_id} takedown no-op (not in feed_items or already taken down)")
         else:
-            await conn.execute(
-                "DELETE FROM user_follows_projection WHERE follower_id = $1 AND followee_id = $2",
-                follower_id,
-                followee_id,
-            )
+            logger.warning(f"Feed: unexpected takedown result for blipp {blipp_id}: {res}")
 
 
 async def run_event_consumer() -> None:
@@ -265,6 +333,8 @@ async def run_event_consumer() -> None:
                                 await handle_follow_event(payload, is_follow=True)
                             elif subject == "engagement.unfollow":
                                 await handle_follow_event(payload, is_follow=False)
+                            elif msg.subject == "content.takedown":
+                                await handle_blipp_takedown(payload)
 
                             await msg.ack()
                         except Exception as msg_err:

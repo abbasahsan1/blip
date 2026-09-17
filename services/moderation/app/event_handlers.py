@@ -59,6 +59,29 @@ async def handle_copyright_cleared(data: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Unexpected error calling content-ingest for upload {upload_id}: {e}")
 
+async def _mark_blipp_copyright_status(upload_id: str, blipp_id: str, new_status: str) -> None:
+    """
+    T27: Updates the blipp processing_status via the Content Ingest service.
+    Used to record durable failure states (blocked_on_copyright, rejected_copyright)
+    rather than silently ACK-ing messages that cannot be processed.
+    """
+    try:
+        ingest_url = f"http://content-ingest-service:8001/v1/uploads/{upload_id}/status"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.patch(ingest_url, json={"status": new_status})
+            if response.status_code == 200:
+                logger.info(f"Marked upload {upload_id} / blipp {blipp_id} as {new_status!r}")
+            else:
+                logger.warning(
+                    f"Could not mark upload {upload_id} as {new_status!r}: "
+                    f"HTTP {response.status_code} from content-ingest"
+                )
+    except Exception as e:
+        logger.error(f"Failed to update copyright status for upload {upload_id}: {e}")
+        # Don't re-raise here — we still want to ACK the copyright message even if
+        # the status update fails (the message cannot be usefully redelivered).
+
+
 async def handle_copyright_scan_requested(data: Dict[str, Any]) -> None:
     """
     Handles copyright.scan.requested event by performing a copyright scan.
@@ -90,11 +113,28 @@ async def handle_copyright_scan_requested(data: Dict[str, Any]) -> None:
             )
             logger.info(f"Copyright scan cleared. Published copyright.cleared for blipp {blipp_id}")
         else:
-            logger.warning(f"Copyright scan failed (infringement detected) for blipp {blipp_id}")
+            # Infringement detected — update blipp to rejected_copyright state
+            logger.warning(f"Copyright scan: infringement detected for blipp {blipp_id}")
+            await _mark_blipp_copyright_status(upload_id, blipp_id, "rejected_copyright")
     except NotImplementedError:
-        logger.error(f"Cannot process copyright scan for blipp {blipp_id} due to missing production service.")
+        # T27: The scanner is not implemented. Do NOT silently ACK and discard.
+        # Move the blipp into a durable 'blocked_on_copyright' state so it's visible
+        # and actionable — an operator can see it and take action when the scanner
+        # is eventually integrated.
+        logger.error(
+            f"Copyright scanner NOT IMPLEMENTED for blipp {blipp_id}. "
+            "Setting blipp status to 'blocked_on_copyright' (durable, visible, actionable). "
+            "This blipp will NOT be published until a real scanner is integrated and "
+            "the blocked_on_copyright status is manually or programmatically resolved."
+        )
+        await _mark_blipp_copyright_status(upload_id, blipp_id, "blocked_on_copyright")
+        # Return normally — the ACK in the caller is correct here because we've recorded
+        # the durable state. The message doesn't need to be redelivered (re-scanning would
+        # produce the same NotImplementedError). The blipp status is the durable record.
     except Exception as e:
         logger.exception(f"Unexpected error during copyright scan for blipp {blipp_id}: {e}")
+        # Re-raise so the caller NACKs and the message is redelivered with backoff
+        raise
 
 
 async def run_copyright_consumer() -> None:
@@ -126,10 +166,17 @@ async def run_copyright_consumer() -> None:
                                 await handle_copyright_cleared(payload)
                             elif msg.subject == "copyright.scan.requested":
                                 await handle_copyright_scan_requested(payload)
+                            # T27: Only ACK after handler completes without raising.
+                            # handle_copyright_scan_requested raises on unexpected errors
+                            # so those messages will be NACKed and redelivered with backoff.
                             await msg.ack()
                         except Exception as msg_err:
                             logger.exception(f"Error handling message on {msg.subject}: {msg_err}")
-                            await msg.ack()
+                            # T27: NACK with delay — redelivery with backoff rather than silent loss.
+                            try:
+                                await msg.nak(delay=30.0)
+                            except Exception:
+                                pass
                 except (nats.errors.TimeoutError, asyncio.TimeoutError):
                     continue
                 except asyncio.CancelledError:

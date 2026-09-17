@@ -297,10 +297,18 @@ export default function UploadScreen() {
             </View>
             <View style={styles.progressInfo}>
               <Text style={styles.progressText} testID="upload-status-text">
+                {/* T-UI1: Every backend status maps to visible copy (never blank). */}
                 {uploadStatus === 'idle' && selectedFile ? 'File Picked' : ''}
-                {uploadStatus === 'uploading' ? 'Uploading...' : ''}
-                {uploadStatus === 'transcoding' ? 'Processing...' : ''}
-                {uploadStatus === 'completed' ? 'Published' : ''}
+                {uploadStatus === 'uploading' ? 'Uploading…' : ''}
+                {uploadStatus === 'created' ? 'Upload accepted…' : ''}
+                {uploadStatus === 'processing' ? 'Processing…' : ''}
+                {uploadStatus === 'transcoding' ? 'Transcoding audio…' : ''}
+                {uploadStatus === 'copyright_check' ? 'Checking copyright…' : ''}
+                {uploadStatus === 'blocked_on_copyright' ? 'Awaiting copyright clearance…' : ''}
+                {uploadStatus === 'moderation' ? 'In moderation review…' : ''}
+                {uploadStatus === 'scheduled' ? 'Scheduled ✓' : ''}
+                {uploadStatus === 'completed' || uploadStatus === 'published' ? 'Your blipp is live! 🎙' : ''}
+                {uploadStatus === 'rejected' ? 'Rejected by moderation' : ''}
               </Text>
               <Text style={styles.progressPercentage}>{progress}%</Text>
             </View>
@@ -323,9 +331,13 @@ export default function UploadScreen() {
           {isUploading ? (
             <View style={styles.buttonRow}>
               <Text style={styles.submitButtonText}>
-                {uploadStatus === 'transcoding'
-                  ? 'Processing...'
-                  : 'Uploading...'}
+                {/* T-UI1: Map processing states to human-readable button copy */}
+                {uploadStatus === 'transcoding' ? 'Transcoding…'
+                  : uploadStatus === 'processing' ? 'Processing…'
+                  : uploadStatus === 'copyright_check' ? 'Copyright check…'
+                  : uploadStatus === 'moderation' ? 'In review…'
+                  : uploadStatus === 'created' ? 'Accepted…'
+                  : 'Uploading…'}
               </Text>
             </View>
           ) : uploadStatus === 'failed' ? (
