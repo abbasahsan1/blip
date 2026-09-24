@@ -76,3 +76,13 @@ jobs:
           echo "Pushed tags:"
           echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blipps-api:latest"
           echo "  ${{ secrets.DOCKERHUB_USERNAME }}/blipps-api:${{ steps.sha.outputs.short }}"
+
+      # ── 7. Trigger Render deploy ──────────────────────────────────────────
+      # Render does NOT auto-poll Docker Hub. To automate deploys:
+      #   1. Render dashboard → your service → Settings → Deploy Hook → copy URL
+      #   2. Add it as GitHub secret: RENDER_DEPLOY_HOOK_URL
+      #   3. Uncomment the step below
+      #
+      # - name: Trigger Render deploy
+      #   run: curl -s "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Deploy triggered:', d)"
+
