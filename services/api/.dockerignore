@@ -1,0 +1,39 @@
+# ── Secrets and local config — never ship these ───────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python runtime artifacts ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Git ───────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Test / dev files ──────────────────────────────────────────────────────
+test_audio.mp3
+media/
+*.sh
+
+# ── Editor and OS noise ───────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── CI and docs (not needed at runtime) ──────────────────────────────────
+.github/
+README.md
+*.md
